@@ -1,0 +1,9 @@
+[package]
+name = "allie"
+version = "0.1.0"
+edition = "2024"
+description = "Accessibility evidence harness and release intelligence CLI"
+publish = false
+license = "UNLICENSED"
+
+[dependencies]
