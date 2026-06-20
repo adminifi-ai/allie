@@ -1,6 +1,6 @@
 # Enforce V0 trust boundaries fail-closed
 
-Priority: P0 - Status: pending - Estimate: L
+Priority: P0 - Status: done - Estimate: L
 
 ## Goal
 
@@ -10,14 +10,14 @@ evidence cannot masquerade as a valid release packet.
 
 ## Oracle
 
-- [ ] Evidence packets identify credential profile names without storing secret
+- [x] Evidence packets identify credential profile names without storing secret
   values.
-- [ ] Artifact metadata records hash, redaction status, retention class, and
+- [x] Artifact metadata records hash, redaction status, retention class, and
   withheld/unavailable reasons.
-- [ ] Worker timeout, crash, missing credential, unreachable target, axe failure,
+- [x] Worker timeout, crash, missing credential, unreachable target, axe failure,
   partial write, and nondeterminism map to stable packet statuses and exit
   classes.
-- [ ] Model-call fields remain disabled by default and fail closed if provider
+- [x] Model-call fields remain disabled by default and fail closed if provider
   policy is incomplete.
 
 ## Verification System
@@ -55,3 +55,10 @@ already requires scoped credentials, redaction, no silent provider fallback,
 audit logs, and bounded exploration; this ticket turns those requirements into
 testable packet behavior.
 
+## Delivered
+
+- Added manifest credential, artifact, model, timeout, and known-nondeterminism policy fields.
+- Added packet metadata for credential provider status, artifact redaction/retention/unavailable state, infrastructure failure counts, and stable `failure_class`.
+- Added fail-closed packet/exit handling for missing credentials, incomplete model policy, worker crash/error/timeout/partial write, unreachable target, missing required artifacts, axe failures, and nondeterminism.
+- Added negative fixtures: `examples/trust-missing-credential.yml`, `examples/trust-model-policy-incomplete.yml`, and `examples/trust-unreachable-target.yml`.
+- Verified with `npm run verify`, serial trust-boundary fixture runs, and secret scan `rg -n "super-secret|secret-value|password|token" .allie/runs/trust-boundary-*` returning no matches.

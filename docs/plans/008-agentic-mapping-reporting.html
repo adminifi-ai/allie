@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Agentic Mapping and Reporting Design</title>
+  <style>
+    :root {
+      --bg: #f6f5f0;
+      --ink: #151515;
+      --muted: #65625d;
+      --line: #d6d1c5;
+      --panel: #fffefa;
+      --wash: #ebe6da;
+      --accent: #174fc8;
+      --ok: #17623c;
+      --warn: #8a4a05;
+      --bad: #8e2525;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(1200px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 32px 0 64px;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(34px, 5vw, 76px); line-height: 0.94; letter-spacing: 0; }
+    h2 { font-size: 18px; text-transform: uppercase; letter-spacing: 0.08em; }
+    h3 { font-size: 16px; margin-bottom: 0.35rem; }
+    p + p { margin-top: 0.75rem; }
+    code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.92em; }
+    a { color: var(--accent); }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 16px;
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(330px, 0.68fr);
+      gap: 42px;
+      align-items: end;
+      padding: 54px 0 34px;
+    }
+
+    .lede {
+      color: var(--muted);
+      font-size: 20px;
+      max-width: 800px;
+      margin-top: 22px;
+    }
+
+    .panel, .cell {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 22px;
+    }
+
+    .decision { border-left: 5px solid var(--accent); }
+    .muted { color: var(--muted); }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+
+    .grid-2, .grid-3, .grid-4, .grid-5 {
+      display: grid;
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      margin-top: 1px;
+    }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .cell { border: 0; min-width: 0; }
+    .wash { background: var(--wash); }
+
+    section { margin-top: 34px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      margin-top: 18px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 13px 14px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--wash);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    pre {
+      margin: 18px 0 0;
+      padding: 18px;
+      background: #111;
+      color: #f4f4f4;
+      overflow: auto;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 1px;
+      border: 1px solid var(--line);
+      background: var(--line);
+    }
+
+    .flow div {
+      background: var(--panel);
+      padding: 18px;
+      min-height: 124px;
+    }
+
+    @media (max-width: 920px) {
+      main { width: min(100% - 28px, 1200px); }
+      .hero, .grid-2, .grid-3, .grid-4, .grid-5, .flow { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="topbar">
+      <span>Allie / Agentic Mapping + Reporting</span>
+      <span>Research + shape packet / 2026-06-19</span>
+    </header>
+
+    <section class="hero" aria-label="Plan contract">
+      <div>
+        <h1>Allie should run as an agentic mapper before it runs as a scanner.</h1>
+        <p class="lede">The CLI should launch a bespoke accessibility agent in the consumer repository. That agent builds and maintains a product map, derives user stories and workflows, generates an evidence plan, executes deterministic and scripted tests through the Rust engine, sends visual artifacts through policy-gated vision review, and writes a drilldown compliance report. Remediation is explicitly out of scope for this slice.</p>
+      </div>
+      <aside class="panel decision">
+        <h2>Chosen Shape</h2>
+        <p><strong>Agent-first, engine-backed.</strong> Allie invokes an agent runner for discovery, mapping, test-plan authorship, and context enrichment; the Rust core remains the deterministic evidence, standards, policy, artifact, and report engine.</p>
+        <p><strong>Runner posture:</strong> default to an adapter abstraction with OpenCode as the headless baseline and OMP as the richer interactive candidate. Do not bake either CLI into the product contract.</p>
+        <p class="muted">Premise source: <code>sha256:2a53a184b9e292b090835d0935868877a0e7fb84d7b6c49472fa4b50e827fac4 chat-request-2026-06-19</code></p>
+      </aside>
+    </section>
+
+    <section class="grid-5" aria-label="Executive contract">
+      <article class="cell">
+        <h2>Goal</h2>
+        <p>Generate a human-reviewable, evidence-backed accessibility map and WCAG report for an application with minimal manual route/story setup.</p>
+      </article>
+      <article class="cell">
+        <h2>Non-Goal</h2>
+        <p>No automated remediation or PR patching in this slice. The report may suggest next evidence to collect, not change application code.</p>
+      </article>
+      <article class="cell">
+        <h2>Output</h2>
+        <p><code>product-map.json</code>, <code>surface-map.html</code>, generated flow manifests, evidence packets, vision review receipts, and a WCAG drilldown report.</p>
+      </article>
+      <article class="cell">
+        <h2>Proof</h2>
+        <p>Run against Vanity and Linejam. The map must identify real routes, visible surfaces, stories, workflows, evidence gaps, and standards status.</p>
+      </article>
+      <article class="cell wash">
+        <h2>Stop If</h2>
+        <p>The agent cannot cite repo files, route evidence, screenshots, or test artifacts for a mapped claim. Uncited map assertions are drafts, not evidence.</p>
+      </article>
+    </section>
+
+    <section>
+      <h2>System Flow</h2>
+      <div class="flow" aria-label="System flow">
+        <div><h3>1. Agent Launch</h3><p><code>allie map</code> starts a bounded agent in the target repo with a project-specific system prompt, budgets, allowed tools, and output schema.</p></div>
+        <div><h3>2. Product Map</h3><p>The agent reads code, routes, tests, docs, config, and running app evidence to produce surfaces, services, stories, workflows, and confidence.</p></div>
+        <div><h3>3. Evidence Plan</h3><p>Allie converts the map into flow manifests and test obligations: deterministic, scripted, agentic, human-needed, not applicable, and unknown.</p></div>
+        <div><h3>4. Engine Run</h3><p>Rust and the browser worker execute axe, Playwright, screenshots, DOM, accessibility tree, keyboard, video, trace, and report capture.</p></div>
+        <div><h3>5. Vision Review</h3><p>Policy-gated vision agents review screenshots/video for criteria that require human judgment, producing hypotheses and context receipts.</p></div>
+        <div><h3>6. Visibility</h3><p>Allie writes a WCAG drilldown report that starts from the standards graph and attaches evidence, gaps, and agent/human review context.</p></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Agent Runner Decision</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Runner</th>
+            <th>Observed local surface</th>
+            <th>Fit for Allie</th>
+            <th>Risk</th>
+            <th>Recommendation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>OpenCode</strong></td>
+            <td><code>opencode run</code>, <code>serve</code>, <code>web</code>, sessions, export JSON, agent management, ACP/MCP support.</td>
+            <td>Good headless default: launch, run to completion, export receipt, integrate into CLI/CI without requiring an operator in the loop.</td>
+            <td>Interactivity and visual review flow may be weaker unless Allie builds its own review UI around exported artifacts.</td>
+            <td class="ok">Default V1 runner candidate.</td>
+          </tr>
+          <tr>
+            <td><strong>OMP</strong></td>
+            <td><code>--mode json/rpc/rpc-ui</code>, interactive and print modes, resume/export, profiles, browser, image inspection, task agents, web search, advisor.</td>
+            <td>Strong for an interactive compliance engineer session where the agent asks clarifying questions, resumes work, and inspects visual artifacts.</td>
+            <td>Richer surface can become product coupling. Need a machine contract so OMP is an adapter, not the Allie API.</td>
+            <td class="ok">Interactive runner candidate and dogfood path.</td>
+          </tr>
+          <tr>
+            <td><strong>Allie-native agent runtime</strong></td>
+            <td>Rust-owned orchestrator launches model/tool calls directly.</td>
+            <td>Maximum control over policy, schema, and reproducibility.</td>
+            <td>Rebuilds a coding-agent substrate before the product proof exists.</td>
+            <td class="bad">Defer. Adapter first.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="grid-2" aria-label="Core artifacts">
+      <article class="cell">
+        <h2>Product Map Contract</h2>
+        <p>The map is the central artifact for agentic discovery. It must be reviewable by an accessibility compliance engineer and machine-usable by Allie.</p>
+        <pre><code>{
+  "schema": "allie.product-map.v0",
+  "repo": {"root": "...", "git_sha": "..."},
+  "surfaces": [
+    {
+      "id": "settings",
+      "routes": ["/settings"],
+      "components": ["app/settings/page.tsx"],
+      "services": ["settings-api"],
+      "user_stories": ["As a user, I update preferences"],
+      "workflows": ["settings-update"],
+      "evidence_refs": ["route-screenshot-settings"],
+      "confidence": "agent_mapped",
+      "review_status": "needs_human_confirmation"
+    }
+  ],
+  "open_questions": []
+}</code></pre>
+      </article>
+      <article class="cell wash">
+        <h2>Report Contract</h2>
+        <p>The report should start from every WCAG obligation, then drill into applicability, product surfaces, evidence, findings, screenshots, videos, tests, agent context, and human review status.</p>
+        <pre><code>{
+  "schema": "allie.compliance-report.v0",
+  "profile": "wcag22-aa",
+  "obligations": [
+    {
+      "id": "wcag22-aa:1.4.3-contrast-minimum",
+      "status": "fail",
+      "why": "Axe color-contrast failed on quote attribution.",
+      "surfaces": ["home"],
+      "tests": ["axe:color-contrast"],
+      "artifacts": ["screenshot-home", "axe-json-home"],
+      "agentic_context": ["vision-review-home-1"],
+      "human_review": "not_started"
+    }
+  ]
+}</code></pre>
+      </article>
+    </section>
+
+    <section>
+      <h2>What To Reuse Versus Homebrew</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Layer</th>
+            <th>Reuse</th>
+            <th>Allie must build</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Standards taxonomy</td>
+            <td>W3C WCAG 2 overview, WCAG 2.2 standard, Quick Reference, Understanding docs, Techniques.</td>
+            <td>Versioned profile ingestion, stable IDs, local snapshotting, mappings from tests/findings to obligations.</td>
+          </tr>
+          <tr>
+            <td>Conformance test rule shape</td>
+            <td>ACT Rules Format 1.1 and W3C/community ACT rules.</td>
+            <td>Executable rule adapters, aggregation into Allie verdicts, deviation tracking, applicability logic.</td>
+          </tr>
+          <tr>
+            <td>Evaluation/report methodology</td>
+            <td>WCAG-EM and W3C report template/report tool structure.</td>
+            <td>Automated evidence population, drilldown UI, diff-aware report, artifact linking, confidence/provenance.</td>
+          </tr>
+          <tr>
+            <td>Automated checks</td>
+            <td>axe-core, Playwright accessibility patterns, browser snapshots, existing app tests.</td>
+            <td>Product-map-driven test generation, coverage ledger, screenshot/video capture, standards ledger integration.</td>
+          </tr>
+          <tr>
+            <td>Human-review assist</td>
+            <td>WAI combined expertise guidance and WCAG-EM report fields.</td>
+            <td>Vision prompts, redaction, model receipts, confidence labels, human confirmation workflow.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="grid-3" aria-label="CLI modes">
+      <article class="cell">
+        <h2>Initial Run</h2>
+        <pre><code>allie map --agent opencode --out .allie/map</code></pre>
+        <p>Launches the mapper agent, creates the first product map, generates candidate flows, and writes a human-readable surface map.</p>
+      </article>
+      <article class="cell">
+        <h2>Report Run</h2>
+        <pre><code>allie report --map .allie/map/product-map.json --out .allie/report</code></pre>
+        <p>Runs evidence collection and produces the standards drilldown report. This is the main slice for compliance visibility.</p>
+      </article>
+      <article class="cell wash">
+        <h2>Diff Run</h2>
+        <pre><code>allie report --since origin/main --map .allie/map/product-map.json</code></pre>
+        <p>Limits required evidence to changed surfaces while preserving the full standards ledger and marking stale or missing coverage honestly.</p>
+      </article>
+    </section>
+
+    <section>
+      <h2>Accuracy Model</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Meaning</th>
+            <th>Allowed evidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="ok">Pass</td>
+            <td>The obligation was applicable and sufficient evidence supports compliance for mapped surfaces.</td>
+            <td>Deterministic test, scripted test, human attestation, or high-confidence agentic context only when policy permits that status.</td>
+          </tr>
+          <tr>
+            <td class="bad">Fail</td>
+            <td>Evidence shows non-compliance or required behavior broke.</td>
+            <td>axe/static failure, scripted failure, or reviewed human/agent finding promoted by policy.</td>
+          </tr>
+          <tr>
+            <td class="warn">Needs Review</td>
+            <td>Allie has enough context to guide a human but not enough to claim pass/fail.</td>
+            <td>Vision review, screenshot/video, DOM, a11y tree, content context, or manual checklist prompt.</td>
+          </tr>
+          <tr>
+            <td>Not Tested</td>
+            <td>No credible evidence exists yet.</td>
+            <td>Report must show missing driver, missing artifact, or unmapped surface. No hidden gray areas.</td>
+          </tr>
+          <tr>
+            <td>Not Applicable</td>
+            <td>The obligation does not apply to the mapped surface.</td>
+            <td>Applicability rule, agent/human rationale, and surface scope evidence.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="grid-2" aria-label="Implementation plan">
+      <article class="cell">
+        <h2>Implementation Slices</h2>
+        <p><strong>1. Agent runner adapter:</strong> define a small interface: prompt, cwd, budgets, allowed tools, session id, transcript export, JSON artifact path.</p>
+        <p><strong>2. Product-map schema:</strong> surfaces, routes, components, services, user stories, workflows, evidence refs, confidence, human review flags.</p>
+        <p><strong>3. Mapper prompt:</strong> a bespoke accessibility-compliance engineer prompt that requires citations to files, routes, screenshots, and commands.</p>
+        <p><strong>4. Standards graph:</strong> ingest W3C/WAI references into local profiles with source URLs and update metadata.</p>
+        <p><strong>5. Report generator:</strong> standards-first HTML/JSON drilldown over product map plus evidence packets.</p>
+        <p><strong>6. Vision review lane:</strong> policy-gated artifact batches, prompts, redaction receipts, and non-blocking context enrichment.</p>
+      </article>
+      <article class="cell wash">
+        <h2>Verification System</h2>
+        <p><strong>Claim:</strong> Allie can autonomously map a consumer app and generate a standards-first report a compliance engineer can review.</p>
+        <p><strong>Falsifier:</strong> the map misses visible surfaces, uncited assertions appear in the report, or WCAG statuses cannot be traced to evidence.</p>
+        <p><strong>Driver:</strong> <code>allie map</code> and <code>allie report</code> against Vanity and Linejam.</p>
+        <p><strong>Grader:</strong> schema validation, golden report snapshots, seeded-missing-route fixture, target-identity guard, and human review of the first generated surface map.</p>
+        <p><strong>Evidence packet:</strong> <code>.allie/dogfood/&lt;repo&gt;/agentic-map-report/</code> with transcript, product map, screenshots, generated flows, evidence packet, vision receipts, and report HTML.</p>
+        <p><strong>Cadence:</strong> every runner adapter change and every standards/report schema change.</p>
+      </article>
+    </section>
+
+    <section>
+      <h2>Research Anchors</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Use in Allie</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://www.w3.org/WAI/standards-guidelines/wcag/">W3C WCAG 2 Overview</a></td>
+            <td>Canonical resource map for WCAG standards, Understanding docs, Techniques, Test Rules, and supplemental guidance.</td>
+          </tr>
+          <tr>
+            <td><a href="https://www.w3.org/WAI/WCAG22/quickref/">How to Meet WCAG Quick Reference</a></td>
+            <td>Success criteria, sufficient/advisory techniques, failures, and human-readable drilldown content.</td>
+          </tr>
+          <tr>
+            <td><a href="https://www.w3.org/TR/act-rules-format/">ACT Rules Format 1.1</a></td>
+            <td>Rule format and terminology for automated and manual checks; useful for Allie's obligation/test schema.</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/w3c/wcag-act-rules-cg">W3C ACT Rules Community Group</a></td>
+            <td>Reference rules and the "write rules, not tools" philosophy; Allie can document deviations.</td>
+          </tr>
+          <tr>
+            <td><a href="https://www.w3.org/WAI/test-evaluate/conformance/wcag-em/">WCAG-EM</a> and <a href="https://www.w3.org/WAI/test-evaluate/report-template/">WAI report template</a></td>
+            <td>Evaluation methodology and report shape for human-readable conformance reporting.</td>
+          </tr>
+          <tr>
+            <td><a href="https://www.w3.org/WAI/test-evaluate/tools/list/">WAI Evaluation Tools List</a></td>
+            <td>Comparator categories: report generation, step-by-step guidance, whole-product scope, restricted pages, ACT support.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

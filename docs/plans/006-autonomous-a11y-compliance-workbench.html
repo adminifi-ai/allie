@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Autonomous Accessibility Compliance Workbench</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17201d;
+      --muted: #58635e;
+      --line: #cfd8d1;
+      --paper: #f7f6ef;
+      --panel: #ffffff;
+      --green: #1f6f4a;
+      --blue: #245b9f;
+      --red: #a43b3b;
+      --gold: #9b6b14;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 24px 56px;
+    }
+    header {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 24px;
+      align-items: end;
+      border-bottom: 3px solid var(--ink);
+      padding-bottom: 24px;
+      min-height: 78vh;
+    }
+    h1 {
+      font-size: clamp(42px, 7vw, 92px);
+      line-height: 0.95;
+      letter-spacing: 0;
+      margin: 0 0 20px;
+      max-width: 920px;
+    }
+    h2 {
+      font-size: 24px;
+      margin: 0 0 12px;
+      letter-spacing: 0;
+    }
+    h3 {
+      font-size: 17px;
+      margin: 0 0 8px;
+      letter-spacing: 0;
+    }
+    p { margin: 0 0 12px; }
+    a { color: var(--blue); }
+    code {
+      background: #ece9df;
+      border: 1px solid #d8d1c3;
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    .lede {
+      font-size: 22px;
+      color: var(--muted);
+      max-width: 760px;
+    }
+    .meta {
+      border-left: 4px solid var(--ink);
+      padding-left: 16px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    section {
+      padding: 28px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .callout {
+      background: #eef4ef;
+      border: 1px solid #bbd0c0;
+      border-left: 6px solid var(--green);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .warning {
+      background: #fbf2e2;
+      border-color: #e1c681;
+      border-left-color: var(--gold);
+    }
+    .danger {
+      background: #f7eaea;
+      border-color: #ddb5b5;
+      border-left-color: var(--red);
+    }
+    ol, ul { margin: 0; padding-left: 22px; }
+    li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+      padding: 10px;
+      font-size: 14px;
+    }
+    th { background: #ecefe9; }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 8px;
+    }
+    .step {
+      min-height: 112px;
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--blue);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px;
+      font-size: 14px;
+    }
+    .tag {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      color: var(--muted);
+      background: #fff;
+      margin-right: 4px;
+    }
+    @media (max-width: 880px) {
+      header, .two, .grid, .flow { grid-template-columns: 1fr; }
+      header { min-height: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="tag">Shape packet</p>
+        <p class="tag">Backlog 006-010</p>
+        <h1>Autonomous Accessibility Compliance Workbench</h1>
+        <p class="lede">Allie should let a compliance engineer point at an application and receive autonomous discovery, generated browser evidence, full WCAG drilldown, agentic vision context, remediation guidance, and release enforcement without pretending model opinion is legal compliance.</p>
+      </div>
+      <div class="meta">
+        <p><strong>Premise source:</strong> current operator direction in this thread, codified into <code>docs/vision.md</code> and backlog items <code>006</code> through <code>010</code>.</p>
+        <p><strong>Repo baseline:</strong> branch <code>deliver/full-backlog</code> has a clean V0 loop: handwritten manifest, Playwright/axe worker, screenshot, packet, local report, and release projection.</p>
+        <p><strong>Key correction:</strong> the LLM, vision AI, comprehensive WCAG matrix, autonomous discovery, and remediation workbench are not shipped. They are now explicit epics.</p>
+      </div>
+    </header>
+
+    <section>
+      <h2>Decision</h2>
+      <div class="callout">
+        <p><strong>Build a packeted autonomy pipeline, not a semantic agent platform.</strong> Rust owns schemas, policy, budgets, hashing, promotion state, and enforcement. Browser and model systems are narrow adapters that return typed evidence. Every generated or agentic claim must replay, be attested, or stay neutral.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Target Operator Experience</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Assess</h3>
+          <p>Discover sitemap, product surfaces, user stories, route states, hidden UI, form errors, media, and auth boundaries under explicit budgets.</p>
+        </div>
+        <div class="card">
+          <h3>Prove</h3>
+          <p>Generate Playwright and axe coverage, replay it, capture DOM, accessibility tree, screenshots, video/GIF, traces, console, network, and raw axe JSON.</p>
+        </div>
+        <div class="card">
+          <h3>Explain</h3>
+          <p>Render every WCAG criterion with status, method, rationale, artifacts, model context, waiver state, remediation, and residual review.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Pipeline</h2>
+      <div class="flow">
+        <div class="step"><strong>Discovery packet</strong><br>Sitemap, surfaces, states, provenance, budgets.</div>
+        <div class="step"><strong>Story packet</strong><br>User stories, critical flows, confidence, operator review.</div>
+        <div class="step"><strong>Flow plan</strong><br>Generated Playwright candidates, WCAG methods, replay intent.</div>
+        <div class="step"><strong>Evidence packet</strong><br>Axe, scripted checks, screenshots, DOM, a11y tree, media, traces.</div>
+        <div class="step"><strong>Review packet</strong><br>Vision AI attempts, prompts, responses, redaction receipts, confidence.</div>
+        <div class="step"><strong>Release packet</strong><br>Blocking proof, neutral review gaps, waivers, remediation, check payload.</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Backlog Shape</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Epic</th>
+            <th>Why it comes here</th>
+            <th>Primary oracle</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>006</code> Autonomous discovery</td>
+            <td>Surface and story discovery is the input to every later autonomous capability.</td>
+            <td>Generated flow candidate must replay through <code>allie run</code> before enforcement.</td>
+          </tr>
+          <tr>
+            <td><code>007</code> WCAG drilldown</td>
+            <td>Every test, agentic finding, waiver, and remediation item needs a criterion-level home.</td>
+            <td>Every WCAG 2.2 A/AA criterion appears with exactly one status and evidence/gap rationale.</td>
+          </tr>
+          <tr>
+            <td><code>008</code> Generated Playwright/axe suite</td>
+            <td>Discovery and ledger become useful only when coverage replays in a real browser.</td>
+            <td>Known fixture failures block; unreplayed generated tests cannot block.</td>
+          </tr>
+          <tr>
+            <td><code>009</code> Model and vision contract</td>
+            <td>Vision AI needs policy, redaction, prompts, responses, audit, and promotion before live calls.</td>
+            <td>Model-only findings enrich reports but stay neutral until scripted or human-backed promotion.</td>
+          </tr>
+          <tr>
+            <td><code>010</code> Remediation workbench</td>
+            <td>Assessment must drive fixes and release enforcement without unsafe autonomy.</td>
+            <td>No remediation action exists without finding refs, artifact refs, replay command, and policy effect.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>External Anchors</h2>
+      <div class="two">
+        <div class="card">
+          <h3>Standards</h3>
+          <ul>
+            <li><a href="https://www.w3.org/WAI/standards-guidelines/wcag/">W3C WCAG overview</a>: WCAG success criteria determine conformance, so Allie's denominator must be criteria, not tool rules.</li>
+            <li><a href="https://www.w3.org/WAI/test-evaluate/conformance/wcag-em/">W3C WCAG-EM</a>: evaluation has scope, exploration, representative samples, evaluation, and reporting.</li>
+            <li><a href="https://www.w3.org/WAI/standards-guidelines/act/">W3C ACT</a>: test methods should be transparent across automated, semi-automated, and manual testing.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Automation</h3>
+          <ul>
+            <li><a href="https://www.deque.com/axe/core-documentation/api-documentation/">Deque axe API docs</a>: axe tags map rules to WCAG versions and success criteria.</li>
+            <li>Deque also notes hidden regions need to be activated or rendered before analysis, which points directly to generated Playwright interaction coverage.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Stop Conditions</h2>
+      <div class="callout warning">
+        <ul>
+          <li>Stop if generated flow candidates can block release before replay.</li>
+          <li>Stop if model-only findings can block release without scripted reproduction or human attestation.</li>
+          <li>Stop if reports imply legal compliance instead of evidence status and residual review.</li>
+          <li>Stop if provider calls can run without typed policy, redaction receipts, budgets, and no-fallback enforcement.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <h2>Verification Contract</h2>
+      <div class="callout danger">
+        <p><strong>Autonomy is accepted only when it leaves evidence.</strong> Every new capability must produce a reviewable artifact set: schema validation, packet, report, replay command, raw worker/model transcript, artifact hashes, release projection, and final gate output. A green unit test without those receipts is not product acceptance.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

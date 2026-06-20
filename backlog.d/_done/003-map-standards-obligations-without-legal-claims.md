@@ -1,6 +1,6 @@
 # Map standards obligations without legal claims
 
-Priority: P1 - Status: pending - Estimate: L
+Priority: P1 - Status: done - Estimate: L
 
 ## Goal
 
@@ -10,13 +10,13 @@ without claiming legal compliance.
 
 ## Oracle
 
-- [ ] `wcag22-aa` profile data can map axe rule tags and scripted checks to
+- [x] `wcag22-aa` profile data can map axe rule tags and scripted checks to
   obligation-level verdicts.
-- [ ] Verdicts distinguish `pass`, `fail`, `needs_review`, `not_tested`,
+- [x] Verdicts distinguish `pass`, `fail`, `needs_review`, `not_tested`,
   `waived`, and `risk_accepted`.
-- [ ] Confidence distinguishes `machine_proven`, `script_observed`,
+- [x] Confidence distinguishes `machine_proven`, `script_observed`,
   `agent_inferred`, and `human_attested`.
-- [ ] The report names residual human-review obligations instead of collapsing
+- [x] The report names residual human-review obligations instead of collapsing
   them into a score.
 
 ## Verification System
@@ -49,3 +49,10 @@ sources support this shape: W3C WCAG 2.2 defines the recommendation, W3C ACT
 documents transparent automated/semi-automated/manual test rules, and axe-core
 rules carry WCAG version and success-criterion tags.
 
+## Delivered
+
+- Added `profiles/wcag22-aa.json` with axe-tag mapping, deterministic pass, scripted placeholder, and human-review obligations.
+- Mapped axe findings and passing deterministic evidence into obligation-level verdicts with confidence/provenance.
+- Added `not_tested` scripted obligations and `needs_review` human obligations to packets, coverage, and reports.
+- Kept report language explicit that evidence is not a legal compliance guarantee and does not produce a compliance score.
+- Verified with `cargo test --locked`, `npm run verify`, and live `.allie/runs/latest/evidence.json` showing one deterministic pass, three `not_tested` obligations, and two `needs_review` obligations.

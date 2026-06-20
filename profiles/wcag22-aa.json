@@ -1,0 +1,684 @@
+{
+  "schema": "allie.obligation-profile.v0",
+  "id": "wcag22-aa",
+  "version": "2026-06-19",
+  "source": "W3C WCAG 2.2 A/AA success criteria plus axe-core rule tags",
+  "deterministic_pass_obligation": {
+    "obligation": "wcag22-aa:deterministic-axe-rules",
+    "title": "No axe-core violations in captured states"
+  },
+  "axe_tag_map": {
+    "wcag111": {
+      "obligation": "wcag22-aa:1.1.1-non-text-content",
+      "title": "Non-text content"
+    },
+    "wcag131": {
+      "obligation": "wcag22-aa:1.3.1-info-and-relationships",
+      "title": "Info and relationships"
+    },
+    "wcag141": {
+      "obligation": "wcag22-aa:1.4.1-use-of-color",
+      "title": "Use of color"
+    },
+    "wcag143": {
+      "obligation": "wcag22-aa:1.4.3-contrast-minimum",
+      "title": "Contrast minimum"
+    },
+    "wcag211": {
+      "obligation": "wcag22-aa:2.1.1-keyboard",
+      "title": "Keyboard"
+    },
+    "wcag241": {
+      "obligation": "wcag22-aa:2.4.1-bypass-blocks",
+      "title": "Bypass blocks"
+    },
+    "wcag242": {
+      "obligation": "wcag22-aa:2.4.2-page-titled",
+      "title": "Page titled"
+    },
+    "wcag244": {
+      "obligation": "wcag22-aa:2.4.4-link-purpose-in-context",
+      "title": "Link purpose in context"
+    },
+    "wcag332": {
+      "obligation": "wcag22-aa:3.3.2-labels-or-instructions",
+      "title": "Labels or instructions"
+    },
+    "wcag412": {
+      "obligation": "wcag22-aa:4.1.2-name-role-value",
+      "title": "Name, role, value"
+    }
+  },
+  "scripted_obligations": [
+    {
+      "obligation": "wcag22-aa:2.1.1-keyboard-traversal",
+      "title": "Keyboard traversal through the critical flow"
+    },
+    {
+      "obligation": "wcag22-aa:1.4.10-zoom-reflow",
+      "title": "Zoom and reflow at release viewport"
+    },
+    {
+      "obligation": "wcag22-aa:2.2.2-reduced-motion",
+      "title": "Reduced motion behavior"
+    }
+  ],
+  "human_review_obligations": [
+    {
+      "obligation": "wcag22-aa:human-content-meaning",
+      "title": "Content meaning and cognitive load"
+    },
+    {
+      "obligation": "wcag22-aa:human-assistive-technology-review",
+      "title": "Manual assistive technology review"
+    }
+  ],
+  "source_url": "https://www.w3.org/WAI/WCAG22/wcag.json",
+  "success_criteria": [
+    {
+      "obligation": "wcag22-aa:1.1.1-non-text-content",
+      "num": "1.1.1",
+      "handle": "Non-text Content",
+      "level": "A",
+      "principle": "Perceivable",
+      "guideline": "1.1",
+      "guideline_handle": "Text Alternatives",
+      "method": "axe",
+      "source_url": "https://www.w3.org/TR/WCAG22/#non-text-content"
+    },
+    {
+      "obligation": "wcag22-aa:1.2.1-audio-only-and-video-only-prerecorded",
+      "num": "1.2.1",
+      "handle": "Audio-only and Video-only (Prerecorded)",
+      "level": "A",
+      "principle": "Perceivable",
+      "guideline": "1.2",
+      "guideline_handle": "Time-based Media",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#audio-only-and-video-only-prerecorded"
+    },
+    {
+      "obligation": "wcag22-aa:1.2.2-captions-prerecorded",
+      "num": "1.2.2",
+      "handle": "Captions (Prerecorded)",
+      "level": "A",
+      "principle": "Perceivable",
+      "guideline": "1.2",
+      "guideline_handle": "Time-based Media",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#captions-prerecorded"
+    },
+    {
+      "obligation": "wcag22-aa:1.2.3-audio-description-or-media-alternative-prerecorded",
+      "num": "1.2.3",
+      "handle": "Audio Description or Media Alternative (Prerecorded)",
+      "level": "A",
+      "principle": "Perceivable",
+      "guideline": "1.2",
+      "guideline_handle": "Time-based Media",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#audio-description-or-media-alternative-prerecorded"
+    },
+    {
+      "obligation": "wcag22-aa:1.2.4-captions-live",
+      "num": "1.2.4",
+      "handle": "Captions (Live)",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.2",
+      "guideline_handle": "Time-based Media",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#captions-live"
+    },
+    {
+      "obligation": "wcag22-aa:1.2.5-audio-description-prerecorded",
+      "num": "1.2.5",
+      "handle": "Audio Description (Prerecorded)",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.2",
+      "guideline_handle": "Time-based Media",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#audio-description-prerecorded"
+    },
+    {
+      "obligation": "wcag22-aa:1.3.1-info-and-relationships",
+      "num": "1.3.1",
+      "handle": "Info and Relationships",
+      "level": "A",
+      "principle": "Perceivable",
+      "guideline": "1.3",
+      "guideline_handle": "Adaptable",
+      "method": "axe",
+      "source_url": "https://www.w3.org/TR/WCAG22/#info-and-relationships"
+    },
+    {
+      "obligation": "wcag22-aa:1.3.2-meaningful-sequence",
+      "num": "1.3.2",
+      "handle": "Meaningful Sequence",
+      "level": "A",
+      "principle": "Perceivable",
+      "guideline": "1.3",
+      "guideline_handle": "Adaptable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#meaningful-sequence"
+    },
+    {
+      "obligation": "wcag22-aa:1.3.3-sensory-characteristics",
+      "num": "1.3.3",
+      "handle": "Sensory Characteristics",
+      "level": "A",
+      "principle": "Perceivable",
+      "guideline": "1.3",
+      "guideline_handle": "Adaptable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#sensory-characteristics"
+    },
+    {
+      "obligation": "wcag22-aa:1.3.4-orientation",
+      "num": "1.3.4",
+      "handle": "Orientation",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.3",
+      "guideline_handle": "Adaptable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#orientation"
+    },
+    {
+      "obligation": "wcag22-aa:1.3.5-identify-input-purpose",
+      "num": "1.3.5",
+      "handle": "Identify Input Purpose",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.3",
+      "guideline_handle": "Adaptable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#identify-input-purpose"
+    },
+    {
+      "obligation": "wcag22-aa:1.4.1-use-of-color",
+      "num": "1.4.1",
+      "handle": "Use of Color",
+      "level": "A",
+      "principle": "Perceivable",
+      "guideline": "1.4",
+      "guideline_handle": "Distinguishable",
+      "method": "axe",
+      "source_url": "https://www.w3.org/TR/WCAG22/#use-of-color"
+    },
+    {
+      "obligation": "wcag22-aa:1.4.2-audio-control",
+      "num": "1.4.2",
+      "handle": "Audio Control",
+      "level": "A",
+      "principle": "Perceivable",
+      "guideline": "1.4",
+      "guideline_handle": "Distinguishable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#audio-control"
+    },
+    {
+      "obligation": "wcag22-aa:1.4.3-contrast-minimum",
+      "num": "1.4.3",
+      "handle": "Contrast (Minimum)",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.4",
+      "guideline_handle": "Distinguishable",
+      "method": "axe",
+      "source_url": "https://www.w3.org/TR/WCAG22/#contrast-minimum"
+    },
+    {
+      "obligation": "wcag22-aa:1.4.4-resize-text",
+      "num": "1.4.4",
+      "handle": "Resize Text",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.4",
+      "guideline_handle": "Distinguishable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#resize-text"
+    },
+    {
+      "obligation": "wcag22-aa:1.4.5-images-of-text",
+      "num": "1.4.5",
+      "handle": "Images of Text",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.4",
+      "guideline_handle": "Distinguishable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#images-of-text"
+    },
+    {
+      "obligation": "wcag22-aa:1.4.10-reflow",
+      "num": "1.4.10",
+      "handle": "Reflow",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.4",
+      "guideline_handle": "Distinguishable",
+      "method": "scripted",
+      "source_url": "https://www.w3.org/TR/WCAG22/#reflow"
+    },
+    {
+      "obligation": "wcag22-aa:1.4.11-non-text-contrast",
+      "num": "1.4.11",
+      "handle": "Non-text Contrast",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.4",
+      "guideline_handle": "Distinguishable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#non-text-contrast"
+    },
+    {
+      "obligation": "wcag22-aa:1.4.12-text-spacing",
+      "num": "1.4.12",
+      "handle": "Text Spacing",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.4",
+      "guideline_handle": "Distinguishable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#text-spacing"
+    },
+    {
+      "obligation": "wcag22-aa:1.4.13-content-on-hover-or-focus",
+      "num": "1.4.13",
+      "handle": "Content on Hover or Focus",
+      "level": "AA",
+      "principle": "Perceivable",
+      "guideline": "1.4",
+      "guideline_handle": "Distinguishable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#content-on-hover-or-focus"
+    },
+    {
+      "obligation": "wcag22-aa:2.1.1-keyboard",
+      "num": "2.1.1",
+      "handle": "Keyboard",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.1",
+      "guideline_handle": "Keyboard Accessible",
+      "method": "axe",
+      "source_url": "https://www.w3.org/TR/WCAG22/#keyboard"
+    },
+    {
+      "obligation": "wcag22-aa:2.1.2-no-keyboard-trap",
+      "num": "2.1.2",
+      "handle": "No Keyboard Trap",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.1",
+      "guideline_handle": "Keyboard Accessible",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#no-keyboard-trap"
+    },
+    {
+      "obligation": "wcag22-aa:2.1.4-character-key-shortcuts",
+      "num": "2.1.4",
+      "handle": "Character Key Shortcuts",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.1",
+      "guideline_handle": "Keyboard Accessible",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#character-key-shortcuts"
+    },
+    {
+      "obligation": "wcag22-aa:2.2.1-timing-adjustable",
+      "num": "2.2.1",
+      "handle": "Timing Adjustable",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.2",
+      "guideline_handle": "Enough Time",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#timing-adjustable"
+    },
+    {
+      "obligation": "wcag22-aa:2.2.2-pause-stop-hide",
+      "num": "2.2.2",
+      "handle": "Pause, Stop, Hide",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.2",
+      "guideline_handle": "Enough Time",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#pause-stop-hide"
+    },
+    {
+      "obligation": "wcag22-aa:2.3.1-three-flashes-or-below-threshold",
+      "num": "2.3.1",
+      "handle": "Three Flashes or Below Threshold",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.3",
+      "guideline_handle": "Seizures and Physical Reactions",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#three-flashes-or-below-threshold"
+    },
+    {
+      "obligation": "wcag22-aa:2.4.1-bypass-blocks",
+      "num": "2.4.1",
+      "handle": "Bypass Blocks",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.4",
+      "guideline_handle": "Navigable",
+      "method": "axe",
+      "source_url": "https://www.w3.org/TR/WCAG22/#bypass-blocks"
+    },
+    {
+      "obligation": "wcag22-aa:2.4.2-page-titled",
+      "num": "2.4.2",
+      "handle": "Page Titled",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.4",
+      "guideline_handle": "Navigable",
+      "method": "axe",
+      "source_url": "https://www.w3.org/TR/WCAG22/#page-titled"
+    },
+    {
+      "obligation": "wcag22-aa:2.4.3-focus-order",
+      "num": "2.4.3",
+      "handle": "Focus Order",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.4",
+      "guideline_handle": "Navigable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#focus-order"
+    },
+    {
+      "obligation": "wcag22-aa:2.4.4-link-purpose-in-context",
+      "num": "2.4.4",
+      "handle": "Link Purpose (In Context)",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.4",
+      "guideline_handle": "Navigable",
+      "method": "axe",
+      "source_url": "https://www.w3.org/TR/WCAG22/#link-purpose-in-context"
+    },
+    {
+      "obligation": "wcag22-aa:2.4.5-multiple-ways",
+      "num": "2.4.5",
+      "handle": "Multiple Ways",
+      "level": "AA",
+      "principle": "Operable",
+      "guideline": "2.4",
+      "guideline_handle": "Navigable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#multiple-ways"
+    },
+    {
+      "obligation": "wcag22-aa:2.4.6-headings-and-labels",
+      "num": "2.4.6",
+      "handle": "Headings and Labels",
+      "level": "AA",
+      "principle": "Operable",
+      "guideline": "2.4",
+      "guideline_handle": "Navigable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#headings-and-labels"
+    },
+    {
+      "obligation": "wcag22-aa:2.4.7-focus-visible",
+      "num": "2.4.7",
+      "handle": "Focus Visible",
+      "level": "AA",
+      "principle": "Operable",
+      "guideline": "2.4",
+      "guideline_handle": "Navigable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#focus-visible"
+    },
+    {
+      "obligation": "wcag22-aa:2.4.11-focus-not-obscured-minimum",
+      "num": "2.4.11",
+      "handle": "Focus Not Obscured (Minimum)",
+      "level": "AA",
+      "principle": "Operable",
+      "guideline": "2.4",
+      "guideline_handle": "Navigable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#focus-not-obscured-minimum"
+    },
+    {
+      "obligation": "wcag22-aa:2.5.1-pointer-gestures",
+      "num": "2.5.1",
+      "handle": "Pointer Gestures",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.5",
+      "guideline_handle": "Input Modalities",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#pointer-gestures"
+    },
+    {
+      "obligation": "wcag22-aa:2.5.2-pointer-cancellation",
+      "num": "2.5.2",
+      "handle": "Pointer Cancellation",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.5",
+      "guideline_handle": "Input Modalities",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#pointer-cancellation"
+    },
+    {
+      "obligation": "wcag22-aa:2.5.3-label-in-name",
+      "num": "2.5.3",
+      "handle": "Label in Name",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.5",
+      "guideline_handle": "Input Modalities",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#label-in-name"
+    },
+    {
+      "obligation": "wcag22-aa:2.5.4-motion-actuation",
+      "num": "2.5.4",
+      "handle": "Motion Actuation",
+      "level": "A",
+      "principle": "Operable",
+      "guideline": "2.5",
+      "guideline_handle": "Input Modalities",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#motion-actuation"
+    },
+    {
+      "obligation": "wcag22-aa:2.5.7-dragging-movements",
+      "num": "2.5.7",
+      "handle": "Dragging Movements",
+      "level": "AA",
+      "principle": "Operable",
+      "guideline": "2.5",
+      "guideline_handle": "Input Modalities",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#dragging-movements"
+    },
+    {
+      "obligation": "wcag22-aa:2.5.8-target-size-minimum",
+      "num": "2.5.8",
+      "handle": "Target Size (Minimum)",
+      "level": "AA",
+      "principle": "Operable",
+      "guideline": "2.5",
+      "guideline_handle": "Input Modalities",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#target-size-minimum"
+    },
+    {
+      "obligation": "wcag22-aa:3.1.1-language-of-page",
+      "num": "3.1.1",
+      "handle": "Language of Page",
+      "level": "A",
+      "principle": "Understandable",
+      "guideline": "3.1",
+      "guideline_handle": "Readable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#language-of-page"
+    },
+    {
+      "obligation": "wcag22-aa:3.1.2-language-of-parts",
+      "num": "3.1.2",
+      "handle": "Language of Parts",
+      "level": "AA",
+      "principle": "Understandable",
+      "guideline": "3.1",
+      "guideline_handle": "Readable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#language-of-parts"
+    },
+    {
+      "obligation": "wcag22-aa:3.2.1-on-focus",
+      "num": "3.2.1",
+      "handle": "On Focus",
+      "level": "A",
+      "principle": "Understandable",
+      "guideline": "3.2",
+      "guideline_handle": "Predictable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#on-focus"
+    },
+    {
+      "obligation": "wcag22-aa:3.2.2-on-input",
+      "num": "3.2.2",
+      "handle": "On Input",
+      "level": "A",
+      "principle": "Understandable",
+      "guideline": "3.2",
+      "guideline_handle": "Predictable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#on-input"
+    },
+    {
+      "obligation": "wcag22-aa:3.2.3-consistent-navigation",
+      "num": "3.2.3",
+      "handle": "Consistent Navigation",
+      "level": "AA",
+      "principle": "Understandable",
+      "guideline": "3.2",
+      "guideline_handle": "Predictable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#consistent-navigation"
+    },
+    {
+      "obligation": "wcag22-aa:3.2.4-consistent-identification",
+      "num": "3.2.4",
+      "handle": "Consistent Identification",
+      "level": "AA",
+      "principle": "Understandable",
+      "guideline": "3.2",
+      "guideline_handle": "Predictable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#consistent-identification"
+    },
+    {
+      "obligation": "wcag22-aa:3.2.6-consistent-help",
+      "num": "3.2.6",
+      "handle": "Consistent Help",
+      "level": "A",
+      "principle": "Understandable",
+      "guideline": "3.2",
+      "guideline_handle": "Predictable",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#consistent-help"
+    },
+    {
+      "obligation": "wcag22-aa:3.3.1-error-identification",
+      "num": "3.3.1",
+      "handle": "Error Identification",
+      "level": "A",
+      "principle": "Understandable",
+      "guideline": "3.3",
+      "guideline_handle": "Input Assistance",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#error-identification"
+    },
+    {
+      "obligation": "wcag22-aa:3.3.2-labels-or-instructions",
+      "num": "3.3.2",
+      "handle": "Labels or Instructions",
+      "level": "A",
+      "principle": "Understandable",
+      "guideline": "3.3",
+      "guideline_handle": "Input Assistance",
+      "method": "axe",
+      "source_url": "https://www.w3.org/TR/WCAG22/#labels-or-instructions"
+    },
+    {
+      "obligation": "wcag22-aa:3.3.3-error-suggestion",
+      "num": "3.3.3",
+      "handle": "Error Suggestion",
+      "level": "AA",
+      "principle": "Understandable",
+      "guideline": "3.3",
+      "guideline_handle": "Input Assistance",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#error-suggestion"
+    },
+    {
+      "obligation": "wcag22-aa:3.3.4-error-prevention-legal-financial-data",
+      "num": "3.3.4",
+      "handle": "Error Prevention (Legal, Financial, Data)",
+      "level": "AA",
+      "principle": "Understandable",
+      "guideline": "3.3",
+      "guideline_handle": "Input Assistance",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#error-prevention-legal-financial-data"
+    },
+    {
+      "obligation": "wcag22-aa:3.3.7-redundant-entry",
+      "num": "3.3.7",
+      "handle": "Redundant Entry",
+      "level": "A",
+      "principle": "Understandable",
+      "guideline": "3.3",
+      "guideline_handle": "Input Assistance",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#redundant-entry"
+    },
+    {
+      "obligation": "wcag22-aa:3.3.8-accessible-authentication-minimum",
+      "num": "3.3.8",
+      "handle": "Accessible Authentication (Minimum)",
+      "level": "AA",
+      "principle": "Understandable",
+      "guideline": "3.3",
+      "guideline_handle": "Input Assistance",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#accessible-authentication-minimum"
+    },
+    {
+      "obligation": "wcag22-aa:4.1.2-name-role-value",
+      "num": "4.1.2",
+      "handle": "Name, Role, Value",
+      "level": "A",
+      "principle": "Robust",
+      "guideline": "4.1",
+      "guideline_handle": "Compatible",
+      "method": "axe",
+      "source_url": "https://www.w3.org/TR/WCAG22/#name-role-value"
+    },
+    {
+      "obligation": "wcag22-aa:4.1.3-status-messages",
+      "num": "4.1.3",
+      "handle": "Status Messages",
+      "level": "AA",
+      "principle": "Robust",
+      "guideline": "4.1",
+      "guideline_handle": "Compatible",
+      "method": "human_review",
+      "source_url": "https://www.w3.org/TR/WCAG22/#status-messages"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Freeze V0 around a deterministic local evidence loop
 
-Priority: P0 - Status: ready - Estimate: XL
+Priority: P0 - Status: done - Estimate: XL
 
 ## PRD Summary
 
@@ -142,3 +142,9 @@ before expanding the product surface. Playwright's official accessibility
 testing guidance points to Axe integration, and axe-core exposes WCAG-tagged
 rule metadata suitable for initial deterministic mapping.
 
+## Delivered
+
+- Implemented `cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest`.
+- Added a checked-in login fixture, flow manifest, Playwright/axe worker, raw axe JSON artifact, screenshot artifact, `allie.evidence.v0` packet, local HTML report, replay command, and deterministic/scripted exit semantics.
+- Added fail-closed checks for required route HTTP failures and missing required worker artifacts.
+- Verified with `cargo fmt --check`, `cargo test --locked`, `npm run worker:smoke`, the V0 command, and a negative `/missing` route CLI run.

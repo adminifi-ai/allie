@@ -1,0 +1,18 @@
+{
+  "name": "allie-browser-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "worker:smoke": "node workers/browser/run.mjs --smoke .allie/worker-smoke",
+    "evidence:smoke": "cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/v0-smoke",
+    "visibility:smoke": "scripts/visibility-smoke.sh",
+    "release:smoke": "cargo run --locked -- release --packet .allie/runs/v0-smoke/evidence.json --out .allie/releases/v0-smoke --changed-surface login-form",
+    "autonomous:smoke": "scripts/autonomous-smoke.sh",
+    "verify": "scripts/verify.sh"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "playwright": "^1.49.1"
+  }
+}

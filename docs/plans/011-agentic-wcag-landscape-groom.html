@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Agentic WCAG Coverage Groom</title>
+  <style>
+    :root {
+      --bg: #f7f6f2;
+      --ink: #141414;
+      --muted: #5e625f;
+      --line: #d3d6cf;
+      --panel: #fffef9;
+      --wash: #ecefe7;
+      --accent: #245f46;
+      --warn: #91600f;
+      --bad: #9a2c2c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(1160px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 30px 0 58px;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(38px, 6vw, 78px); line-height: 0.95; letter-spacing: 0; max-width: 960px; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+    h3 { font-size: 17px; margin-bottom: 6px; }
+    p + p { margin-top: 10px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 12px;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 32px;
+      align-items: end;
+      padding: 46px 0 28px;
+    }
+    .lede { margin-top: 20px; color: var(--muted); font-size: 20px; max-width: 840px; }
+    .panel, .cell {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 20px;
+    }
+    .decision { border-left: 5px solid var(--accent); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      margin-top: 1px;
+    }
+    .cell { border: 0; min-height: 150px; }
+    section { margin-top: 30px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      margin-top: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 12px 13px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--wash);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 12px;
+    }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    @media (max-width: 860px) {
+      main { width: min(100% - 26px, 1160px); }
+      .hero, .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="top">
+      <span>Allie / Groom Contract</span>
+      <span>2026-06-20</span>
+    </header>
+
+    <section class="hero" aria-label="Groom contract">
+      <div>
+        <h1>Make autonomy long-running and make WCAG visibility exact.</h1>
+        <p class="lede">The Vanity dogfood exposed the next product truth: Allie cannot treat a 120-second subprocess as the agentic contract, and it cannot let supporting checks inflate the WCAG denominator. The backlog should now pivot from "all initial epics done" to V1 evidence governance.</p>
+      </div>
+      <aside class="panel decision">
+        <h2>Chosen Direction</h2>
+        <p><strong>Agent job runner plus criterion-by-surface matrix.</strong> Keep Rust as the evidence engine. Move agent work into resumable jobs with checkpoints, budgets, event logs, and adapters. Report exactly 55 WCAG 2.2 A/AA success criteria separately from Allie supporting checks.</p>
+      </aside>
+    </section>
+
+    <section class="grid" aria-label="Core moves">
+      <article class="cell">
+        <h2>Runtime</h2>
+        <h3>Replace wall-clock kill switches with jobs.</h3>
+        <p>Agent sessions should be resumable, cancellable, evented, budgeted, and checkpointed. CI consumes completed packets or bounded deterministic subsets.</p>
+      </article>
+      <article class="cell">
+        <h2>Coverage</h2>
+        <h3>Matrix every criterion across every surface.</h3>
+        <p>Every WCAG criterion and discovered surface/state gets a status, evidence refs, applicability rationale, confidence, and residual review need.</p>
+      </article>
+      <article class="cell">
+        <h2>Landscape</h2>
+        <h3>Track competitors by evidence contract.</h3>
+        <p>Deque, Evinced, Level Access, Pa11y, Lighthouse, Accessibility Insights, BrowserStack, Sauce, and Stark should be compared by replayability, governance, and release-decision semantics.</p>
+      </article>
+    </section>
+
+    <section>
+      <h2>Backlog Emissions</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Epic</th>
+            <th>Why now</th>
+            <th>Primary oracle</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>011</code></td>
+            <td>Replace synchronous agent helper with durable autonomous jobs</td>
+            <td>The current mapper timeout is a smoke guard, not a product contract.</td>
+            <td>Long-running fixture job can pause/resume/cancel and still emit map/report evidence.</td>
+          </tr>
+          <tr>
+            <td><code>012</code></td>
+            <td>Make WCAG coverage a 55-criterion surface matrix</td>
+            <td>Dogfood showed misleading <code>61</code> totals and mixed supporting checks with WCAG criteria.</td>
+            <td>Report proves exactly 55 WCAG rows, with supporting checks separate, across every required surface.</td>
+          </tr>
+          <tr>
+            <td><code>013</code></td>
+            <td>Track the accessibility tooling landscape as product input</td>
+            <td>Allie needs a living competitive lens so it does not become a weaker scanner clone.</td>
+            <td>Landscape doc and release checklist map competitors to Allie's evidence/replay/governance bets.</td>
+          </tr>
+          <tr>
+            <td><code>014</code></td>
+            <td>Package the host-agnostic consumer contract</td>
+            <td>Dogfood needs one portable operator path for GitHub, Azure, local, and arbitrary repos.</td>
+            <td><code>allie init</code>/<code>allie verify</code> style flow produces the same artifacts locally and in CI wrappers.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Stop Conditions</h2>
+      <table>
+        <tbody>
+          <tr>
+            <th class="bad">Do not claim compliance</th>
+            <td>Allie reports evidence, status, confidence, and review needs. Legal/compliance claims remain out of scope.</td>
+          </tr>
+          <tr>
+            <th class="warn">Do not block on model-only output</th>
+            <td>Agentic and vision output enriches review until promoted by scripted reproduction or human attestation.</td>
+          </tr>
+          <tr>
+            <th>Do not inflate standards</th>
+            <td>Supporting checks and aggregate gates map into WCAG criteria but never count as extra WCAG success criteria.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

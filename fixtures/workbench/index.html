@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Allie Workbench Home</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.5; }
+      nav a { margin-right: 1rem; }
+      button, input, a { font: inherit; }
+      .low-contrast { color: #777; background: #888; padding: 0.5rem; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Accessibility workbench</h1>
+      <nav aria-label="Primary">
+        <a href="/">Home</a>
+        <a href="/settings.html">Settings</a>
+        <a href="/help.html">Help</a>
+      </nav>
+    </header>
+    <main>
+      <p>Fixture for autonomous sitemap, user-story, and generated flow discovery.</p>
+      <button id="open-menu" aria-expanded="false" aria-controls="menu">Actions</button>
+      <div id="menu" hidden>
+        <a href="/settings.html">Manage account settings</a>
+      </div>
+      <p class="low-contrast">Known contrast issue for deterministic remediation proof.</p>
+    </main>
+    <script>
+      const button = document.querySelector('#open-menu');
+      const menu = document.querySelector('#menu');
+      button.addEventListener('click', () => {
+        const open = menu.hasAttribute('hidden');
+        menu.toggleAttribute('hidden', !open);
+        button.setAttribute('aria-expanded', String(open));
+      });
+    </script>
+  </body>
+</html>

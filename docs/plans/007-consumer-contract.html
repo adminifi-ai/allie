@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Consumer Contract Design</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --ink: #171717;
+      --muted: #66645e;
+      --line: #d9d6cd;
+      --panel: #ffffff;
+      --wash: #ece9df;
+      --accent: #1f4fd8;
+      --risk: #9b2c2c;
+      --ok: #17643a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(34px, 5vw, 72px); line-height: 0.95; letter-spacing: 0; }
+    h2 { font-size: 18px; text-transform: uppercase; letter-spacing: 0.08em; }
+    h3 { font-size: 16px; }
+    p + p { margin-top: 0.75rem; }
+    a { color: var(--accent); }
+    code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.92em; }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 16px;
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.65fr);
+      gap: 40px;
+      align-items: end;
+      padding: 52px 0 34px;
+    }
+
+    .lede {
+      color: var(--muted);
+      font-size: 20px;
+      max-width: 760px;
+      margin-top: 22px;
+    }
+
+    .panel, .cell {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 22px;
+    }
+
+    .panel strong, .cell strong { color: var(--ink); }
+    .muted { color: var(--muted); }
+    .ok { color: var(--ok); }
+    .risk { color: var(--risk); }
+
+    .grid-2, .grid-3, .grid-4 {
+      display: grid;
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      margin-top: 1px;
+    }
+
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .cell { border: 0; min-width: 0; }
+    .wash { background: var(--wash); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      margin-top: 18px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 13px 14px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: var(--wash);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    section { margin-top: 34px; }
+
+    pre {
+      margin: 18px 0 0;
+      padding: 18px;
+      background: #111;
+      color: #f4f4f4;
+      overflow: auto;
+    }
+
+    .decision {
+      border-left: 5px solid var(--accent);
+    }
+
+    @media (max-width: 860px) {
+      main { width: min(100% - 28px, 1180px); }
+      .hero, .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="topbar">
+      <span>Allie / Consumer Contract</span>
+      <span>Research + shape packet / 2026-06-19</span>
+    </header>
+
+    <section class="hero" aria-label="Plan contract">
+      <div>
+        <h1>Make Allie a portable evidence CLI with host-specific wrappers.</h1>
+        <p class="lede">Consuming apps should not integrate with Allie as a GitHub-only app, a SaaS-first scanner, or a test-framework package. The durable contract is: one manifest in, one evidence packet out, deterministic exit semantics, and optional adapters for GitHub, Azure, local development, and later hosted review.</p>
+      </div>
+      <aside class="panel decision">
+        <h2>Recommendation</h2>
+        <p><strong>Best design:</strong> standalone Rust CLI plus manifest and reporter contract, distributed through a binary installer, npm shim, and container. GitHub Action and Azure YAML templates are thin wrappers around the same CLI.</p>
+        <p><strong>Why it wins:</strong> it preserves local replay, host agnosticism, privacy controls, and stable evidence packets while still giving CI users a copy-paste path.</p>
+        <p class="muted">Premise source: <code>sha256:ea1aed7d389bb0eb7321096650dfbd76efde321238de478c14599a25b0ad06df chat-request-2026-06-19</code></p>
+      </aside>
+    </section>
+
+    <section class="grid-4" aria-label="Executive contract">
+      <article class="cell">
+        <h2>User Outcome</h2>
+        <p>An application team can add Allie to any staged web app, run it locally or in CI, get actionable accessibility evidence, and publish reports without changing CI providers.</p>
+      </article>
+      <article class="cell">
+        <h2>Primary Contract</h2>
+        <p><code>allie.yml</code> or <code>.allie/manifest.yml</code> defines target, startup, credentials profile, flows, discovery policy, standards profile, redaction, and reporters.</p>
+      </article>
+      <article class="cell">
+        <h2>Outputs</h2>
+        <p>Evidence JSON, HTML report, artifact directory, JUnit XML, SARIF, Markdown summary, CI-specific check payloads, and deterministic exit code.</p>
+      </article>
+      <article class="cell wash">
+        <h2>Stop Rule</h2>
+        <p>Do not build hosted dashboards or provider-specific actions before the same manifest can run locally, in GitHub, and in Azure with comparable receipts.</p>
+      </article>
+    </section>
+
+    <section>
+      <h2>Alternatives</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Design</th>
+            <th>Consumer UX</th>
+            <th>Strength</th>
+            <th>Failure Mode</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Package embedded in app tests</strong><br><code>@allie/playwright</code>, Rust crate, or framework plugin.</td>
+            <td>Teams install a package and write test code around Allie.</td>
+            <td>Excellent for teams already invested in Playwright and repo-local tests.</td>
+            <td>Couples Allie to language, package manager, and test runner. Makes Azure/local/non-JS adoption feel second-class.</td>
+            <td class="risk">Support later as an SDK, not as the main contract.</td>
+          </tr>
+          <tr>
+            <td><strong>GitHub Action first</strong></td>
+            <td>Teams paste a workflow and get PR checks.</td>
+            <td>Fast adoption for GitHub-native repos.</td>
+            <td>Violates host agnosticism. Azure, GitLab, Buildkite, local-only users need a different product surface.</td>
+            <td class="risk">Thin wrapper only.</td>
+          </tr>
+          <tr>
+            <td><strong>Azure task first</strong></td>
+            <td>Teams paste Azure YAML and publish test results/artifacts.</td>
+            <td>Useful enterprise path.</td>
+            <td>Same trap as GitHub Action first, with slower local feedback.</td>
+            <td class="risk">Template wrapper only.</td>
+          </tr>
+          <tr>
+            <td><strong>Hosted SaaS scanner first</strong></td>
+            <td>Teams connect repo/preview URL and inspect a dashboard.</td>
+            <td>Best long-term executive reporting and collaboration surface.</td>
+            <td>Premature for privacy, staging auth, local replay, and proof ownership. Becomes "dashboard detached from CI" from the spec non-goals.</td>
+            <td class="risk">Later evidence viewer, not V1 adoption.</td>
+          </tr>
+          <tr>
+            <td><strong>Container-only runner</strong></td>
+            <td>Teams run <code>docker run</code> with mounted config and output dirs.</td>
+            <td>Good for hermetic CI and non-Rust/non-Node hosts.</td>
+            <td>Awkward local UX on macOS, browser sandbox and networking footguns, harder credential handling.</td>
+            <td>Secondary distribution path.</td>
+          </tr>
+          <tr>
+            <td><strong>Portable CLI plus wrappers</strong></td>
+            <td>Teams add one manifest and run one command. CI wrappers only install/invoke/publish.</td>
+            <td>Host-agnostic, locally replayable, privacy-friendly, aligned with evidence packet architecture.</td>
+            <td>Requires crisp install story and strong examples, or it feels lower-level than an action.</td>
+            <td class="ok">Recommended.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="grid-3" aria-label="Consumer contract">
+      <article class="cell">
+        <h2>Manifest</h2>
+        <p>All host-specific integrations should point at the same manifest. The manifest is the product surface consumers learn, review, diff, and tune.</p>
+        <pre><code>target:
+  base_url: http://127.0.0.1:4173
+  start: npm run dev -- --host 127.0.0.1
+policy:
+  profile: wcag22-aa
+  blocking_classes: [deterministic, scripted_required]
+reporters: [html, json, junit, sarif, markdown]
+flows:
+  - id: homepage
+    discover: true</code></pre>
+      </article>
+      <article class="cell">
+        <h2>CLI</h2>
+        <p>The CLI owns execution, policy, browser worker orchestration, model policy, evidence writing, and exit code. Wrappers should not reinterpret the result.</p>
+        <pre><code>allie verify \
+  --config .allie/manifest.yml \
+  --out .allie/runs/$ALLIE_RUN_ID
+
+allie report \
+  --packet .allie/runs/$ALLIE_RUN_ID/evidence.json \
+  --format junit,sarif,markdown,github,azure</code></pre>
+      </article>
+      <article class="cell wash">
+        <h2>CI Wrappers</h2>
+        <p>GitHub Action, Azure template, Docker image, and npm shim all reduce setup friction but remain adapters. They install Allie, call the CLI, publish artifacts, and surface summaries.</p>
+        <pre><code># GitHub: upload artifacts + optional SARIF
+# Azure: PublishTestResults@2 + PublishPipelineArtifact@1
+# Local: allie verify --config .allie/manifest.yml</code></pre>
+      </article>
+    </section>
+
+    <section>
+      <h2>Reporter Contract</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Output</th>
+            <th>Purpose</th>
+            <th>Why it matters</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>evidence.json</code></td>
+            <td>Canonical Allie packet.</td>
+            <td>Stable replay, audit, release, and hosted-viewer boundary.</td>
+          </tr>
+          <tr>
+            <td><code>report.html</code> plus artifacts</td>
+            <td>Human drilldown for engineers, QA, and accessibility specialists.</td>
+            <td>Works locally, in Azure artifacts, GitHub artifacts, or object storage.</td>
+          </tr>
+          <tr>
+            <td><code>junit.xml</code></td>
+            <td>Generic CI test result channel.</td>
+            <td>Azure supports JUnit/NUnit/VSTest/XUnit/CTest publication through PublishTestResults@2.</td>
+          </tr>
+          <tr>
+            <td><code>results.sarif</code></td>
+            <td>Code scanning where host supports it.</td>
+            <td>GitHub accepts third-party SARIF from Actions, external CI, or the API. Treat this as optional because not every accessibility issue maps cleanly to code locations.</td>
+          </tr>
+          <tr>
+            <td><code>summary.md</code></td>
+            <td>Portable PR/build summary.</td>
+            <td>Easy to paste into GitHub step summaries, Azure logs, Slack, Teams, or release notes.</td>
+          </tr>
+          <tr>
+            <td><code>github-check.json</code>, <code>azure-summary.json</code></td>
+            <td>Host-specific projections.</td>
+            <td>Generated from evidence, never the source of truth.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="grid-2" aria-label="Rollout">
+      <article class="cell">
+        <h2>Rollout Plan</h2>
+        <p><strong>1. Contract hardening:</strong> write an ADR and schema for manifest, reporters, target identity, and exit codes.</p>
+        <p><strong>2. Local first:</strong> implement <code>allie init</code>, <code>allie verify</code>, and reporter emission against Vanity.</p>
+        <p><strong>3. CI parity:</strong> add GitHub Action and Azure YAML examples that call the same CLI and publish the same artifacts.</p>
+        <p><strong>4. Serious dogfood:</strong> run Linejam as the first Next app integration, then Sploot once its current auth work lands.</p>
+        <p><strong>5. Hosted viewer:</strong> only after packets are stable, add an optional server that ingests evidence packets.</p>
+      </article>
+      <article class="cell wash">
+        <h2>Verification System</h2>
+        <p><strong>Claim:</strong> one consumer manifest can run locally, in GitHub, and in Azure-equivalent CI without changing Allie semantics.</p>
+        <p><strong>Falsifier:</strong> a host wrapper needs different policy semantics, different findings, or a different canonical report.</p>
+        <p><strong>Driver:</strong> run the same manifest against Vanity and Linejam through local shell, GitHub workflow, and Azure YAML sample.</p>
+        <p><strong>Grader:</strong> schema-valid evidence packets, comparable findings, expected exit code, published HTML artifacts, JUnit result, optional SARIF upload.</p>
+        <p><strong>Evidence packet:</strong> <code>.allie/dogfood/&lt;repo&gt;/&lt;mode&gt;/</code> with HTML report, JSON packet, screenshots, trace, logs, JUnit, SARIF, and wrapper transcript.</p>
+        <p><strong>Cadence:</strong> every wrapper change and before any hosted viewer work.</p>
+      </article>
+    </section>
+
+    <section>
+      <h2>Research Notes</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Relevant pattern</th>
+            <th>Allie implication</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://github.com/dequelabs/axe-core">axe-core</a> and <a href="https://www.npmjs.com/package/@axe-core/cli">@axe-core/cli</a></td>
+            <td>Core engine integrates into existing test environments; CLI emits JSON/stdout and can fail CI with exit code.</td>
+            <td>Allie should expose deterministic CLI semantics and JSON first, not require a hosted integration.</td>
+          </tr>
+          <tr>
+            <td><a href="https://playwright.dev/docs/accessibility-testing">Playwright accessibility docs</a></td>
+            <td>Accessibility checks can be regular Playwright tests, with scan results attached to test output.</td>
+            <td>Allie reporters should integrate with existing test artifacts, but keep Playwright behind the worker boundary.</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/pa11y/pa11y-ci">pa11y-ci</a></td>
+            <td>CI-centric CLI uses config files, URL lists/sitemaps, JSON reporter, custom reporters, and Docker examples.</td>
+            <td>Manifest plus reporters is the right consumer primitive; container is a distribution option, not the product core.</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/GoogleChrome/lighthouse-ci/">Lighthouse CI</a></td>
+            <td>CLI-centered CI suite with optional GitHub Action and server/reporting ecosystem.</td>
+            <td>Follow the CLI-first ladder: local command, CI examples, then optional hosted evidence viewer.</td>
+          </tr>
+          <tr>
+            <td><a href="https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file">GitHub SARIF upload</a></td>
+            <td>GitHub can ingest third-party SARIF from Actions, external CI, or API.</td>
+            <td>Allie should emit SARIF as an optional projection, not as the canonical packet.</td>
+          </tr>
+          <tr>
+            <td><a href="https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/publish-test-results-v2?view=azure-pipelines">Azure PublishTestResults@2</a> and <a href="https://learn.microsoft.com/en-us/azure/devops/pipelines/artifacts/pipeline-artifacts?view=azure-devops">Pipeline Artifacts</a></td>
+            <td>Azure accepts generic test result formats and pipeline artifacts from any runner.</td>
+            <td>Allie should emit JUnit plus artifact directories so Azure support is native without an Azure-only product branch.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Non-Goals For The Next Slice</h2>
+      <p>Do not build a hosted dashboard, marketplace action polish, full SDK, auto-remediation PR bot, or CI provider abstraction layer before the core manifest and reporter contract are proven in at least one local static app and one real app with a dev server.</p>
+    </section>
+  </main>
+</body>
+</html>

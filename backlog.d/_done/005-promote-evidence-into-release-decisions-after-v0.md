@@ -1,6 +1,6 @@
 # Promote evidence into release decisions after V0
 
-Priority: P2 - Status: pending - Estimate: XL
+Priority: P2 - Status: done - Estimate: XL
 
 ## Goal
 
@@ -10,13 +10,13 @@ features outrun deterministic proof.
 
 ## Oracle
 
-- [ ] PR/check output summarizes changed surfaces, required evidence, blocking
+- [x] PR/check output summarizes changed surfaces, required evidence, blocking
   deterministic/scripted failures, stale evidence, and review-needed obligations.
-- [ ] Model enrichment remains policy-gated, audited, and non-blocking unless a
+- [x] Model enrichment remains policy-gated, audited, and non-blocking unless a
   human or deterministic rule promotes it.
-- [ ] Waivers include provenance, expiry, touched-surface behavior, and packet
+- [x] Waivers include provenance, expiry, touched-surface behavior, and packet
   references.
-- [ ] Hosted/dashboard views read from the same evidence contract instead of a
+- [x] Hosted/dashboard views read from the same evidence contract instead of a
   separate status model.
 
 ## Verification System
@@ -48,3 +48,12 @@ the durable product direction, but the first wedge must stay local and
 deterministic. This epic preserves the ambition while sequencing PR, model,
 waiver, remediation, and hosted surfaces behind stable evidence.
 
+## Delivered
+
+- Added `allie release --packet <evidence.json> --out <dir> --changed-surface <id>` as a packet projection command.
+- Added `release-summary.json`, `github-check.json`, and `release-report.html` outputs under the requested release directory.
+- Release projection blocks packet failures, missing evidence for changed surfaces, expired touched waivers, and invalid touched-waiver metadata.
+- Release projection treats stale evidence, model-only findings, `needs_review`, and `not_tested` obligations as neutral review-required output rather than hard blocks.
+- Added waiver metadata requirements to the formal packet schema and docs.
+- Added `npm run release:smoke`, CI wiring, and tests for packet failures, missing changed surfaces, model-only non-blocking findings, stale evidence review, expired waivers, invalid waivers, and CLI output.
+- Verified with `npm run verify` and live `cargo run --locked -- release --packet .allie/runs/latest/evidence.json --out .allie/releases/latest --changed-surface login-form`, which produced a neutral `needs_review` GitHub-check payload from the same evidence packet.

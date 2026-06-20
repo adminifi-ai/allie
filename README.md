@@ -34,16 +34,91 @@ Accessibility work is often split across manual expert review, browser extension
 - [docs/naming.md](docs/naming.md): naming decisions and alternates.
 - [docs/roadmap.md](docs/roadmap.md): proposed build sequence.
 
-## Current CLI Placeholder
+## V0 Local Evidence Loop
 
 ```sh
-cargo run --locked
+cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest
 ```
 
-The binary currently prints the project line and next target. The first real CLI milestone is:
+The V0 command runs the checked-in login fixture through the browser worker,
+captures axe output and a screenshot, and writes a replayable evidence packet
+plus a local HTML report:
 
 ```sh
-allie run --manifest <flow.yml>
+.allie/runs/latest/evidence.json
+.allie/runs/latest/report.html
+.allie/runs/latest/artifacts/axe-login-form.json
+.allie/runs/latest/artifacts/login-form.png
 ```
 
-That command should execute one authenticated journey against one staged app, run Playwright plus axe, and emit a replayable evidence packet.
+The packet reports accessibility evidence status, confidence, and residual
+review needs. It is not a legal compliance guarantee.
+
+## Release Decision Projection
+
+```sh
+cargo run --locked -- release --packet .allie/runs/latest/evidence.json --out .allie/releases/latest --changed-surface login-form
+```
+
+The release command reads an `allie.evidence.v0` packet and writes a release
+summary, a GitHub Checks-style payload, and an HTML decision report:
+
+```sh
+.allie/releases/latest/release-summary.json
+.allie/releases/latest/github-check.json
+.allie/releases/latest/release-report.html
+```
+
+It blocks on packet failures, missing evidence for changed surfaces, expired
+waivers on touched surfaces, and invalid waiver metadata. Stale evidence,
+model-only findings, `needs_review` obligations, and `not_tested` obligations
+produce a neutral review-required decision instead of a hard block.
+
+## Autonomous Workbench Loop
+
+```sh
+cargo run --locked -- discover --manifest examples/autonomous-workbench.yml --out .allie/discovery/autonomous
+cargo run --locked -- promote-flow --discovery .allie/discovery/autonomous/discovery.json --flow-plan .allie/discovery/autonomous/flow-plan.json --out .allie/discovery/autonomous/generated-flow.yml
+cargo run --locked -- run --manifest .allie/discovery/autonomous/generated-flow.yml --out .allie/runs/autonomous
+cargo run --locked -- review --packet .allie/runs/autonomous/evidence.json --out .allie/reviews/autonomous
+cargo run --locked -- remediate --packet .allie/runs/autonomous/evidence.json --out .allie/remediation/autonomous
+```
+
+The autonomous loop discovers fixture surfaces, promotes generated flow
+candidates into a replayable manifest, captures axe, screenshot, DOM,
+accessibility-tree, keyboard, and trace artifacts, adds offline agentic review
+context with redaction receipts, and writes an evidence-linked remediation
+queue. Generated and agentic claims do not enforce release policy until replayed,
+scripted, or human-attested.
+
+## Local Verification
+
+Install the browser worker dependencies once:
+
+```sh
+npm install
+npx playwright install chromium
+```
+
+Then run the repo gates:
+
+```sh
+cargo fmt --check
+cargo test --locked
+npm run worker:smoke
+npm run evidence:smoke
+npm run release:smoke
+npm run autonomous:smoke
+cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest
+cargo run --locked -- release --packet .allie/runs/latest/evidence.json --out .allie/releases/latest --changed-surface login-form
+```
+
+The worker smoke proves Playwright plus axe can inspect the checked-in fixture.
+The evidence smoke leaves a stable receipt under `.allie/runs/v0-smoke/`. The
+release smoke projects that packet into `.allie/releases/v0-smoke/`. The final
+two commands are the V0 live oracle and release projection, leaving inspectable
+evidence under `.allie/runs/latest/` and `.allie/releases/latest/`.
+The autonomous smoke leaves discovery, generated-flow, richer evidence, review,
+remediation, and blocked-release receipts under `.allie/*/autonomous-smoke/`.
+
+For a cold-start verification path, see [docs/verification.md](docs/verification.md).

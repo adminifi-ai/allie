@@ -1,34 +1,75 @@
 # Roadmap
 
+## Current V0 Loop
+
+The first local evidence loop is implemented around:
+
+```sh
+cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest
+```
+
+It reads the checked-in login manifest, serves the local fixture through the
+browser worker, runs Playwright plus axe, captures a screenshot, writes raw axe
+JSON, emits an `allie.evidence.v0` packet, and generates a local HTML report.
+
+This is a proof foundation, not the autonomous product. The current system does
+not yet discover application surfaces, generate tests, run vision AI, complete a
+WCAG matrix, or draft remediation.
+
+## Product Target
+
+Allie should let a compliance engineer point it at an application and receive:
+
+1. An autonomously discovered sitemap, product-surface inventory, and likely user
+   stories.
+2. Generated Playwright and axe coverage that replays through real browser
+   evidence before it can enforce release policy.
+3. A complete WCAG 2.2 A/AA obligation ledger with drilldown from criterion to
+   state, finding, artifact, agentic context, waiver, and remediation.
+4. Agentic vision review for criteria that require judgment, with redaction
+   receipts and neutral findings until promoted by scripted proof or human
+   attestation.
+5. Release enforcement and remediation guidance that are packet projections, not
+   a separate status model.
+
 ## Now
 
-1. Define a formal `allie.evidence.v0` JSON Schema.
-2. Define a flow manifest format.
-3. Implement `allie run --manifest <path> --out <dir>`.
-4. Build a minimal Playwright/axe worker contract.
-5. Generate local evidence packets and HTML reports.
+1. Replace the synchronous advisory agent helper with durable autonomous jobs
+   (`backlog.d/011-replace-synchronous-agent-helper-with-durable-jobs.md`).
+   A 120-second subprocess timeout is acceptable as a smoke guard, not as the
+   product contract for agentic assessment.
+2. Make WCAG reporting an exact 55-criterion surface matrix
+   (`backlog.d/012-make-wcag-coverage-a-55-criterion-surface-matrix.md`).
+   Supporting checks and aggregate gates should explain evidence, not inflate
+   the standards denominator.
+3. Keep the autonomous workbench smoke green as the primary regression oracle
+   while the V1 job and coverage contracts land (`npm run autonomous:smoke`).
 
 ## Next
 
-1. Add standards profile mapping for `wcag22-aa`.
-2. Add deterministic PR/CI exit semantics.
-3. Add screenshot, DOM, and accessibility tree artifact capture.
-4. Add model-gateway policy types, but keep provider calls disabled by default.
-5. Add fixture app and golden evidence tests.
+1. Package the host-agnostic consumer contract with `allie init`, `allie verify`,
+   stable reporter outputs, and GitHub/Azure examples as thin wrappers
+   (`backlog.d/014-package-host-agnostic-consumer-contract.md`).
+2. Track the accessibility tooling landscape as product input so Allie
+   differentiates on evidence contracts, replayability, governance, and release
+   semantics rather than scanner parity
+   (`backlog.d/013-track-accessibility-tooling-landscape.md`).
+3. Add authenticated staged-app discovery and changed-surface inference once the
+   job and coverage contracts are explicit.
 
 ## Later
 
-1. OpenRouter-backed multimodal first-pass review.
-2. GitHub Checks integration.
-3. Hosted evidence viewer.
-4. SME review workbench.
-5. Remediation PR drafting.
-6. Browser extension capture companion.
-7. Multi-repo dashboard and trends.
+1. Enable approved live multimodal provider calls behind the model gateway.
+2. Add richer remediation patch adapters, before/after packet comparison, and
+   reviewer attestations.
+3. Wire GitHub Checks, PR comments, and hosted evidence viewer from the same
+   packets.
+4. Add SME review workbench, reviewer attestations, and promotion workflows.
+5. Add browser extension capture companion, multi-repo dashboard, and trends.
 
 ## First Acceptance Slice
 
-The first slice is not complete until this command works against a checked-in fixture:
+The first slice is complete when this command works against a checked-in fixture:
 
 ```sh
 allie run --manifest examples/login-flow.yml --out .allie/runs/latest

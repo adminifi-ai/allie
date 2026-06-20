@@ -1,0 +1,28 @@
+{
+  "schema": "allie.worker.request.v0",
+  "run_id": "worker-smoke",
+  "manifest_id": "login-flow",
+  "target": {
+    "kind": "local_fixture",
+    "fixture_dir": "fixtures/login",
+    "base_url": null
+  },
+  "browser": {
+    "viewport": { "width": 1280, "height": 900 },
+    "color_scheme": "light",
+    "reduced_motion": "reduce",
+    "locale": "en-US",
+    "zoom": 1.0
+  },
+  "states": [
+    {
+      "id": "login-form",
+      "path": "/",
+      "description": "Initial login form route state.",
+      "required": true,
+      "axe": true,
+      "screenshot": true
+    }
+  ],
+  "artifacts_dir": ".allie/worker-smoke/artifacts"
+}

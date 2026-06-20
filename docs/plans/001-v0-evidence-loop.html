@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Plan: V0 Evidence Loop</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #151719;
+      --muted: #5d646c;
+      --line: #d9dde3;
+      --wash: #f4f6f8;
+      --panel: #ffffff;
+      --accent: #1f5eff;
+      --warn: #8f5a00;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--wash);
+      font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    header,
+    main {
+      width: min(1180px, calc(100% - 48px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 28px 0 18px;
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    main {
+      padding: 28px 0 56px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      max-width: 760px;
+      font-size: clamp(38px, 6vw, 70px);
+      line-height: 0.98;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    h3 {
+      font-size: 18px;
+      margin-bottom: 6px;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+      background: #eef1f5;
+      padding: 0.08em 0.28em;
+      border-radius: 4px;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    .chrome {
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 28px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    .lede {
+      font-size: 20px;
+      color: var(--muted);
+      margin-top: 18px;
+      max-width: 780px;
+    }
+
+    .panel,
+    .cell {
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+
+    .panel {
+      padding: 20px;
+    }
+
+    .panel p + p {
+      margin-top: 10px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      margin-top: 24px;
+    }
+
+    .grid.cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid.cols-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid.cols-5 {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .cell {
+      border: 0;
+      min-width: 0;
+      padding: 18px;
+    }
+
+    .cell.warn {
+      background: #fff8e8;
+    }
+
+    .stack {
+      display: grid;
+      gap: 14px;
+      margin-top: 24px;
+    }
+
+    .phase {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr) minmax(220px, 0.55fr);
+      gap: 18px;
+      align-items: start;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .phase:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      vertical-align: top;
+      border-top: 1px solid var(--line);
+      padding: 10px;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    ul {
+      padding-left: 20px;
+      margin: 0;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    .accent {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .warn-text {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    @media (max-width: 900px) {
+      header,
+      main {
+        width: min(100% - 28px, 1180px);
+      }
+
+      header,
+      .hero,
+      .grid.cols-2,
+      .grid.cols-3,
+      .grid.cols-5,
+      .phase {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="chrome">Allie backlog 001 / executor plan</p>
+    <p class="chrome">Branch: deliver/001-v0-evidence-loop</p>
+  </header>
+
+  <main>
+    <section class="hero" aria-label="Plan contract">
+      <div>
+        <p class="chrome">Target outcome</p>
+        <h1>Make Allie's V0 evidence loop executable.</h1>
+        <p class="lede">
+          Deliver <code>allie run --manifest examples/login-flow.yml --out .allie/runs/latest</code>
+          so a cold operator gets one checked-in browser flow, axe output, a screenshot,
+          a machine-readable evidence packet, a local HTML report, replay instructions,
+          and deterministic exit behavior.
+        </p>
+      </div>
+      <aside class="panel" aria-label="Chosen design">
+        <h2>Chosen Design</h2>
+        <p><strong>Rust core, narrow Node worker.</strong> Rust owns CLI parsing, manifest validation, run planning, packet/report writing, hashing, and exit taxonomy. Node owns only Playwright and axe execution behind a request/response JSON boundary.</p>
+        <p><strong>Local fixture first.</strong> A checked-in fixture and no-op auth profile prove evidence semantics before real staging credentials.</p>
+        <p class="muted">Premise sources: <code>SPEC.md</code>, <code>AGENTS.md</code>, <code>docs/architecture.md</code>, <code>docs/evidence-contract.md</code>, <code>backlog.d/001-...</code>.</p>
+      </aside>
+    </section>
+
+    <section class="grid cols-5" aria-label="Quality system">
+      <article class="cell">
+        <h2>Standards</h2>
+        <p>Evidence packet is the core interface. Rust remains the orchestration owner. Playwright/axe details stay behind the worker adapter. No legal compliance claims.</p>
+      </article>
+      <article class="cell">
+        <h2>Acceptance</h2>
+        <p>The V0 command writes <code>evidence.json</code>, <code>report.html</code>, axe JSON, one screenshot, replay instructions, route-state metadata, and exits by deterministic/scripted result.</p>
+      </article>
+      <article class="cell">
+        <h2>Verify</h2>
+        <p>Live oracle: V0 command. Structural gates: <code>cargo fmt --check</code>, <code>cargo test --locked</code>, worker smoke. Fresh critic: artifact-only works critique before closeout.</p>
+      </article>
+      <article class="cell">
+        <h2>Communicate</h2>
+        <p>Report before edits, after the first live artifact, after gates, and at closeout with exact commands, artifact paths, status, and residual risk.</p>
+      </article>
+      <article class="cell warn">
+        <h2>Stop If</h2>
+        <p>Stop if Playwright cannot install/run locally after two attempts, the evidence contract contradicts the spec, or implementation requires real credentials/model calls to pass.</p>
+      </article>
+    </section>
+
+    <section class="grid cols-3" aria-label="Current state and proof">
+      <article class="cell">
+        <h2>Current State</h2>
+        <p>The repo has product docs and five active backlog files. The current CLI only prints a product line and next target. No fixture, manifest, worker, packet writer, or smoke command exists.</p>
+      </article>
+      <article class="cell">
+        <h2>Change Shape</h2>
+        <p>Add the smallest durable V0 surface: CLI subcommand, manifest schema, evidence schema/types, fixture, worker protocol, report writer, tests, and worker smoke command.</p>
+      </article>
+      <article class="cell">
+        <h2>Proof Surface</h2>
+        <p><code>.allie/runs/latest/</code> becomes the inspectable receipt: packet, report, screenshot, axe JSON, worker transcript, and replay command.</p>
+      </article>
+    </section>
+
+    <section class="grid cols-2" aria-label="Scope">
+      <article class="cell">
+        <h2>In Scope</h2>
+        <ul>
+          <li>Checked-in local flow manifest and fixture app.</li>
+          <li>Playwright plus axe worker with typed JSON request and response.</li>
+          <li>Evidence packet conforming to <code>allie.evidence.v0</code> shape and formal JSON Schema.</li>
+          <li>Local report with evidence links and replay instructions.</li>
+          <li>Deterministic exit semantics covered by tests.</li>
+        </ul>
+      </article>
+      <article class="cell">
+        <h2>Non-Goals</h2>
+        <ul>
+          <li>Real staging auth, secret providers, model review, PR comments, hosted dashboards, remediation branches, video/GIF, and legal compliance claims.</li>
+          <li>Full standards obligation mapping beyond the minimum profile/verdict fields needed by the packet.</li>
+          <li>A general workflow engine or provider abstraction outside the narrow worker and future model gateway boundaries.</li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="panel stack" aria-label="Verification system">
+      <div>
+        <h2>Verification System</h2>
+        <p><strong>Claim:</strong> one command proves the local deterministic evidence loop works for a checked-in login flow.</p>
+        <p><strong>Falsifier:</strong> missing artifact, invalid packet, broken report link, worker failure, missing screenshot, missing raw axe JSON, unmapped deterministic finding, or wrong exit code.</p>
+        <p><strong>Driver:</strong> <code>cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest</code>.</p>
+        <p><strong>Grader:</strong> Rust tests assert manifest validation, packet/report generation, artifact hashes, and exit classes; the worker smoke asserts Playwright plus axe output against the fixture.</p>
+        <p><strong>Evidence packet:</strong> <code>.allie/runs/latest/</code> plus final command output.</p>
+        <p><strong>Cadence:</strong> after schema/tests, after worker integration, before closeout, and after critic fixes.</p>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Execution plan">
+      <h2>Execution Plan</h2>
+      <div class="phase">
+        <strong class="accent">1. Contract</strong>
+        <p>Add operator docs and failing tests for the CLI, manifest, evidence packet, report, and deterministic exit behavior.</p>
+        <p class="muted">Evidence: tests initially fail or clearly target missing behavior.</p>
+      </div>
+      <div class="phase">
+        <strong class="accent">2. Core</strong>
+        <p>Implement Rust modules for manifest parsing, worker invocation, packet/report writing, hashing, and exit taxonomy.</p>
+        <p class="muted">Evidence: unit/integration tests pass without needing a browser.</p>
+      </div>
+      <div class="phase">
+        <strong class="accent">3. Worker</strong>
+        <p>Add the local fixture and Node worker package, keep the process boundary typed, and add the smoke command to repo docs once real.</p>
+        <p class="muted">Evidence: worker smoke produces route state, axe JSON, and screenshot.</p>
+      </div>
+      <div class="phase">
+        <strong class="accent">4. Oracle</strong>
+        <p>Run the V0 acceptance command, inspect the generated packet/report, run repo gates, and fix any contradictions.</p>
+        <p class="muted">Evidence: final artifact paths and command output.</p>
+      </div>
+      <div class="phase">
+        <strong class="accent">5. Critic</strong>
+        <p>Send the diff and oracle to an artifact-only fresh-context works critique; fix blockers or record rejected findings with reasons.</p>
+        <p class="muted">Evidence: critic receipt and follow-up diff.</p>
+      </div>
+    </section>
+
+    <section class="grid cols-2" aria-label="Alternatives and risks">
+      <article class="cell">
+        <h2>Alternatives</h2>
+        <table>
+          <thead>
+            <tr><th>Option</th><th>Why It Helps</th><th>Tradeoff</th><th>Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Rust + Node worker</td><td>Matches architecture and keeps browser runtime isolated.</td><td>Requires package setup and process protocol.</td><td>Choose.</td></tr>
+            <tr><td>Rust-only browser capture</td><td>Single language.</td><td>Fights Playwright/axe ecosystem and violates shaped boundary.</td><td>Reject.</td></tr>
+            <tr><td>Stub worker output</td><td>Fast tests.</td><td>Does not prove browser reality.</td><td>Use only for unit tests, not acceptance.</td></tr>
+            <tr><td>Real staging app</td><td>Closer to product future.</td><td>Auth and privacy scope outrun V0.</td><td>Defer.</td></tr>
+          </tbody>
+        </table>
+      </article>
+      <article class="cell">
+        <h2>Adversarial Review Focus</h2>
+        <ul>
+          <li>Could the report look successful when the worker failed or skipped axe?</li>
+          <li>Can the packet be replayed without chat-only knowledge?</li>
+          <li>Are Node and provider details leaking across the Rust core boundary?</li>
+          <li>Does any output imply legal compliance instead of evidence status?</li>
+          <li>Would a future operator know what degraded if the live oracle stops working?</li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="panel" aria-label="Closeout">
+      <h2>Closeout Requirements</h2>
+      <p>Before calling the goal complete, verify each explicit backlog and spec requirement against current artifacts, run <code>cargo fmt --check</code>, <code>cargo test --locked</code>, the worker smoke, and the V0 command, then report final <code>git status --short --branch --untracked-files=all</code>. Do not mark complete if the browser worker, screenshot, axe JSON, report, replay command, or deterministic exit semantics are missing.</p>
+    </section>
+  </main>
+</body>
+</html>
