@@ -13,10 +13,10 @@ cargo run --locked -- report \
   --packet "$RUN_DIR/evidence.json" \
   --out "$REPORT_DIR"
 
-node -e "
+REPORT_DIR="$REPORT_DIR" node -e "
 const fs = require('fs');
-const report = JSON.parse(fs.readFileSync('$REPORT_DIR/compliance-report.json', 'utf8'));
-const html = fs.readFileSync('$REPORT_DIR/compliance-report.html', 'utf8');
+const report = JSON.parse(fs.readFileSync(process.env.REPORT_DIR + '/compliance-report.json', 'utf8'));
+const html = fs.readFileSync(process.env.REPORT_DIR + '/compliance-report.html', 'utf8');
 const supportIds = [
   'wcag22-aa:deterministic-axe-rules',
   'wcag22-aa:2.1.1-keyboard-traversal',

@@ -9,6 +9,7 @@ use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wait_timeout::ChildExt;
 
@@ -3075,15 +3076,29 @@ fn aggregate_criteria_from_cells(
                     .flat_map(|cell| cell.finding_refs.iter().cloned())
                     .collect::<Vec<_>>(),
             );
-            criterion.confidence = criterion_cells
-                .iter()
-                .map(|cell| cell.confidence.clone())
-                .next()
-                .unwrap_or_else(|| criterion.confidence.clone());
+            criterion.confidence = aggregate_cell_confidence(
+                &criterion.status,
+                &criterion_cells,
+                &criterion.confidence,
+            );
             criterion.why = criterion_matrix_why(&criterion, &criterion_cells);
             criterion
         })
         .collect()
+}
+
+fn aggregate_cell_confidence(
+    status: &str,
+    cells: &[&CriterionCoverageCell],
+    fallback: &str,
+) -> String {
+    cells
+        .iter()
+        .copied()
+        .find(|cell| cell.status == status)
+        .or_else(|| cells.first().copied())
+        .map(|cell| cell.confidence.clone())
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn aggregate_cell_status(cells: &[&CriterionCoverageCell]) -> String {
@@ -3277,15 +3292,19 @@ fn criterion_cell_status(
         .any(|verdict| verdict.status == "not_applicable")
     {
         "not_applicable".to_string()
+    } else if verdicts
+        .iter()
+        .any(|verdict| verdict.status == "needs_review")
+        || findings
+            .iter()
+            .any(|finding| finding.status == "needs_review")
+    {
+        "needs_review".to_string()
     } else if verdicts.iter().any(|verdict| verdict.status == "pass")
         || method == "axe" && deterministic_support.is_some()
     {
         "pass".to_string()
-    } else if verdicts
-        .iter()
-        .any(|verdict| verdict.status == "needs_review")
-        || method == "human_review"
-    {
+    } else if method == "human_review" {
         "needs_review".to_string()
     } else {
         "not_tested".to_string()
@@ -3493,6 +3512,11 @@ fn validate_criterion_coverage_completeness(
         .iter()
         .filter_map(|criterion| criterion["id"].as_str())
         .collect::<Vec<_>>();
+    let policy_profile = report["criterion_coverage"]
+        .as_array()
+        .and_then(|cells| cells.first())
+        .and_then(|cell| cell["policy_profile"].as_str())
+        .unwrap_or("wcag22-aa");
     for surface in surfaces {
         let Some(surface_id) = surface["surface_id"].as_str() else {
             continue;
@@ -3505,7 +3529,7 @@ fn validate_criterion_coverage_completeness(
             .collect::<Vec<_>>();
         for criterion_id in &criterion_ids {
             for state_id in &states {
-                let key = format!("{criterion_id}|{surface_id}|{state_id}|wcag22-aa");
+                let key = format!("{criterion_id}|{surface_id}|{state_id}|{policy_profile}");
                 if !cell_keys.contains(&key) {
                     return Err(format!("missing criterion coverage cell: {key}"));
                 }
@@ -3596,22 +3620,24 @@ fn compliance_surface_report(
     criteria: &[ComplianceObligation],
     cells: &[CriterionCoverageCell],
 ) -> ComplianceSurfaceReport {
+    let surface_cells = cells
+        .iter()
+        .filter(|cell| cell.surface_id == surface.id)
+        .collect::<Vec<_>>();
+    let surface_criteria = criteria
+        .iter()
+        .filter(|obligation| obligation.surfaces.contains(&surface.id))
+        .collect::<Vec<_>>();
     let criterion_ids = criteria
         .iter()
         .filter(|obligation| obligation.surfaces.contains(&surface.id))
         .map(|obligation| obligation.id.clone())
         .collect::<Vec<_>>();
-    let cell_ids = cells
+    let cell_ids = surface_cells
         .iter()
-        .filter(|cell| cell.surface_id == surface.id)
         .map(|cell| cell.id.clone())
         .collect::<Vec<_>>();
-    let state_ids = unique_strings(
-        cells
-            .iter()
-            .filter(|cell| cell.surface_id == surface.id)
-            .map(|cell| cell.state_id.clone()),
-    );
+    let state_ids = unique_strings(surface_cells.iter().map(|cell| cell.state_id.clone()));
     let finding_refs = packet
         .findings
         .iter()
@@ -3621,25 +3647,10 @@ fn compliance_surface_report(
         })
         .map(|finding| finding.id.clone())
         .collect::<Vec<_>>();
-    let status = if cells
-        .iter()
-        .filter(|cell| cell.surface_id == surface.id)
-        .any(|cell| cell.status == "fail")
-    {
-        "fail"
-    } else if cells
-        .iter()
-        .filter(|cell| cell.surface_id == surface.id)
-        .any(|cell| {
-            matches!(
-                cell.status.as_str(),
-                "needs_review" | "not_tested" | "waived" | "risk_accepted"
-            )
-        })
-    {
-        "needs_review"
+    let status = if surface_cells.is_empty() {
+        surface_status_from_criteria(&surface_criteria)
     } else {
-        "pass"
+        surface_status_from_cells(&surface_cells)
     };
     ComplianceSurfaceReport {
         surface_id: surface.id.clone(),
@@ -3650,6 +3661,36 @@ fn compliance_surface_report(
         criteria: criterion_ids,
         cells: cell_ids,
         finding_refs,
+    }
+}
+
+fn surface_status_from_cells(cells: &[&CriterionCoverageCell]) -> &'static str {
+    if cells.iter().any(|cell| cell.status == "fail") {
+        "fail"
+    } else if cells.iter().any(|cell| {
+        matches!(
+            cell.status.as_str(),
+            "needs_review" | "not_tested" | "waived" | "risk_accepted"
+        )
+    }) {
+        "needs_review"
+    } else {
+        "pass"
+    }
+}
+
+fn surface_status_from_criteria(criteria: &[&ComplianceObligation]) -> &'static str {
+    if criteria.iter().any(|criterion| criterion.status == "fail") {
+        "fail"
+    } else if criteria.iter().any(|criterion| {
+        matches!(
+            criterion.status.as_str(),
+            "needs_review" | "not_tested" | "waived" | "risk_accepted"
+        )
+    }) {
+        "needs_review"
+    } else {
+        "pass"
     }
 }
 
@@ -6229,8 +6270,12 @@ fn profile_obligation_list(policy_profile: &str, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn wcag22_profile() -> serde_json::Value {
-    serde_json::from_str(WCAG22_AA_PROFILE_JSON).expect("embedded wcag22-aa profile is valid JSON")
+fn wcag22_profile() -> &'static serde_json::Value {
+    static PROFILE: OnceLock<serde_json::Value> = OnceLock::new();
+    PROFILE.get_or_init(|| {
+        serde_json::from_str(WCAG22_AA_PROFILE_JSON)
+            .expect("embedded wcag22-aa profile is valid JSON")
+    })
 }
 
 fn criteria_with_method(policy_profile: &str, method: &str) -> Vec<String> {
@@ -7602,6 +7647,54 @@ mod tests {
     }
 
     #[test]
+    fn axe_mapped_review_finding_beats_deterministic_aggregate_pass() {
+        let map: ProductMapPacket = read_json_file(Path::new(
+            "fixtures/vanity-dogfood-legacy-61/product-map.json",
+        ))
+        .unwrap();
+        let mut packet: EvidencePacket =
+            read_json_file(Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json")).unwrap();
+        packet.findings.push(Finding {
+            id: "agentic-non-text-review".to_string(),
+            title: "Image alt text needs judgment".to_string(),
+            description: "Agent could not confirm non-text alternative usefulness.".to_string(),
+            evidence_class: "agentic".to_string(),
+            standard_obligation: "wcag22-aa:1.1.1-non-text-content".to_string(),
+            severity: "review".to_string(),
+            status: "needs_review".to_string(),
+            confidence: "agent_inferred".to_string(),
+            source: "offline-agentic-review".to_string(),
+            affected_route: "/".to_string(),
+            affected_state: "home".to_string(),
+            artifact_refs: vec!["screenshot-home".to_string()],
+            suggested_remediation: "Review image alternatives.".to_string(),
+            replay_command: packet.replay.command.clone(),
+        });
+
+        let report = build_compliance_report(
+            &map,
+            &packet,
+            Path::new("fixtures/vanity-dogfood-legacy-61/product-map.json"),
+            Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json"),
+        );
+
+        let cell = report
+            .criterion_coverage
+            .iter()
+            .find(|cell| cell.criterion_id == "wcag22-aa:1.1.1-non-text-content")
+            .unwrap();
+        let criterion = report
+            .criteria
+            .iter()
+            .find(|criterion| criterion.id == "wcag22-aa:1.1.1-non-text-content")
+            .unwrap();
+        assert_eq!(cell.status, "needs_review");
+        assert_eq!(cell.confidence, "agent_inferred");
+        assert_eq!(criterion.status, "needs_review");
+        assert_eq!(criterion.confidence, "agent_inferred");
+    }
+
+    #[test]
     fn waiver_inputs_reach_coverage_cells_and_summary() {
         let map: ProductMapPacket = read_json_file(Path::new(
             "fixtures/vanity-dogfood-legacy-61/product-map.json",
@@ -7732,6 +7825,38 @@ mod tests {
         assert_eq!(summary.waived, 1);
         assert_eq!(summary.risk_accepted, 1);
         assert_eq!(summary.pass, 0);
+    }
+
+    #[test]
+    fn surface_report_falls_back_to_criteria_when_matrix_is_absent() {
+        let packet: EvidencePacket =
+            read_json_file(Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json")).unwrap();
+        let surface = ProductSurface {
+            id: "home".to_string(),
+            title: "Home".to_string(),
+            routes: vec!["/".to_string()],
+            files: Vec::new(),
+            services: Vec::new(),
+            user_stories: Vec::new(),
+            workflow_refs: Vec::new(),
+            evidence_refs: vec!["home".to_string()],
+            confidence: "operator_supplied".to_string(),
+            review_status: "required".to_string(),
+            provenance: Vec::new(),
+        };
+        let criteria = vec![sample_compliance_obligation(
+            "custom-policy:required-home-check",
+            "fail",
+        )];
+
+        let report = compliance_surface_report(&surface, &packet, &criteria, &[]);
+
+        assert_eq!(report.status, "fail");
+        assert_eq!(
+            report.criteria,
+            vec!["custom-policy:required-home-check".to_string()]
+        );
+        assert!(report.cells.is_empty());
     }
 
     #[test]
