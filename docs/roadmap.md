@@ -50,12 +50,13 @@ Allie should let a compliance engineer point it at an application and receive:
 1. Package the host-agnostic consumer contract with `allie init`, `allie verify`,
    stable reporter outputs, and GitHub/Azure examples as thin wrappers
    (`backlog.d/014-package-host-agnostic-consumer-contract.md`).
-2. Track the accessibility tooling landscape as product input so Allie
-   differentiates on evidence contracts, replayability, governance, and release
-   semantics rather than scanner parity
-   (`backlog.d/013-track-accessibility-tooling-landscape.md`).
-3. Add authenticated staged-app discovery and changed-surface inference once the
+2. Add authenticated staged-app discovery and changed-surface inference once the
    job and coverage contracts are explicit.
+
+Before adding hosted, dashboard, browser-cloud, or AI-heavy work, refresh
+[competitive-landscape.md](competitive-landscape.md) and prefer roadmap slices
+that improve packet provenance, replayability, privacy governance, and
+criterion-by-surface drilldown over scanner-rule parity.
 
 ## Later
 
