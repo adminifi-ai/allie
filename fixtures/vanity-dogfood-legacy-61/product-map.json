@@ -1,0 +1,64 @@
+{
+  "schema": "allie.product-map.v0",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "source_manifest": "fixtures/vanity-dogfood-legacy-61/flow.yml",
+  "project_root": "/fixtures/vanity",
+  "app_name": "Vanity",
+  "environment": "local",
+  "policy_profile": "wcag22-aa",
+  "target": {
+    "kind": "web",
+    "fixture_dir": null,
+    "base_url": "http://127.0.0.1:4174"
+  },
+  "agent": {
+    "schema": "allie.agent-runner.v0",
+    "runner": "local",
+    "mode": "fixture",
+    "status": "complete",
+    "capabilities": ["manifest-map"],
+    "command": ["allie", "map"],
+    "prompt_path": null,
+    "transcript_path": "fixtures/vanity-dogfood-legacy-61/map-transcript.txt",
+    "warnings": [],
+    "sources": ["fixtures/vanity-dogfood-legacy-61/product-map.json"]
+  },
+  "standards": {
+    "id": "wcag22-aa",
+    "source_urls": ["https://www.w3.org/TR/WCAG22/"],
+    "total_obligations": 55,
+    "methods": {
+      "axe": 10,
+      "scripted": 1,
+      "human_review": 44
+    }
+  },
+  "surfaces": [
+    {
+      "id": "home",
+      "title": "Vanity home",
+      "routes": ["/"],
+      "files": ["app/page.tsx"],
+      "services": ["web"],
+      "user_stories": ["As a reader, I can open the Vanity home page."],
+      "workflow_refs": ["vanity-home-flow"],
+      "evidence_refs": ["home"],
+      "confidence": "operator_supplied",
+      "review_status": "required",
+      "provenance": ["fixtures/vanity-dogfood-legacy-61/product-map.json"]
+    }
+  ],
+  "workflows": [
+    {
+      "id": "vanity-home-flow",
+      "title": "Home page read",
+      "surface_refs": ["home"],
+      "user_story": "As a reader, I can open the Vanity home page.",
+      "generated_flow_manifest": "fixtures/vanity-dogfood-legacy-61/generated-flow.yml",
+      "states": ["home"]
+    }
+  ],
+  "open_questions": [
+    "Confirm generated surface map with the application owner before enforcement."
+  ]
+}

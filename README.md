@@ -54,6 +54,28 @@ plus a local HTML report:
 The packet reports accessibility evidence status, confidence, and residual
 review needs. It is not a legal compliance guarantee.
 
+## WCAG Coverage Report
+
+```sh
+cargo run --locked -- report \
+  --map .allie/maps/latest/product-map.json \
+  --packet .allie/runs/latest/evidence.json \
+  --out .allie/reports/latest
+```
+
+For the `wcag22-aa` profile, the compliance report uses exactly the 55 WCAG
+2.2 A/AA success criteria as the standards denominator. Allie support checks
+such as deterministic axe aggregate status, keyboard traversal, zoom/reflow,
+reduced-motion, agentic review, and human-review aggregate context are reported
+separately and linked into criterion cells as evidence; they are not counted as
+extra WCAG standards.
+
+Each required product surface/state receives a criterion matrix cell with
+status, applicability, method, confidence, evidence refs, agentic refs, waiver
+refs, and residual review need. Terminal claims (`pass`, `fail`, `waived`, or
+`risk_accepted`) require provenance. Empty cells stay `not_tested` or
+`needs_review` instead of implying compliance.
+
 ## Release Decision Projection
 
 ```sh

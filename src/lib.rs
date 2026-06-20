@@ -2567,6 +2567,11 @@ fn run_compliance_report(options: ReportOptions) -> Result<ComplianceReportRecei
     let packet: EvidencePacket = read_json_file(&options.packet_path)?;
     validate_release_packet(&packet)?;
     let report = build_compliance_report(&map, &packet, &options.map_path, &options.packet_path);
+    let report_value = serde_json::to_value(&report).map_err(|source| AllieError::Json {
+        context: "serialize compliance report for validation".to_string(),
+        source,
+    })?;
+    validate_criterion_coverage_cells(&report_value).map_err(AllieError::InvalidManifest)?;
 
     let report_json_path = options.out_dir.join("compliance-report.json");
     let report_html_path = options.out_dir.join("compliance-report.html");
@@ -2588,15 +2593,21 @@ fn build_compliance_report(
     map_path: &Path,
     packet_path: &Path,
 ) -> ComplianceReportPacket {
-    let obligations = compliance_obligation_order(&map.policy_profile, packet)
+    let base_criteria = compliance_criterion_order(&map.policy_profile, packet)
         .into_iter()
         .map(|obligation| compliance_obligation(map, packet, &obligation))
         .collect::<Vec<_>>();
-    let summary = compliance_summary(packet, &obligations);
+    let supporting_checks = supporting_check_order(&map.policy_profile, packet)
+        .into_iter()
+        .map(|obligation| compliance_supporting_check(map, packet, &obligation))
+        .collect::<Vec<_>>();
+    let criterion_coverage = criterion_coverage_matrix(map, packet);
+    let criteria = aggregate_criteria_from_cells(base_criteria, &criterion_coverage);
+    let summary = compliance_summary(packet, &criteria, supporting_checks.len());
     let surfaces = map
         .surfaces
         .iter()
-        .map(|surface| compliance_surface_report(surface, packet, &obligations))
+        .map(|surface| compliance_surface_report(surface, packet, &criteria, &criterion_coverage))
         .collect();
     ComplianceReportPacket {
         schema: COMPLIANCE_REPORT_SCHEMA.to_string(),
@@ -2605,12 +2616,15 @@ fn build_compliance_report(
         source_packet: packet_path.to_string_lossy().to_string(),
         app_name: map.app_name.clone(),
         summary,
-        obligations,
+        criteria: criteria.clone(),
+        criterion_coverage,
+        supporting_checks,
+        obligations: criteria,
         surfaces,
     }
 }
 
-fn compliance_obligation_order(policy_profile: &str, packet: &EvidencePacket) -> Vec<String> {
+fn compliance_criterion_order(policy_profile: &str, packet: &EvidencePacket) -> Vec<String> {
     let mut obligations = Vec::new();
     let mut seen = BTreeSet::new();
     if policy_profile == "wcag22-aa" {
@@ -2621,15 +2635,9 @@ fn compliance_obligation_order(policy_profile: &str, packet: &EvidencePacket) ->
                 obligations.push(obligation.to_string());
             }
         }
+        return obligations;
     }
-    for obligation in std::iter::once(deterministic_pass_obligation(policy_profile))
-        .chain(scripted_profile_obligations(policy_profile))
-        .chain(human_review_profile_obligations(policy_profile))
-    {
-        if seen.insert(obligation.clone()) {
-            obligations.push(obligation);
-        }
-    }
+
     for verdict in &packet.verdicts {
         if seen.insert(verdict.obligation.clone()) {
             obligations.push(verdict.obligation.clone());
@@ -2641,6 +2649,50 @@ fn compliance_obligation_order(policy_profile: &str, packet: &EvidencePacket) ->
         }
     }
     obligations
+}
+
+fn supporting_check_order(policy_profile: &str, packet: &EvidencePacket) -> Vec<String> {
+    if policy_profile != "wcag22-aa" {
+        return Vec::new();
+    }
+
+    let criteria = wcag22_success_criterion_ids();
+    let mut support = Vec::new();
+    let mut seen = BTreeSet::new();
+    for obligation in std::iter::once(deterministic_pass_obligation(policy_profile))
+        .chain(profile_obligation_list(
+            policy_profile,
+            "scripted_obligations",
+        ))
+        .chain(profile_obligation_list(
+            policy_profile,
+            "human_review_obligations",
+        ))
+        .chain(
+            packet
+                .verdicts
+                .iter()
+                .map(|verdict| verdict.obligation.clone()),
+        )
+        .chain(
+            packet
+                .findings
+                .iter()
+                .map(|finding| finding.standard_obligation.clone()),
+        )
+    {
+        if !criteria.contains(&obligation) && seen.insert(obligation.clone()) {
+            support.push(obligation);
+        }
+    }
+    support
+}
+
+fn wcag22_success_criterion_ids() -> BTreeSet<String> {
+    wcag22_success_criteria()
+        .into_iter()
+        .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
+        .collect()
 }
 
 fn compliance_obligation(
@@ -2697,6 +2749,66 @@ fn compliance_obligation(
     }
 }
 
+fn compliance_supporting_check(
+    map: &ProductMapPacket,
+    packet: &EvidencePacket,
+    obligation: &str,
+) -> ComplianceSupportingCheck {
+    let row = compliance_obligation(map, packet, obligation);
+    ComplianceSupportingCheck {
+        id: row.id.clone(),
+        title: row.title.clone(),
+        status: row.status.clone(),
+        why: row.why.clone(),
+        related_criteria: supporting_check_related_criteria(obligation),
+        surfaces: row.surfaces,
+        tests: row.tests,
+        artifact_refs: row.artifact_refs,
+        agentic_context: row.agentic_context,
+        human_review: row.human_review,
+        confidence: row.confidence,
+        evidence_class: row.evidence_class,
+        finding_refs: row.finding_refs,
+    }
+}
+
+fn supporting_check_related_criteria(obligation: &str) -> Vec<String> {
+    match obligation {
+        "wcag22-aa:deterministic-axe-rules" => wcag22_success_criteria()
+            .into_iter()
+            .filter(|criterion| criterion["method"].as_str() == Some("axe"))
+            .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
+            .collect(),
+        "wcag22-aa:2.1.1-keyboard-traversal" => vec![
+            "wcag22-aa:2.1.1-keyboard".to_string(),
+            "wcag22-aa:2.1.2-no-keyboard-trap".to_string(),
+            "wcag22-aa:2.4.3-focus-order".to_string(),
+            "wcag22-aa:2.4.7-focus-visible".to_string(),
+            "wcag22-aa:2.4.11-focus-not-obscured-minimum".to_string(),
+        ],
+        "wcag22-aa:1.4.10-zoom-reflow" => vec![
+            "wcag22-aa:1.4.4-resize-text".to_string(),
+            "wcag22-aa:1.4.10-reflow".to_string(),
+            "wcag22-aa:1.4.12-text-spacing".to_string(),
+        ],
+        "wcag22-aa:2.2.2-reduced-motion" => vec![
+            "wcag22-aa:2.2.2-pause-stop-hide".to_string(),
+            "wcag22-aa:2.3.1-three-flashes-or-below-threshold".to_string(),
+            "wcag22-aa:2.5.4-motion-actuation".to_string(),
+        ],
+        "wcag22-aa:human-content-meaning" => wcag22_success_criteria()
+            .into_iter()
+            .filter(|criterion| criterion["method"].as_str() == Some("human_review"))
+            .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
+            .collect(),
+        "wcag22-aa:human-assistive-technology-review" => wcag22_success_criteria()
+            .into_iter()
+            .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn related_findings<'a>(
     packet: &'a EvidencePacket,
     obligation: &str,
@@ -2733,6 +2845,13 @@ fn compliance_status(verdicts: &[&Verdict], findings: &[&Finding]) -> String {
         .any(|verdict| verdict.status == "not_applicable")
     {
         "not_applicable".to_string()
+    } else if verdicts.iter().any(|verdict| verdict.status == "waived") {
+        "waived".to_string()
+    } else if verdicts
+        .iter()
+        .any(|verdict| verdict.status == "risk_accepted")
+    {
+        "risk_accepted".to_string()
     } else if verdicts.iter().any(|verdict| verdict.status == "pass") {
         "pass".to_string()
     } else {
@@ -2887,47 +3006,586 @@ fn criterion_source_url(obligation: &str) -> Option<String> {
         .and_then(|criterion| criterion["source_url"].as_str().map(ToString::to_string))
 }
 
+fn criterion_coverage_matrix(
+    map: &ProductMapPacket,
+    packet: &EvidencePacket,
+) -> Vec<CriterionCoverageCell> {
+    if map.policy_profile != "wcag22-aa" {
+        return Vec::new();
+    }
+
+    let criteria = wcag22_success_criteria();
+    let mut cells = Vec::new();
+    for surface in &map.surfaces {
+        for state_id in surface_state_ids(surface, packet) {
+            for criterion in &criteria {
+                if let Some(cell) =
+                    criterion_coverage_cell(map, packet, surface, &state_id, criterion)
+                {
+                    cells.push(cell);
+                }
+            }
+        }
+    }
+    cells
+}
+
+fn aggregate_criteria_from_cells(
+    criteria: Vec<ComplianceObligation>,
+    cells: &[CriterionCoverageCell],
+) -> Vec<ComplianceObligation> {
+    criteria
+        .into_iter()
+        .map(|mut criterion| {
+            let criterion_cells = cells
+                .iter()
+                .filter(|cell| cell.criterion_id == criterion.id)
+                .collect::<Vec<_>>();
+            if criterion_cells.is_empty() {
+                return criterion;
+            }
+            criterion.status = aggregate_cell_status(&criterion_cells);
+            criterion.surfaces = unique_strings(
+                criterion_cells
+                    .iter()
+                    .map(|cell| cell.surface_id.clone())
+                    .collect::<Vec<_>>(),
+            );
+            criterion.tests = unique_strings(
+                criterion_cells
+                    .iter()
+                    .flat_map(|cell| cell.test_refs.iter().cloned())
+                    .collect::<Vec<_>>(),
+            );
+            criterion.artifact_refs = unique_strings(
+                criterion_cells
+                    .iter()
+                    .flat_map(|cell| cell.artifact_refs.iter().cloned())
+                    .collect::<Vec<_>>(),
+            );
+            criterion.agentic_context = unique_strings(
+                criterion_cells
+                    .iter()
+                    .flat_map(|cell| cell.agentic_refs.iter().cloned())
+                    .collect::<Vec<_>>(),
+            );
+            criterion.finding_refs = unique_strings(
+                criterion_cells
+                    .iter()
+                    .flat_map(|cell| cell.finding_refs.iter().cloned())
+                    .collect::<Vec<_>>(),
+            );
+            criterion.confidence = criterion_cells
+                .iter()
+                .map(|cell| cell.confidence.clone())
+                .next()
+                .unwrap_or_else(|| criterion.confidence.clone());
+            criterion.why = criterion_matrix_why(&criterion, &criterion_cells);
+            criterion
+        })
+        .collect()
+}
+
+fn aggregate_cell_status(cells: &[&CriterionCoverageCell]) -> String {
+    if cells.iter().any(|cell| cell.status == "fail") {
+        "fail".to_string()
+    } else if cells.iter().any(|cell| cell.status == "needs_review") {
+        "needs_review".to_string()
+    } else if cells.iter().any(|cell| cell.status == "not_tested") {
+        "not_tested".to_string()
+    } else if cells.iter().any(|cell| cell.status == "risk_accepted") {
+        "risk_accepted".to_string()
+    } else if cells.iter().any(|cell| cell.status == "waived") {
+        "waived".to_string()
+    } else if cells.iter().all(|cell| cell.status == "not_applicable") {
+        "not_applicable".to_string()
+    } else {
+        "pass".to_string()
+    }
+}
+
+fn criterion_matrix_why(
+    criterion: &ComplianceObligation,
+    cells: &[&CriterionCoverageCell],
+) -> String {
+    let status = criterion.status.as_str();
+    let total = cells.len();
+    let with_evidence = cells
+        .iter()
+        .filter(|cell| {
+            !cell.evidence_refs.is_empty()
+                || !cell.agentic_refs.is_empty()
+                || !cell.waiver_refs.is_empty()
+        })
+        .count();
+    match status {
+        "fail" => format!(
+            "{} has failing evidence in at least one surface/state cell.",
+            criterion.title
+        ),
+        "needs_review" => format!(
+            "{} has {} of {} cell(s) requiring human or agentic review.",
+            criterion.title,
+            cells
+                .iter()
+                .filter(|cell| cell.status == "needs_review")
+                .count(),
+            total
+        ),
+        "not_tested" => format!(
+            "{} has no completed evidence in {} of {} cell(s).",
+            criterion.title,
+            cells
+                .iter()
+                .filter(|cell| cell.status == "not_tested")
+                .count(),
+            total
+        ),
+        "pass" => format!(
+            "{} has supporting evidence in {} of {} surface/state cell(s).",
+            criterion.title, with_evidence, total
+        ),
+        _ => format!(
+            "{} has aggregate status {} across {} surface/state cell(s).",
+            criterion.title, status, total
+        ),
+    }
+}
+
+fn criterion_coverage_cell(
+    map: &ProductMapPacket,
+    packet: &EvidencePacket,
+    surface: &ProductSurface,
+    state_id: &str,
+    criterion: &serde_json::Value,
+) -> Option<CriterionCoverageCell> {
+    let criterion_id = criterion["obligation"].as_str()?;
+    let method = criterion["method"].as_str().unwrap_or("human_review");
+    let verdicts = packet
+        .verdicts
+        .iter()
+        .filter(|verdict| {
+            verdict.obligation == criterion_id && verdict_applies_to_state(verdict, state_id)
+        })
+        .collect::<Vec<_>>();
+    let findings = packet
+        .findings
+        .iter()
+        .filter(|finding| {
+            finding.standard_obligation == criterion_id && finding.affected_state == state_id
+        })
+        .collect::<Vec<_>>();
+    let deterministic_support = if method == "axe" {
+        let deterministic_support_id = deterministic_pass_obligation(&map.policy_profile);
+        packet.verdicts.iter().find(|verdict| {
+            verdict.obligation == deterministic_support_id
+                && verdict.status == "pass"
+                && verdict_applies_to_state(verdict, state_id)
+        })
+    } else {
+        None
+    };
+    let waiver_refs = waiver_refs_for_cell(packet, &surface.id, criterion_id);
+    let waiver_status = waiver_status_for_cell(packet, &surface.id, criterion_id);
+    let status = criterion_cell_status(
+        method,
+        &verdicts,
+        &findings,
+        deterministic_support,
+        waiver_status.as_deref(),
+    );
+    let finding_refs = findings
+        .iter()
+        .map(|finding| finding.id.clone())
+        .collect::<Vec<_>>();
+    let mut artifact_refs = obligation_artifact_refs(packet, &verdicts, &findings);
+    if artifact_refs.is_empty() && deterministic_support.is_some() {
+        artifact_refs = state_artifact_refs(packet, state_id);
+    }
+    let test_refs = unique_strings(
+        verdicts
+            .iter()
+            .map(|verdict| verdict.source.clone())
+            .chain(findings.iter().map(|finding| finding.source.clone()))
+            .chain(deterministic_support.map(|verdict| verdict.source.clone())),
+    );
+    let evidence_refs = unique_strings(
+        finding_refs
+            .iter()
+            .cloned()
+            .chain(artifact_refs.iter().cloned())
+            .chain(test_refs.iter().cloned()),
+    );
+    let agentic_refs = obligation_agentic_context(map, packet, &findings);
+    let confidence = if waiver_status.is_some() {
+        "human_attested".to_string()
+    } else {
+        verdicts
+            .iter()
+            .map(|verdict| verdict.confidence.clone())
+            .chain(findings.iter().map(|finding| finding.confidence.clone()))
+            .chain(deterministic_support.map(|verdict| verdict.confidence.clone()))
+            .next()
+            .unwrap_or_else(|| default_criterion_confidence(method).to_string())
+    };
+
+    Some(CriterionCoverageCell {
+        id: format!(
+            "{}|{}|{}|{}",
+            criterion_id, surface.id, state_id, map.policy_profile
+        ),
+        criterion_id: criterion_id.to_string(),
+        surface_id: surface.id.clone(),
+        state_id: state_id.to_string(),
+        policy_profile: map.policy_profile.clone(),
+        status: status.clone(),
+        applicability: if status == "not_applicable" {
+            "not_applicable".to_string()
+        } else {
+            "applicable".to_string()
+        },
+        method: method.to_string(),
+        confidence,
+        evidence_refs,
+        agentic_refs,
+        waiver_refs,
+        finding_refs,
+        artifact_refs,
+        test_refs,
+        replay_command: Some(packet.replay.command.clone()),
+        residual_review_need: residual_review_need(method, &status),
+    })
+}
+
+fn criterion_cell_status(
+    method: &str,
+    verdicts: &[&Verdict],
+    findings: &[&Finding],
+    deterministic_support: Option<&Verdict>,
+    waiver_status: Option<&str>,
+) -> String {
+    if waiver_status == Some("risk_accepted") {
+        "risk_accepted".to_string()
+    } else if waiver_status == Some("waived") {
+        "waived".to_string()
+    } else if findings.iter().any(|finding| finding.status == "fail")
+        || verdicts.iter().any(|verdict| verdict.status == "fail")
+    {
+        "fail".to_string()
+    } else if verdicts
+        .iter()
+        .any(|verdict| verdict.status == "not_applicable")
+    {
+        "not_applicable".to_string()
+    } else if verdicts.iter().any(|verdict| verdict.status == "pass")
+        || method == "axe" && deterministic_support.is_some()
+    {
+        "pass".to_string()
+    } else if verdicts
+        .iter()
+        .any(|verdict| verdict.status == "needs_review")
+        || method == "human_review"
+    {
+        "needs_review".to_string()
+    } else {
+        "not_tested".to_string()
+    }
+}
+
+fn default_criterion_confidence(method: &str) -> &'static str {
+    match method {
+        "axe" => "not_observed",
+        "scripted" => "script_observed",
+        _ => "requires_human_or_agent_review",
+    }
+}
+
+fn residual_review_need(method: &str, status: &str) -> String {
+    match status {
+        "pass" if method == "axe" => {
+            "Deterministic evidence is present; sample with human review if policy requires."
+                .to_string()
+        }
+        "pass" => "Evidence is present; retain replay proof for review.".to_string(),
+        "fail" => "Remediate, rerun, and sign off with updated evidence.".to_string(),
+        "waived" | "risk_accepted" => {
+            "Review waiver provenance and expiry before release reliance.".to_string()
+        }
+        "not_applicable" => "Confirm applicability rationale with the product owner.".to_string(),
+        "needs_review" => {
+            "Human or agentic review required before making a compliance claim.".to_string()
+        }
+        _ => "No evidence in this packet for this criterion, surface, and state.".to_string(),
+    }
+}
+
+fn verdict_applies_to_state(verdict: &Verdict, state_id: &str) -> bool {
+    verdict.affected_states.is_empty()
+        || verdict
+            .affected_states
+            .iter()
+            .any(|affected| affected == state_id)
+}
+
+fn surface_state_ids(surface: &ProductSurface, packet: &EvidencePacket) -> Vec<String> {
+    let mut states = surface
+        .evidence_refs
+        .iter()
+        .filter(|state| !state.trim().is_empty())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for state in &packet.coverage.state_metadata {
+        if surface.routes.contains(&state.route) || surface.id == state.id {
+            states.insert(state.id.clone());
+        }
+    }
+    if states.is_empty() && !surface.id.trim().is_empty() {
+        states.insert(surface.id.clone());
+    }
+    if states.is_empty() {
+        states.extend(packet.coverage.states_captured.iter().cloned());
+    }
+    states.into_iter().collect()
+}
+
+fn state_artifact_refs(packet: &EvidencePacket, state_id: &str) -> Vec<String> {
+    packet
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.related_flow_state.as_deref() == Some(state_id))
+        .map(|artifact| artifact.id.clone())
+        .collect()
+}
+
+fn waiver_refs_for_cell(
+    packet: &EvidencePacket,
+    surface_id: &str,
+    criterion_id: &str,
+) -> Vec<String> {
+    matching_cell_waivers(packet, surface_id, criterion_id)
+        .into_iter()
+        .filter_map(|waiver| waiver["id"].as_str().map(ToString::to_string))
+        .collect()
+}
+
+fn waiver_status_for_cell(
+    packet: &EvidencePacket,
+    surface_id: &str,
+    criterion_id: &str,
+) -> Option<String> {
+    let statuses = matching_cell_waivers(packet, surface_id, criterion_id)
+        .into_iter()
+        .filter_map(|waiver| waiver["status"].as_str())
+        .collect::<Vec<_>>();
+    if statuses.contains(&"risk_accepted") {
+        Some("risk_accepted".to_string())
+    } else if statuses.contains(&"waived") {
+        Some("waived".to_string())
+    } else {
+        None
+    }
+}
+
+fn matching_cell_waivers<'a>(
+    packet: &'a EvidencePacket,
+    surface_id: &str,
+    criterion_id: &str,
+) -> Vec<&'a serde_json::Value> {
+    packet
+        .waivers
+        .iter()
+        .filter(|waiver| waiver["surface"].as_str() == Some(surface_id))
+        .filter(|waiver| {
+            let standard = waiver["standard_obligation"]
+                .as_str()
+                .or_else(|| waiver["obligation"].as_str())
+                .or_else(|| waiver["criterion_id"].as_str());
+            standard.is_none() || standard == Some(criterion_id)
+        })
+        .collect()
+}
+
+fn validate_criterion_coverage_cells(
+    report: &serde_json::Value,
+) -> std::result::Result<(), String> {
+    let Some(cells) = report["criterion_coverage"].as_array() else {
+        return Err("criterion_coverage must be an array".to_string());
+    };
+    let mut cell_keys = BTreeSet::new();
+    for cell in cells {
+        for field in [
+            "criterion_id",
+            "surface_id",
+            "state_id",
+            "policy_profile",
+            "status",
+            "applicability",
+            "method",
+            "confidence",
+            "residual_review_need",
+        ] {
+            if cell[field]
+                .as_str()
+                .is_none_or(|value| value.trim().is_empty())
+            {
+                return Err(format!("criterion coverage cell missing {field}"));
+            }
+        }
+        for field in [
+            "evidence_refs",
+            "agentic_refs",
+            "waiver_refs",
+            "finding_refs",
+            "artifact_refs",
+            "test_refs",
+        ] {
+            if !cell[field].is_array() {
+                return Err(format!("criterion coverage cell missing {field}"));
+            }
+        }
+        let status = cell["status"].as_str().unwrap_or_default();
+        if matches!(status, "pass" | "fail" | "waived" | "risk_accepted")
+            && !cell_has_provenance(cell)
+        {
+            return Err(format!(
+                "terminal criterion coverage cell lacks provenance: {}",
+                cell["criterion_id"].as_str().unwrap_or("unknown")
+            ));
+        }
+        let key = coverage_cell_key(cell)?;
+        if !cell_keys.insert(key.clone()) {
+            return Err(format!("duplicate criterion coverage cell: {key}"));
+        }
+    }
+    validate_criterion_coverage_completeness(report, &cell_keys)?;
+    Ok(())
+}
+
+fn coverage_cell_key(cell: &serde_json::Value) -> std::result::Result<String, String> {
+    Ok(format!(
+        "{}|{}|{}|{}",
+        cell["criterion_id"]
+            .as_str()
+            .ok_or_else(|| "criterion coverage cell missing criterion_id".to_string())?,
+        cell["surface_id"]
+            .as_str()
+            .ok_or_else(|| "criterion coverage cell missing surface_id".to_string())?,
+        cell["state_id"]
+            .as_str()
+            .ok_or_else(|| "criterion coverage cell missing state_id".to_string())?,
+        cell["policy_profile"]
+            .as_str()
+            .ok_or_else(|| "criterion coverage cell missing policy_profile".to_string())?
+    ))
+}
+
+fn validate_criterion_coverage_completeness(
+    report: &serde_json::Value,
+    cell_keys: &BTreeSet<String>,
+) -> std::result::Result<(), String> {
+    let Some(criteria) = report["criteria"].as_array() else {
+        return Ok(());
+    };
+    let Some(surfaces) = report["surfaces"].as_array() else {
+        return Ok(());
+    };
+    let criterion_ids = criteria
+        .iter()
+        .filter_map(|criterion| criterion["id"].as_str())
+        .collect::<Vec<_>>();
+    for surface in surfaces {
+        let Some(surface_id) = surface["surface_id"].as_str() else {
+            continue;
+        };
+        let states = surface["states"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|state| state.as_str())
+            .collect::<Vec<_>>();
+        for criterion_id in &criterion_ids {
+            for state_id in &states {
+                let key = format!("{criterion_id}|{surface_id}|{state_id}|wcag22-aa");
+                if !cell_keys.contains(&key) {
+                    return Err(format!("missing criterion coverage cell: {key}"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cell_has_provenance(cell: &serde_json::Value) -> bool {
+    [
+        "evidence_refs",
+        "agentic_refs",
+        "waiver_refs",
+        "finding_refs",
+        "artifact_refs",
+        "test_refs",
+    ]
+    .iter()
+    .any(|field| {
+        cell[*field]
+            .as_array()
+            .is_some_and(|values| !values.is_empty())
+    })
+}
+
 fn compliance_summary(
     packet: &EvidencePacket,
-    obligations: &[ComplianceObligation],
+    criteria: &[ComplianceObligation],
+    supporting_check_count: usize,
 ) -> ComplianceSummary {
-    let pass = obligations
+    let pass = criteria
         .iter()
         .filter(|obligation| obligation.status == "pass")
         .count();
-    let fail = obligations
+    let fail = criteria
         .iter()
         .filter(|obligation| obligation.status == "fail")
         .count();
-    let needs_review = obligations
+    let needs_review = criteria
         .iter()
         .filter(|obligation| obligation.status == "needs_review")
         .count();
-    let not_tested = obligations
+    let not_tested = criteria
         .iter()
         .filter(|obligation| obligation.status == "not_tested")
         .count();
-    let not_applicable = obligations
+    let not_applicable = criteria
         .iter()
         .filter(|obligation| obligation.status == "not_applicable")
+        .count();
+    let waived = criteria
+        .iter()
+        .filter(|obligation| obligation.status == "waived")
+        .count();
+    let risk_accepted = criteria
+        .iter()
+        .filter(|obligation| obligation.status == "risk_accepted")
         .count();
     let status = if packet.summary.status == "error" {
         "error"
     } else if fail > 0 {
         "fail"
-    } else if needs_review > 0 || not_tested > 0 {
+    } else if needs_review > 0 || not_tested > 0 || waived > 0 || risk_accepted > 0 {
         "needs_review"
     } else {
         "pass"
     };
     ComplianceSummary {
         status: status.to_string(),
-        total_obligations: obligations.len(),
+        total_obligations: criteria.len(),
         pass,
         fail,
         needs_review,
         not_tested,
         not_applicable,
+        waived,
+        risk_accepted,
+        total_success_criteria: criteria.len(),
+        total_supporting_checks: supporting_check_count,
         evidence_packet_status: packet.summary.status.clone(),
     }
 }
@@ -2935,13 +3593,25 @@ fn compliance_summary(
 fn compliance_surface_report(
     surface: &ProductSurface,
     packet: &EvidencePacket,
-    obligations: &[ComplianceObligation],
+    criteria: &[ComplianceObligation],
+    cells: &[CriterionCoverageCell],
 ) -> ComplianceSurfaceReport {
-    let obligation_ids = obligations
+    let criterion_ids = criteria
         .iter()
         .filter(|obligation| obligation.surfaces.contains(&surface.id))
         .map(|obligation| obligation.id.clone())
         .collect::<Vec<_>>();
+    let cell_ids = cells
+        .iter()
+        .filter(|cell| cell.surface_id == surface.id)
+        .map(|cell| cell.id.clone())
+        .collect::<Vec<_>>();
+    let state_ids = unique_strings(
+        cells
+            .iter()
+            .filter(|cell| cell.surface_id == surface.id)
+            .map(|cell| cell.state_id.clone()),
+    );
     let finding_refs = packet
         .findings
         .iter()
@@ -2951,16 +3621,21 @@ fn compliance_surface_report(
         })
         .map(|finding| finding.id.clone())
         .collect::<Vec<_>>();
-    let status = if obligations
+    let status = if cells
         .iter()
-        .filter(|obligation| obligation.surfaces.contains(&surface.id))
-        .any(|obligation| obligation.status == "fail")
+        .filter(|cell| cell.surface_id == surface.id)
+        .any(|cell| cell.status == "fail")
     {
         "fail"
-    } else if obligations
+    } else if cells
         .iter()
-        .filter(|obligation| obligation.surfaces.contains(&surface.id))
-        .any(|obligation| obligation.status == "needs_review" || obligation.status == "not_tested")
+        .filter(|cell| cell.surface_id == surface.id)
+        .any(|cell| {
+            matches!(
+                cell.status.as_str(),
+                "needs_review" | "not_tested" | "waived" | "risk_accepted"
+            )
+        })
     {
         "needs_review"
     } else {
@@ -2970,8 +3645,10 @@ fn compliance_surface_report(
         surface_id: surface.id.clone(),
         title: surface.title.clone(),
         routes: surface.routes.clone(),
+        states: state_ids,
         status: status.to_string(),
-        obligations: obligation_ids,
+        criteria: criterion_ids,
+        cells: cell_ids,
         finding_refs,
     }
 }
@@ -2988,8 +3665,8 @@ fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
 }
 
 fn render_compliance_report(report: &ComplianceReportPacket) -> String {
-    let obligations = report
-        .obligations
+    let criteria = report
+        .criteria
         .iter()
         .map(|obligation| {
             format!(
@@ -3003,6 +3680,51 @@ fn render_compliance_report(report: &ComplianceReportPacket) -> String {
                 artifacts = escape_html(&obligation.artifact_refs.join(", ")),
                 agentic = escape_html(&obligation.agentic_context.join(", ")),
                 human = escape_html(&obligation.human_review)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let cells = report
+        .criterion_coverage
+        .iter()
+        .map(|cell| {
+            format!(
+                "<tr class=\"status-{status}\"><td><code>{criterion}</code><br>Surface <code>{surface}</code><br>State <code>{state}</code></td><td>{status}</td><td>{applicability}</td><td>{method}</td><td>{confidence}</td><td><details><summary>criterion -> surface -> state -> finding -> artifact -> replay command</summary><p>Evidence refs: <code>{evidence}</code></p><p>Findings: <code>{findings}</code></p><p>Artifacts: <code>{artifacts}</code></p><p>Tests: <code>{tests}</code></p><p>Agentic refs: <code>{agentic}</code></p><p>Waivers: <code>{waivers}</code></p><p>Replay command: <code>{replay}</code></p><p>Residual review: {residual}</p></details></td></tr>",
+                status = escape_html(&cell.status),
+                criterion = escape_html(&cell.criterion_id),
+                surface = escape_html(&cell.surface_id),
+                state = escape_html(&cell.state_id),
+                applicability = escape_html(&cell.applicability),
+                method = escape_html(&cell.method),
+                confidence = escape_html(&cell.confidence),
+                evidence = escape_html(&cell.evidence_refs.join(", ")),
+                findings = escape_html(&cell.finding_refs.join(", ")),
+                artifacts = escape_html(&cell.artifact_refs.join(", ")),
+                tests = escape_html(&cell.test_refs.join(", ")),
+                agentic = escape_html(&cell.agentic_refs.join(", ")),
+                waivers = escape_html(&cell.waiver_refs.join(", ")),
+                replay = escape_html(cell.replay_command.as_deref().unwrap_or("")),
+                residual = escape_html(&cell.residual_review_need)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let supporting_checks = report
+        .supporting_checks
+        .iter()
+        .map(|check| {
+            format!(
+                "<tr class=\"status-{status}\"><td><code>{id}</code><br>{title}</td><td>{status}</td><td>{why}<details><summary>Related Criteria And Evidence</summary><p>Related criteria: <code>{criteria}</code></p><p>Surfaces: <code>{surfaces}</code></p><p>Tests: <code>{tests}</code></p><p>Artifacts: <code>{artifacts}</code></p><p>Agentic context: <code>{agentic}</code></p><p>Human review: {human}</p></details></td></tr>",
+                status = escape_html(&check.status),
+                id = escape_html(&check.id),
+                title = escape_html(&check.title),
+                why = escape_html(&check.why),
+                criteria = escape_html(&check.related_criteria.join(", ")),
+                surfaces = escape_html(&check.surfaces.join(", ")),
+                tests = escape_html(&check.tests.join(", ")),
+                artifacts = escape_html(&check.artifact_refs.join(", ")),
+                agentic = escape_html(&check.agentic_context.join(", ")),
+                human = escape_html(&check.human_review)
             )
         })
         .collect::<Vec<_>>()
@@ -3040,7 +3762,7 @@ fn render_compliance_report(report: &ComplianceReportPacket) -> String {
     th {{ color: #58616c; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }}
     code {{ background: #edf1f6; padding: 0.08em 0.28em; border-radius: 4px; }}
     details {{ margin-top: 8px; }}
-    .summary {{ display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; background: #d7dde5; border: 1px solid #d7dde5; margin-top: 22px; }}
+    .summary {{ display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 1px; background: #d7dde5; border: 1px solid #d7dde5; margin-top: 22px; }}
     .summary div {{ background: #fff; padding: 14px; }}
     .label {{ color: #58616c; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }}
     .value {{ font-size: 24px; font-weight: 700; margin: 0; }}
@@ -3061,6 +3783,8 @@ fn render_compliance_report(report: &ComplianceReportPacket) -> String {
       <div><p class="label">Fail</p><p class="value">{fail}</p></div>
       <div><p class="label">Review</p><p class="value">{review}</p></div>
       <div><p class="label">Not Tested</p><p class="value">{not_tested}</p></div>
+      <div><p class="label">Waived</p><p class="value">{waived}</p></div>
+      <div><p class="label">Risk</p><p class="value">{risk_accepted}</p></div>
       <div><p class="label">Total</p><p class="value">{total}</p></div>
     </div>
     <section>
@@ -3068,10 +3792,24 @@ fn render_compliance_report(report: &ComplianceReportPacket) -> String {
       <ul>{surfaces}</ul>
     </section>
     <section>
-      <h2>WCAG 2.2 A/AA Obligations</h2>
+      <h2>WCAG 2.2 A/AA Success Criteria</h2>
       <table>
         <thead><tr><th>Requirement</th><th>Status</th><th>Why And Evidence</th></tr></thead>
-        <tbody>{obligations}</tbody>
+        <tbody>{criteria}</tbody>
+      </table>
+    </section>
+    <section>
+      <h2>Criterion Coverage Matrix</h2>
+      <table>
+        <thead><tr><th>Criterion / Surface / State</th><th>Status</th><th>Applicability</th><th>Method</th><th>Confidence</th><th>Drilldown</th></tr></thead>
+        <tbody>{cells}</tbody>
+      </table>
+    </section>
+    <section>
+      <h2>Supporting Checks</h2>
+      <table>
+        <thead><tr><th>Check</th><th>Status</th><th>Why And Evidence</th></tr></thead>
+        <tbody>{supporting_checks}</tbody>
       </table>
     </section>
   </main>
@@ -3086,28 +3824,35 @@ fn render_compliance_report(report: &ComplianceReportPacket) -> String {
         fail = report.summary.fail,
         review = report.summary.needs_review,
         not_tested = report.summary.not_tested,
+        waived = report.summary.waived,
+        risk_accepted = report.summary.risk_accepted,
         total = report.summary.total_obligations,
         surfaces = surfaces,
-        obligations = obligations
+        criteria = criteria,
+        cells = cells,
+        supporting_checks = supporting_checks
     )
 }
 
 fn render_compliance_summary(report: &ComplianceReportPacket) -> String {
     let failing = report
-        .obligations
+        .criteria
         .iter()
         .filter(|obligation| obligation.status == "fail")
         .map(|obligation| format!("- {}: {}", obligation.id, obligation.why))
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "# Allie WCAG Evidence Summary\n\nStatus: `{}`\n\nPass: {}. Fail: {}. Needs review: {}. Not tested: {}. Total obligations: {}.\n\nSource map: `{}`\nSource packet: `{}`\n\nThis report is evidence visibility for accessibility engineering review, not a legal compliance guarantee.\n\n## Failing Obligations\n\n{}\n",
+        "# Allie WCAG Evidence Summary\n\nStatus: `{}`\n\nPass: {}. Fail: {}. Needs review: {}. Not tested: {}. Waived: {}. Risk accepted: {}. Total WCAG success criteria: {}. Supporting checks: {}.\n\nSource map: `{}`\nSource packet: `{}`\n\nThis report is evidence visibility for accessibility engineering review, not a legal compliance guarantee.\n\n## Failing Criteria\n\n{}\n",
         report.summary.status,
         report.summary.pass,
         report.summary.fail,
         report.summary.needs_review,
         report.summary.not_tested,
-        report.summary.total_obligations,
+        report.summary.waived,
+        report.summary.risk_accepted,
+        report.summary.total_success_criteria,
+        report.summary.total_supporting_checks,
         report.source_map,
         report.source_packet,
         if failing.is_empty() {
@@ -4531,6 +5276,9 @@ struct ComplianceReportPacket {
     source_packet: String,
     app_name: String,
     summary: ComplianceSummary,
+    criteria: Vec<ComplianceObligation>,
+    criterion_coverage: Vec<CriterionCoverageCell>,
+    supporting_checks: Vec<ComplianceSupportingCheck>,
     obligations: Vec<ComplianceObligation>,
     surfaces: Vec<ComplianceSurfaceReport>,
 }
@@ -4544,6 +5292,10 @@ struct ComplianceSummary {
     needs_review: usize,
     not_tested: usize,
     not_applicable: usize,
+    waived: usize,
+    risk_accepted: usize,
+    total_success_criteria: usize,
+    total_supporting_checks: usize,
     evidence_packet_status: String,
 }
 
@@ -4565,12 +5317,52 @@ struct ComplianceObligation {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+struct CriterionCoverageCell {
+    id: String,
+    criterion_id: String,
+    surface_id: String,
+    state_id: String,
+    policy_profile: String,
+    status: String,
+    applicability: String,
+    method: String,
+    confidence: String,
+    evidence_refs: Vec<String>,
+    agentic_refs: Vec<String>,
+    waiver_refs: Vec<String>,
+    finding_refs: Vec<String>,
+    artifact_refs: Vec<String>,
+    test_refs: Vec<String>,
+    replay_command: Option<String>,
+    residual_review_need: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ComplianceSupportingCheck {
+    id: String,
+    title: String,
+    status: String,
+    why: String,
+    related_criteria: Vec<String>,
+    surfaces: Vec<String>,
+    tests: Vec<String>,
+    artifact_refs: Vec<String>,
+    agentic_context: Vec<String>,
+    human_review: String,
+    confidence: String,
+    evidence_class: String,
+    finding_refs: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct ComplianceSurfaceReport {
     surface_id: String,
     title: String,
     routes: Vec<String>,
+    states: Vec<String>,
     status: String,
-    obligations: Vec<String>,
+    criteria: Vec<String>,
+    cells: Vec<String>,
     finding_refs: Vec<String>,
 }
 
@@ -5469,7 +6261,23 @@ fn criterion_title(obligation: &str) -> String {
             let handle = criterion["handle"].as_str()?;
             Some(format!("{num} {handle}"))
         })
+        .or_else(|| profile_obligation_title(obligation))
         .unwrap_or_else(|| obligation.to_string())
+}
+
+fn profile_obligation_title(obligation: &str) -> Option<String> {
+    let profile = wcag22_profile();
+    if profile["deterministic_pass_obligation"]["obligation"].as_str() == Some(obligation) {
+        return profile["deterministic_pass_obligation"]["title"]
+            .as_str()
+            .map(ToString::to_string);
+    }
+    ["scripted_obligations", "human_review_obligations"]
+        .into_iter()
+        .filter_map(|key| profile.get(key).and_then(|value| value.as_array()))
+        .flat_map(|items| items.iter())
+        .find(|item| item["obligation"].as_str() == Some(obligation))
+        .and_then(|item| item["title"].as_str().map(ToString::to_string))
 }
 
 fn verdicts_from_findings(
@@ -6609,7 +7417,14 @@ mod tests {
         .unwrap();
         assert_eq!(report["schema"], COMPLIANCE_REPORT_SCHEMA);
         assert_eq!(report["summary"]["status"], "fail");
-        let contrast = report["obligations"]
+        assert_eq!(report["summary"]["total_obligations"], 55);
+        assert_eq!(report["summary"]["total_success_criteria"], 55);
+        assert_eq!(
+            report["criteria"].as_array().unwrap().len(),
+            55,
+            "wcag22-aa report denominator must be the 55 WCAG success criteria"
+        );
+        let contrast = report["criteria"]
             .as_array()
             .unwrap()
             .iter()
@@ -6623,9 +7438,300 @@ mod tests {
                 .iter()
                 .any(|artifact| artifact == "screenshot-login-form")
         );
+        assert!(
+            report["criterion_coverage"].as_array().unwrap().iter().any(
+                |cell| cell["criterion_id"] == "wcag22-aa:1.4.3-contrast-minimum"
+                    && cell["surface_id"] == "login-form"
+                    && cell["state_id"] == "login-form"
+                    && cell["status"] == "fail"
+                    && cell["method"] == "axe"
+                    && cell["evidence_refs"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|reference| reference == "login-form-axe-color-contrast-1")
+                    && !cell["residual_review_need"].as_str().unwrap().is_empty()
+            )
+        );
         let html = fs::read_to_string(report_dir.join("compliance-report.html")).unwrap();
-        assert!(html.contains("WCAG 2.2 A/AA Obligations"));
+        assert!(html.contains("WCAG 2.2 A/AA Success Criteria"));
+        assert!(html.contains("criterion -> surface -> state -> finding -> artifact -> replay"));
         assert!(html.contains("not a legal compliance guarantee"));
+    }
+
+    #[test]
+    fn vanity_fixture_report_keeps_support_checks_out_of_wcag_denominator() {
+        let temp = tempdir().unwrap();
+        let report_dir = temp.path().join("report");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_cli_with_io(
+            vec![
+                "report".to_string(),
+                "--map".to_string(),
+                "fixtures/vanity-dogfood-legacy-61/product-map.json".to_string(),
+                "--packet".to_string(),
+                "fixtures/vanity-dogfood-legacy-61/evidence.json".to_string(),
+                "--out".to_string(),
+                report_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let report: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(report_dir.join("compliance-report.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report["summary"]["total_obligations"], 55);
+        assert_eq!(report["summary"]["total_success_criteria"], 55);
+        assert_eq!(report["summary"]["total_supporting_checks"], 6);
+        assert_eq!(report["criteria"].as_array().unwrap().len(), 55);
+        assert_eq!(report["criterion_coverage"].as_array().unwrap().len(), 55);
+        let criterion_ids = report["criteria"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|criterion| criterion["id"].as_str().unwrap().to_string())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(criterion_ids.len(), 55);
+        for support in [
+            "wcag22-aa:deterministic-axe-rules",
+            "wcag22-aa:2.1.1-keyboard-traversal",
+            "wcag22-aa:1.4.10-zoom-reflow",
+            "wcag22-aa:2.2.2-reduced-motion",
+            "wcag22-aa:human-content-meaning",
+            "wcag22-aa:human-assistive-technology-review",
+        ] {
+            assert!(
+                !criterion_ids.contains(support),
+                "{support} must not be counted as a WCAG success criterion"
+            );
+            assert!(
+                report["supporting_checks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|check| check["id"] == support)
+            );
+        }
+        validate_criterion_coverage_cells(&report).unwrap();
+        let html = fs::read_to_string(report_dir.join("compliance-report.html")).unwrap();
+        assert!(html.contains("Supporting Checks"));
+        assert!(html.contains("wcag22-aa:deterministic-axe-rules"));
+        assert!(html.contains("replay command"));
+        assert!(html.contains("not a legal compliance guarantee"));
+    }
+
+    #[test]
+    fn criterion_coverage_validation_rejects_terminal_status_without_provenance() {
+        let mut report = serde_json::json!({
+            "criterion_coverage": [
+                {
+                    "criterion_id": "wcag22-aa:1.1.1-non-text-content",
+                    "surface_id": "home",
+                    "state_id": "home",
+                    "policy_profile": "wcag22-aa",
+                    "status": "pass",
+                    "applicability": "applicable",
+                    "method": "axe",
+                    "confidence": "machine_proven",
+                    "evidence_refs": [],
+                    "agentic_refs": [],
+                    "waiver_refs": [],
+                    "finding_refs": [],
+                    "artifact_refs": [],
+                    "test_refs": [],
+                    "replay_command": null,
+                    "residual_review_need": "No linked evidence was provided."
+                }
+            ]
+        });
+
+        let error = validate_criterion_coverage_cells(&report).unwrap_err();
+        assert!(error.contains("terminal criterion coverage cell lacks provenance"));
+
+        report["criterion_coverage"][0]["replay_command"] =
+            serde_json::json!("cargo run --locked -- run --manifest fixture.yml");
+        let error = validate_criterion_coverage_cells(&report).unwrap_err();
+        assert!(error.contains("terminal criterion coverage cell lacks provenance"));
+
+        report["criterion_coverage"][0]["evidence_refs"] = serde_json::json!(["axe-home"]);
+        validate_criterion_coverage_cells(&report).unwrap();
+    }
+
+    #[test]
+    fn coverage_cells_do_not_overstate_unrelated_deterministic_support() {
+        let report = build_vanity_fixture_report();
+        let human_cell = report
+            .criterion_coverage
+            .iter()
+            .find(|cell| {
+                cell.criterion_id == "wcag22-aa:1.2.1-audio-only-and-video-only-prerecorded"
+            })
+            .unwrap();
+        let scripted_cell = report
+            .criterion_coverage
+            .iter()
+            .find(|cell| cell.criterion_id == "wcag22-aa:1.4.10-reflow")
+            .unwrap();
+
+        assert_eq!(human_cell.status, "needs_review");
+        assert_eq!(human_cell.confidence, "requires_human_or_agent_review");
+        assert!(human_cell.artifact_refs.is_empty());
+        assert!(human_cell.test_refs.is_empty());
+        assert!(
+            !human_cell
+                .evidence_refs
+                .iter()
+                .any(|value| value == "axe-core")
+        );
+
+        assert_eq!(scripted_cell.status, "not_tested");
+        assert_eq!(scripted_cell.confidence, "script_observed");
+        assert!(scripted_cell.artifact_refs.is_empty());
+        assert!(scripted_cell.test_refs.is_empty());
+        assert!(
+            !scripted_cell
+                .evidence_refs
+                .iter()
+                .any(|value| value == "axe-home")
+        );
+    }
+
+    #[test]
+    fn waiver_inputs_reach_coverage_cells_and_summary() {
+        let map: ProductMapPacket = read_json_file(Path::new(
+            "fixtures/vanity-dogfood-legacy-61/product-map.json",
+        ))
+        .unwrap();
+        let mut packet: EvidencePacket =
+            read_json_file(Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json")).unwrap();
+        packet.waivers = vec![
+            serde_json::json!({
+                "id": "waiver-non-text",
+                "surface": "home",
+                "criterion_id": "wcag22-aa:1.1.1-non-text-content",
+                "status": "waived",
+                "provenance": {"actor": "accessibility-lead", "reason": "fixture"},
+                "expires_at": "2026-07-20T00:00:00Z",
+                "packet_ref": "vanity-legacy-61"
+            }),
+            serde_json::json!({
+                "id": "risk-contrast",
+                "surface": "home",
+                "criterion_id": "wcag22-aa:1.4.3-contrast-minimum",
+                "status": "risk_accepted",
+                "provenance": {"actor": "accessibility-lead", "reason": "fixture"},
+                "expires_at": "2026-07-20T00:00:00Z",
+                "packet_ref": "vanity-legacy-61"
+            }),
+        ];
+
+        let report = build_compliance_report(
+            &map,
+            &packet,
+            Path::new("fixtures/vanity-dogfood-legacy-61/product-map.json"),
+            Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json"),
+        );
+        let report_value = serde_json::to_value(&report).unwrap();
+
+        validate_criterion_coverage_cells(&report_value).unwrap();
+        assert_eq!(report.summary.status, "needs_review");
+        assert_eq!(report.summary.waived, 1);
+        assert_eq!(report.summary.risk_accepted, 1);
+        assert_eq!(report.surfaces[0].status, "needs_review");
+        assert!(report.criterion_coverage.iter().any(|cell| {
+            cell.criterion_id == "wcag22-aa:1.1.1-non-text-content"
+                && cell.status == "waived"
+                && cell.waiver_refs == ["waiver-non-text"]
+        }));
+        assert!(report.criterion_coverage.iter().any(|cell| {
+            cell.criterion_id == "wcag22-aa:1.4.3-contrast-minimum"
+                && cell.status == "risk_accepted"
+                && cell.waiver_refs == ["risk-contrast"]
+        }));
+    }
+
+    #[test]
+    fn coverage_matrix_validates_all_surface_state_pairs_and_unique_keys() {
+        let mut map: ProductMapPacket = read_json_file(Path::new(
+            "fixtures/vanity-dogfood-legacy-61/product-map.json",
+        ))
+        .unwrap();
+        let mut packet: EvidencePacket =
+            read_json_file(Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json")).unwrap();
+        map.surfaces.push(ProductSurface {
+            id: "settings".to_string(),
+            title: "Vanity settings".to_string(),
+            routes: vec!["/settings".to_string()],
+            files: vec!["app/settings/page.tsx".to_string()],
+            services: vec!["web".to_string()],
+            user_stories: vec!["As a reader, I can open Vanity settings.".to_string()],
+            workflow_refs: vec!["vanity-settings-flow".to_string()],
+            evidence_refs: vec!["settings".to_string()],
+            confidence: "operator_supplied".to_string(),
+            review_status: "required".to_string(),
+            provenance: vec!["test".to_string()],
+        });
+        packet.coverage.states_captured.push("settings".to_string());
+        packet.coverage.state_metadata.push(StateMetadata {
+            id: "settings".to_string(),
+            route: "/settings".to_string(),
+            url: "http://127.0.0.1:4174/settings".to_string(),
+            title: "Vanity Settings".to_string(),
+            http_status: Some(200),
+            keyboard_focus_order: Vec::new(),
+            console_errors: Vec::new(),
+            network_errors: Vec::new(),
+            state_errors: Vec::new(),
+        });
+
+        let report = build_compliance_report(
+            &map,
+            &packet,
+            Path::new("fixtures/vanity-dogfood-legacy-61/product-map.json"),
+            Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json"),
+        );
+        let report_value = serde_json::to_value(&report).unwrap();
+
+        assert_eq!(report.criteria.len(), 55);
+        assert_eq!(report.criterion_coverage.len(), 110);
+        validate_criterion_coverage_cells(&report_value).unwrap();
+
+        let mut duplicate = report_value.clone();
+        let first_cell = duplicate["criterion_coverage"][0].clone();
+        duplicate["criterion_coverage"]
+            .as_array_mut()
+            .unwrap()
+            .push(first_cell);
+        let error = validate_criterion_coverage_cells(&duplicate).unwrap_err();
+        assert!(error.contains("duplicate criterion coverage cell"));
+
+        let mut missing = report_value;
+        missing["criterion_coverage"].as_array_mut().unwrap().pop();
+        let error = validate_criterion_coverage_cells(&missing).unwrap_err();
+        assert!(error.contains("missing criterion coverage cell"));
+    }
+
+    #[test]
+    fn compliance_summary_surfaces_waived_and_risk_accepted_counts() {
+        let packet: EvidencePacket =
+            read_json_file(Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json")).unwrap();
+        let criteria = vec![
+            sample_compliance_obligation("wcag22-aa:1.1.1-non-text-content", "waived"),
+            sample_compliance_obligation("wcag22-aa:1.4.3-contrast-minimum", "risk_accepted"),
+        ];
+
+        let summary = compliance_summary(&packet, &criteria, 0);
+
+        assert_eq!(summary.status, "needs_review");
+        assert_eq!(summary.total_obligations, 2);
+        assert_eq!(summary.waived, 1);
+        assert_eq!(summary.risk_accepted, 1);
+        assert_eq!(summary.pass, 0);
     }
 
     #[test]
@@ -7336,6 +8442,39 @@ flow:
         )
         .unwrap();
         manifest_path
+    }
+
+    fn sample_compliance_obligation(id: &str, status: &str) -> ComplianceObligation {
+        ComplianceObligation {
+            id: id.to_string(),
+            title: criterion_title(id),
+            status: status.to_string(),
+            why: "test row".to_string(),
+            surfaces: vec!["home".to_string()],
+            tests: Vec::new(),
+            artifact_refs: Vec::new(),
+            agentic_context: Vec::new(),
+            human_review: "required".to_string(),
+            confidence: "human_attested".to_string(),
+            evidence_class: "human".to_string(),
+            source_url: criterion_source_url(id),
+            finding_refs: Vec::new(),
+        }
+    }
+
+    fn build_vanity_fixture_report() -> ComplianceReportPacket {
+        let map: ProductMapPacket = read_json_file(Path::new(
+            "fixtures/vanity-dogfood-legacy-61/product-map.json",
+        ))
+        .unwrap();
+        let packet: EvidencePacket =
+            read_json_file(Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json")).unwrap();
+        build_compliance_report(
+            &map,
+            &packet,
+            Path::new("fixtures/vanity-dogfood-legacy-61/product-map.json"),
+            Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json"),
+        )
     }
 
     fn write_passing_evidence_packet(out_dir: &Path) -> PathBuf {

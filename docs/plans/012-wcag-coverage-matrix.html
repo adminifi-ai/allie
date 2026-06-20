@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en" data-ae-mode="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plan 012: WCAG Coverage Matrix</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Geist+Mono:wght@100..900&amp;display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/misty-step/aesthetic@v2.5.1/aesthetic.css">
+  <style>
+    .plan-wide .ae-bar, .plan-wide .ae-stage { width: min(92rem, 100% - 4rem); }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(24em, 0.7fr); gap: 3em; align-items: end; }
+    .grid-2, .grid-3, .grid-5 { display: grid; gap: 1px; background: var(--ae-line); }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .cell { min-width: 0; background: var(--ae-surface); padding: 1.2em 1.35em; }
+    .wash { background: var(--ae-wash); }
+    .phase { display: grid; grid-template-columns: 8em minmax(0, 1fr) minmax(15em, 0.68fr); gap: 1.3em; border-top: 1px solid var(--ae-line); padding-top: 1em; margin-top: 1em; }
+    .phase:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+    .table-wrap { overflow-x: auto; }
+    @media (max-width: 980px) {
+      .plan-wide .ae-bar, .plan-wide .ae-stage { width: min(100% - 2rem, 92rem); }
+      .hero, .grid-2, .grid-3, .grid-5, .phase { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="ae-screen plan-wide">
+  <header class="ae-bar">
+    <a class="ae-name" href="#">ALLIE / BACKLOG 012</a>
+    <p class="ae-chrome">plan opened before implementation</p>
+  </header>
+  <main class="ae-stage ae-stage-scroll">
+    <article class="ae-view">
+      <section class="hero" aria-label="Plan contract">
+        <div>
+          <p class="ae-chrome">P0 / WCAG 2.2 AA VISIBILITY</p>
+          <h1 class="ae-strong">Make the compliance report a 55-success-criterion matrix over each required surface and state.</h1>
+          <p class="ae-lede">Chosen design: keep the evidence packet compatible, then make the report the honest visibility layer. WCAG success criteria stay the denominator; Allie deterministic, scripted, agentic, and human aggregate checks move into support sections and criterion cell provenance.</p>
+        </div>
+        <aside class="ae-panel">
+          <h2 class="ae-h">QUALITY SYSTEM</h2>
+          <p><strong>Outcome:</strong> accessibility engineers can drill from a WCAG criterion to surface/state evidence without inflated counts.</p>
+          <p><strong>Standards:</strong> Rust-first, packet-first, no legal compliance claim, no provider leakage, no weakened deterministic gates.</p>
+          <p><strong>Proof:</strong> matrix unit tests, schema/provenance rejection tests, CLI smoke artifacts, fresh diff critic.</p>
+          <p class="ae-dim">Stop if report cannot distinguish WCAG criteria from support checks without breaking existing packet validation.</p>
+        </aside>
+      </section>
+
+      <section class="grid-5" aria-label="Executive contract" style="margin-top: 2em">
+        <article class="cell">
+          <h2 class="ae-h">STANDARDS</h2>
+          <p>Exactly 55 `wcag22-aa` success criteria, no duplicate criterion rows, support checks outside denominator.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">ACCEPTANCE</h2>
+          <p>Each required surface/state has a cell with status, applicability, method, confidence, evidence, agentic, waiver, and residual-review fields.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">VERIFY</h2>
+          <p>`cargo test --locked`, `npm run coverage:smoke`, then full repo gate.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">COMMUNICATE</h2>
+          <p>Report changed contract, exact artifacts, critic result, PR URL, final clean tree.</p>
+        </article>
+        <article class="cell wash">
+          <h2 class="ae-h">STOP IF</h2>
+          <p>A criterion is missing, support checks re-enter denominator, model-only findings imply pass, or provenance can be empty for terminal statuses.</p>
+        </article>
+      </section>
+
+      <section class="grid-3" aria-label="Current change proof" style="margin-top: 1px">
+        <article class="cell">
+          <h2 class="ae-h">CURRENT STATE</h2>
+          <p>`profiles/wcag22-aa.json` contains 55 success criteria plus five support obligations. `src/lib.rs` currently reports mixed `obligations[]` and summary total from that mixed list.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">CHANGE SHAPE</h2>
+          <p>Add report-native `criteria[]`, `criterion_coverage[]`, `supporting_checks[]`, and surface matrix cells. Keep raw verdicts backward-compatible.</p>
+        </article>
+        <article class="cell wash">
+          <h2 class="ae-h">PROOF SURFACE</h2>
+          <p>Generate `.allie/runs/coverage-matrix-smoke/` and `.allie/reports/coverage-matrix-smoke/`; assert JSON and HTML drilldown content.</p>
+        </article>
+      </section>
+
+      <section class="ae-panel" aria-label="Execution plan" style="margin-top: 2em">
+        <h2 class="ae-h">EXECUTION PLAN</h2>
+        <div class="phase">
+          <strong class="ae-accent">1 docs</strong>
+          <p>Document the report contract in README and evidence contract.</p>
+          <p class="ae-dim">Acceptance text becomes implementation target.</p>
+        </div>
+        <div class="phase">
+          <strong class="ae-accent">2 tests</strong>
+          <p>Add failing tests for 55 count, support separation, matrix cells, terminal-status provenance, and HTML drilldown.</p>
+          <p class="ae-dim">Run focused tests red before code.</p>
+        </div>
+        <div class="phase">
+          <strong class="ae-accent">3 code</strong>
+          <p>Build matrix from profile criteria, product-map surfaces, packet state metadata, verdicts, findings, waivers, artifacts, and replay command.</p>
+          <p class="ae-dim">Favor direct helpers over a new schema engine.</p>
+        </div>
+        <div class="phase">
+          <strong class="ae-accent">4 proof</strong>
+          <p>Add coverage smoke, run full gates, dispatch fresh critic, fix blockers, commit, push, open PR.</p>
+          <p class="ae-dim">Evidence remains in `.allie/.../coverage-matrix-smoke/`.</p>
+        </div>
+      </section>
+
+      <section class="grid-2" aria-label="Alternatives and risks" style="margin-top: 2em">
+        <article class="cell">
+          <h2 class="ae-h">ALTERNATIVES</h2>
+          <div class="table-wrap">
+            <table class="ae-table">
+              <thead><tr><th>option</th><th>tradeoff</th><th>verdict</th></tr></thead>
+              <tbody>
+                <tr><td class="ae-item">Report-layer matrix</td><td>Smallest compatible contract; does not require packet migration.</td><td>choose</td></tr>
+                <tr><td class="ae-item">Packet schema v1 migration</td><td>Cleaner long term, but expands blast radius and breaks current smokes.</td><td>defer</td></tr>
+                <tr><td class="ae-item">Full new worker checks</td><td>Useful later, but ticket is denominator and visibility first.</td><td>defer to child work</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="cell wash">
+          <h2 class="ae-h">RISKS</h2>
+          <p><strong>Mixed denominator:</strong> test known support obligations absent from `criteria[]` and summary total remains 55.</p>
+          <p><strong>Empty provenance:</strong> validation rejects pass/fail/waived/risk_accepted cells without refs.</p>
+          <p><strong>Overclaim:</strong> summary and HTML keep "evidence visibility, not legal compliance guarantee".</p>
+        </article>
+      </section>
+    </article>
+  </main>
+  <footer class="ae-bar">
+    <p class="ae-foot">Generated from `skills/shape/templates/html-plan.html`; all links and commands are repo-local.</p>
+  </footer>
+</div>
+</body>
+</html>
