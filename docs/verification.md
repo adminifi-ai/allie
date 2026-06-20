@@ -73,6 +73,14 @@ assistive-technology obligations are still marked `not_tested` or
 `npm run autonomous:smoke` proves the autonomous workbench path. It leaves:
 
 ```text
+.allie/jobs/autonomous-smoke/job.json
+.allie/jobs/autonomous-smoke/events.jsonl
+.allie/jobs/autonomous-smoke/steps/discovery/discovery.json
+.allie/jobs/autonomous-smoke/steps/map/product-map.json
+.allie/jobs/autonomous-smoke/steps/run/evidence.json
+.allie/jobs/autonomous-smoke/steps/report/compliance-report.json
+.allie/jobs/autonomous-smoke/steps/review/evidence-reviewed.json
+.allie/jobs/autonomous-smoke/steps/release/release-summary.json
 .allie/discovery/autonomous-smoke/discovery.json
 .allie/discovery/autonomous-smoke/flow-plan.json
 .allie/discovery/autonomous-smoke/generated-flow.yml
@@ -86,6 +94,19 @@ The smoke expects the generated replay to find the fixture's known deterministic
 contrast issue. That failure proves enforcement and remediation are wired:
 review still runs, remediation writes a queue, and release projection blocks on
 deterministic evidence while keeping agentic context non-authoritative.
+
+Use the job status command to inspect the durable run state:
+
+```sh
+cargo run --locked -- workbench status --job .allie/jobs/autonomous-smoke
+```
+
+The expected completed fixture job has `schema: allie.job.v0`, `status:
+blocked`, release status `blocked`, resumable state, and artifact pointers for
+map, evidence, compliance report, review, remediation, and release outputs.
+The smoke also verifies that `workbench start` refuses to reuse an existing job
+directory and that non-local advisory agent modes stay on the one-shot `map`
+path until durable session adapters exist.
 
 ## Failure Meanings
 
