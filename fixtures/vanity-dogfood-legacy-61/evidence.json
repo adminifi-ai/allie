@@ -1,0 +1,187 @@
+{
+  "schema": "allie.evidence.v0",
+  "summary": {
+    "status": "pass",
+    "exit_code": 0,
+    "deterministic_failures": 0,
+    "scripted_failures": 0,
+    "infrastructure_failures": 0,
+    "states_captured": 1,
+    "failure_class": null
+  },
+  "run": {
+    "id": "vanity-legacy-61",
+    "started_at": "2026-06-20T00:00:00Z",
+    "finished_at": "2026-06-20T00:00:01Z",
+    "allie_version": "0.1.0",
+    "git_sha": "fixture",
+    "git_branch": "fixture",
+    "ci_provider": null,
+    "actor": "fixture"
+  },
+  "target": {
+    "base_url": "http://127.0.0.1:4174",
+    "environment": "local",
+    "app_name": "Vanity",
+    "auth_profile": "local-fixture-no-auth",
+    "credential_provider": {
+      "provider": "none",
+      "env": null,
+      "required": false,
+      "status": "not_required"
+    },
+    "flow_manifest": "fixtures/vanity-dogfood-legacy-61/flow.yml"
+  },
+  "policy": {
+    "profile": "wcag22-aa",
+    "blocking_classes": ["deterministic"],
+    "worker_timeout_ms": 120000,
+    "model_provider_allowlist": [],
+    "model_status": "disabled",
+    "zdr_required": true,
+    "redaction_profile": "not_redacted_local_fixture",
+    "budget": {
+      "model_calls": 0,
+      "max_states": 1
+    }
+  },
+  "coverage": {
+    "routes_visited": ["/"],
+    "surfaces_discovered": ["Vanity"],
+    "flows_exercised": ["vanity-home-flow"],
+    "states_captured": ["home"],
+    "state_metadata": [
+      {
+        "id": "home",
+        "route": "/",
+        "url": "http://127.0.0.1:4174/",
+        "title": "Vanity",
+        "http_status": 200,
+        "keyboard_focus_order": [],
+        "console_errors": [],
+        "network_errors": [],
+        "state_errors": []
+      }
+    ],
+    "standards_obligations_evaluated": [
+      "wcag22-aa:deterministic-axe-rules",
+      "wcag22-aa:2.1.1-keyboard-traversal",
+      "wcag22-aa:1.4.10-zoom-reflow",
+      "wcag22-aa:2.2.2-reduced-motion",
+      "wcag22-aa:human-content-meaning",
+      "wcag22-aa:human-assistive-technology-review"
+    ],
+    "obligations_not_tested": [
+      "wcag22-aa:2.1.1-keyboard-traversal",
+      "wcag22-aa:1.4.10-zoom-reflow",
+      "wcag22-aa:2.2.2-reduced-motion"
+    ],
+    "obligations_requiring_human_review": [
+      "wcag22-aa:human-content-meaning",
+      "wcag22-aa:human-assistive-technology-review"
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "axe-home",
+      "type": "axe_json",
+      "path": "fixtures/vanity-dogfood-legacy-61/artifacts/axe-home.json",
+      "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "redaction_status": "not_redacted_local_fixture",
+      "retention_class": "local_ephemeral",
+      "unavailable_reason": null,
+      "related_flow_state": "home",
+      "creation_tool": "axe-core",
+      "timestamp": "2026-06-20T00:00:01Z"
+    },
+    {
+      "id": "screenshot-home",
+      "type": "screenshot",
+      "path": "fixtures/vanity-dogfood-legacy-61/artifacts/home.png",
+      "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "redaction_status": "not_redacted_local_fixture",
+      "retention_class": "local_ephemeral",
+      "unavailable_reason": null,
+      "related_flow_state": "home",
+      "creation_tool": "playwright-axe-worker",
+      "timestamp": "2026-06-20T00:00:01Z"
+    }
+  ],
+  "findings": [],
+  "verdicts": [
+    {
+      "obligation": "wcag22-aa:deterministic-axe-rules",
+      "status": "pass",
+      "confidence": "machine_proven",
+      "evidence_class": "deterministic",
+      "source": "axe-core",
+      "affected_states": ["home"],
+      "finding_refs": []
+    },
+    {
+      "obligation": "wcag22-aa:2.1.1-keyboard-traversal",
+      "status": "not_tested",
+      "confidence": "script_observed",
+      "evidence_class": "scripted",
+      "source": "allie-obligation-profile",
+      "affected_states": ["home"],
+      "finding_refs": []
+    },
+    {
+      "obligation": "wcag22-aa:1.4.10-zoom-reflow",
+      "status": "not_tested",
+      "confidence": "script_observed",
+      "evidence_class": "scripted",
+      "source": "allie-obligation-profile",
+      "affected_states": ["home"],
+      "finding_refs": []
+    },
+    {
+      "obligation": "wcag22-aa:2.2.2-reduced-motion",
+      "status": "not_tested",
+      "confidence": "script_observed",
+      "evidence_class": "scripted",
+      "source": "allie-obligation-profile",
+      "affected_states": ["home"],
+      "finding_refs": []
+    },
+    {
+      "obligation": "wcag22-aa:human-content-meaning",
+      "status": "needs_review",
+      "confidence": "requires_human_or_agent_review",
+      "evidence_class": "human",
+      "source": "allie-obligation-profile",
+      "affected_states": ["home"],
+      "finding_refs": []
+    },
+    {
+      "obligation": "wcag22-aa:human-assistive-technology-review",
+      "status": "needs_review",
+      "confidence": "requires_human_or_agent_review",
+      "evidence_class": "human",
+      "source": "allie-obligation-profile",
+      "affected_states": ["home"],
+      "finding_refs": []
+    }
+  ],
+  "waivers": [],
+  "review": [],
+  "replay": {
+    "command": "cargo run --locked -- run --manifest fixtures/vanity-dogfood-legacy-61/flow.yml --out .allie/runs/vanity",
+    "manifest_path": "fixtures/vanity-dogfood-legacy-61/flow.yml",
+    "environment_requirements": [],
+    "credential_profile": "local-fixture-no-auth",
+    "browser": {
+      "viewport": {
+        "width": 1280,
+        "height": 720
+      },
+      "color_scheme": "light",
+      "reduced_motion": "reduce",
+      "locale": "en-US",
+      "zoom": 1.0
+    },
+    "seed_data": [],
+    "known_nondeterminism": []
+  }
+}

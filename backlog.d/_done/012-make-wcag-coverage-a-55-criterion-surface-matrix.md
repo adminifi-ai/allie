@@ -1,6 +1,6 @@
 # Make WCAG coverage a 55-criterion surface matrix
 
-Priority: P0 - Status: ready - Estimate: XL
+Priority: P0 - Status: done - Estimate: XL
 
 ## Goal
 
@@ -10,17 +10,17 @@ the WCAG denominator.
 
 ## Oracle
 
-- [ ] A `wcag22-aa` report has exactly 55 WCAG success-criterion rows and a
+- [x] A `wcag22-aa` report has exactly 55 WCAG success-criterion rows and a
   separate supporting-check section.
-- [ ] Every discovered required surface/state has a criterion matrix with
+- [x] Every discovered required surface/state has a criterion matrix with
   `status`, `applicability`, `method`, `confidence`, `evidence_refs`,
   `agentic_refs`, `waiver_refs`, and `residual_review_need`.
-- [ ] The Vanity dogfood report no longer counts
+- [x] The Vanity dogfood report no longer counts
   `deterministic-axe-rules`, `*-keyboard-traversal`, `*-zoom-reflow`,
   `*-reduced-motion`, or human-review aggregates as extra WCAG standards.
-- [ ] Schema validation rejects a `pass`, `fail`, `waived`, or `risk_accepted`
+- [x] Schema validation rejects a `pass`, `fail`, `waived`, or `risk_accepted`
   criterion cell without required provenance.
-- [ ] The HTML report can drill from criterion -> surface -> state -> finding ->
+- [x] The HTML report can drill from criterion -> surface -> state -> finding ->
   artifact -> test/replay command -> agentic/human context.
 
 ## Verification System
@@ -61,3 +61,17 @@ full WCAG 2.2 A/AA success-criterion list, then appends Allie supporting and
 aggregate obligations as additional `wcag22-aa:*` verdicts. The next product
 step is honest 55-row visibility across the discovered product surface.
 
+## Delivered
+
+- Added report-native `criteria`, `criterion_coverage`, and
+  `supporting_checks`, with legacy `obligations` remaining criterion-only for
+  compatibility.
+- Added criterion/surface/state matrix validation for duplicate cells, missing
+  cells, required fields, and terminal-status provenance.
+- Added a checked-in Vanity legacy-61 fixture and `npm run coverage:smoke`,
+  which proves support checks stay out of the WCAG denominator.
+- Updated HTML and Markdown reports to show matrix drilldown, support checks,
+  waiver/risk counts, and no-legal-guarantee language.
+- Added regression tests for no unrelated axe evidence on `needs_review` and
+  `not_tested` cells, waiver/risk-accepted cells from packet waivers, and
+  multi-surface matrix completeness.

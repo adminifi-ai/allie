@@ -126,6 +126,30 @@ Confidence:
 - `agent_inferred`
 - `human_attested`
 
+## Compliance Report
+
+`allie report --map <product-map.json> --packet <evidence.json> --out <dir>`
+projects packet verdicts into a review surface. For `wcag22-aa`, report
+summary counts use the 55 WCAG 2.2 A/AA success criteria only. Support checks
+and aggregate gates remain visible in `supporting_checks`, but are excluded from
+the WCAG denominator.
+
+The report includes:
+
+- `criteria`: one row per WCAG success criterion;
+- `criterion_coverage`: one cell per criterion, surface, and captured state;
+- `supporting_checks`: deterministic, scripted, agentic, and human aggregate
+  checks linked to affected WCAG criteria;
+- `surfaces`: product surface rollups with their cell refs and finding refs.
+
+Each criterion coverage cell carries `status`, `applicability`, `method`,
+`confidence`, `evidence_refs`, `agentic_refs`, `waiver_refs`, and
+`residual_review_need`. Cells with `pass`, `fail`, `waived`, or
+`risk_accepted` must carry provenance through evidence, agentic, waiver,
+finding, artifact, or test refs; a replay command is drilldown context but is
+not enough by itself. Model-only findings remain review context until scripted
+or human-attested evidence promotes them.
+
 ## Replay
 
 Every packet needs enough data to rerun the same path:
