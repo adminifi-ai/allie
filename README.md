@@ -77,6 +77,36 @@ produce a neutral review-required decision instead of a hard block.
 ## Autonomous Workbench Loop
 
 ```sh
+cargo run --locked -- workbench start --manifest examples/autonomous-workbench.yml --out .allie/jobs/autonomous
+```
+
+The workbench command is the durable operator entrypoint for autonomous work. It
+writes a job ledger, lifecycle events, step receipts, generated artifacts, and
+final pointers under one directory:
+
+```sh
+.allie/jobs/autonomous/job.json
+.allie/jobs/autonomous/events.jsonl
+.allie/jobs/autonomous/steps/discovery/discovery.json
+.allie/jobs/autonomous/steps/map/product-map.json
+.allie/jobs/autonomous/steps/run/evidence.json
+.allie/jobs/autonomous/steps/report/compliance-report.json
+.allie/jobs/autonomous/steps/review/evidence-reviewed.json
+.allie/jobs/autonomous/steps/release/release-summary.json
+```
+
+Inspect, cancel, or resume the job with:
+
+```sh
+cargo run --locked -- workbench status --job .allie/jobs/autonomous
+cargo run --locked -- workbench cancel --job .allie/jobs/autonomous
+cargo run --locked -- workbench resume --job .allie/jobs/autonomous
+```
+
+The one-shot task primitives remain available for debugging or custom
+orchestration:
+
+```sh
 cargo run --locked -- discover --manifest examples/autonomous-workbench.yml --out .allie/discovery/autonomous
 cargo run --locked -- promote-flow --discovery .allie/discovery/autonomous/discovery.json --flow-plan .allie/discovery/autonomous/flow-plan.json --out .allie/discovery/autonomous/generated-flow.yml
 cargo run --locked -- run --manifest .allie/discovery/autonomous/generated-flow.yml --out .allie/runs/autonomous
@@ -120,5 +150,7 @@ two commands are the V0 live oracle and release projection, leaving inspectable
 evidence under `.allie/runs/latest/` and `.allie/releases/latest/`.
 The autonomous smoke leaves discovery, generated-flow, richer evidence, review,
 remediation, and blocked-release receipts under `.allie/*/autonomous-smoke/`.
+It also leaves durable workbench lifecycle receipts under
+`.allie/jobs/autonomous-smoke/`.
 
 For a cold-start verification path, see [docs/verification.md](docs/verification.md).

@@ -1,6 +1,6 @@
 # Replace synchronous agent helper with durable autonomous jobs
 
-Priority: P0 - Status: ready - Estimate: XL
+Priority: P0 - Status: done - Estimate: XL
 
 ## Goal
 
@@ -10,17 +10,17 @@ into a fixed subprocess timeout.
 
 ## Oracle
 
-- [ ] `allie workbench start --manifest examples/autonomous-workbench.yml --out .allie/jobs/autonomous-smoke`
+- [x] `allie workbench start --manifest examples/autonomous-workbench.yml --out .allie/jobs/autonomous-smoke`
   creates a durable job directory with `job.json`, `events.jsonl`, step receipts,
   artifacts, and final map/report pointers.
-- [ ] `allie workbench status --job .allie/jobs/autonomous-smoke` reports
+- [x] `allie workbench status --job .allie/jobs/autonomous-smoke` reports
   lifecycle state, current step, last heartbeat, budget usage, and resumability.
-- [ ] A long-running fixture agent step can exceed 120 seconds without being
+- [x] A long-running fixture agent step can exceed 120 seconds without being
   killed solely by wall-clock timeout, while still obeying explicit budget,
   idle, cancel, and CI policy limits.
-- [ ] `allie workbench cancel` and `allie workbench resume` are covered by tests
+- [x] `allie workbench cancel` and `allie workbench resume` are covered by tests
   and leave auditable state transitions.
-- [ ] Existing one-shot `map`, `report`, `review`, `remediate`, and `release`
+- [x] Existing one-shot `map`, `report`, `review`, `remediate`, and `release`
   commands remain available as task primitives.
 
 ## Verification System
@@ -62,3 +62,17 @@ agent systems support sessions, async work, abort, event streams, checkpoints,
 and background execution; Allie needs that job contract before it can honestly
 sell autonomous assessment.
 
+## Delivered
+
+- Added `allie workbench start|status|cancel|resume`.
+- Added `allie.job.v0` with job status, current step, runtime policy, runner
+  state, step records, artifact pointers, resumability, cancel state, and JSONL
+  lifecycle events.
+- Wrapped the existing discovery, flow promotion, map, evidence run, compliance
+  report, offline review, remediation queue, and release projection primitives
+  into a durable foreground job under `.allie/jobs/<id>/steps/`.
+- Workbench jobs record `agent_step_timeout_ms: null` so agent lifecycle is not
+  governed by the old 120-second advisory mapper guard; Playwright worker
+  timeout remains scoped to browser execution.
+- Extended `npm run autonomous:smoke` and `npm run verify` to assert durable job
+  receipts under `.allie/jobs/autonomous-smoke/`.

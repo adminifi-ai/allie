@@ -28,3 +28,7 @@ test -f .allie/reviews/autonomous-smoke/evidence-reviewed.json
 test -f .allie/remediation/autonomous-smoke/remediation-queue.json
 test -f .allie/remediation/autonomous-smoke/patch-plan.md
 test -f .allie/releases/autonomous-smoke/release-summary.json
+test -f .allie/jobs/autonomous-smoke/job.json
+test -f .allie/jobs/autonomous-smoke/events.jsonl
+test -f .allie/jobs/autonomous-smoke/steps/map/product-map.json
+test -f .allie/jobs/autonomous-smoke/steps/report/compliance-report.json

@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -18,8 +19,11 @@ const WORKER_REQUEST_SCHEMA: &str = "allie.worker.request.v0";
 const WORKER_RESPONSE_SCHEMA: &str = "allie.worker.response.v0";
 const PRODUCT_MAP_SCHEMA: &str = "allie.product-map.v0";
 const COMPLIANCE_REPORT_SCHEMA: &str = "allie.compliance-report.v0";
+const JOB_SCHEMA: &str = "allie.job.v0";
 const DEFAULT_WORKER_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_AGENT_TIMEOUT_MS: u64 = 120_000;
+const DEFAULT_WORKBENCH_MAX_RUNTIME_MS: u64 = 24 * 60 * 60 * 1000;
+const DEFAULT_WORKBENCH_IDLE_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 const WCAG22_AA_PROFILE_JSON: &str = include_str!("../profiles/wcag22-aa.json");
 
 #[derive(Debug)]
@@ -183,6 +187,22 @@ struct ReportOptions {
 }
 
 #[derive(Debug)]
+struct WorkbenchStartOptions {
+    manifest_path: PathBuf,
+    out_dir: PathBuf,
+    project_root: Option<PathBuf>,
+    agent_runner: AgentRunnerKind,
+}
+
+#[derive(Debug)]
+enum WorkbenchCommand {
+    Start(WorkbenchStartOptions),
+    Status { job_dir: PathBuf },
+    Cancel { job_dir: PathBuf },
+    Resume { job_dir: PathBuf },
+}
+
+#[derive(Debug)]
 struct ReleaseReceipt {
     status: String,
     exit_class: ExitClass,
@@ -230,6 +250,16 @@ struct ComplianceReportReceipt {
     report_json_path: PathBuf,
     report_html_path: PathBuf,
     summary_path: PathBuf,
+}
+
+#[derive(Debug)]
+struct WorkbenchReceipt {
+    job_path: PathBuf,
+    events_path: PathBuf,
+    status: String,
+    current_step: String,
+    resumable: bool,
+    exit_class: ExitClass,
 }
 
 pub fn run_cli(args: impl IntoIterator<Item = String>) -> i32 {
@@ -376,6 +406,27 @@ pub fn run_cli_with_io(
                 ExitClass::Usage.code()
             }
         },
+        Some("workbench") => match parse_workbench_command(&args[1..]) {
+            Ok(command) => match run_workbench(command) {
+                Ok(receipt) => {
+                    let _ = writeln!(stdout, "Workbench job: {}", receipt.job_path.display());
+                    let _ = writeln!(stdout, "Events: {}", receipt.events_path.display());
+                    let _ = writeln!(stdout, "Status: {}", receipt.status);
+                    let _ = writeln!(stdout, "Current step: {}", receipt.current_step);
+                    let _ = writeln!(stdout, "Resumable: {}", receipt.resumable);
+                    receipt.exit_class.code()
+                }
+                Err(error) => {
+                    let _ = writeln!(stderr, "allie: {error}");
+                    ExitClass::InfrastructureFailure.code()
+                }
+            },
+            Err(error) => {
+                let _ = writeln!(stderr, "allie: {error}");
+                print_usage(stderr);
+                ExitClass::Usage.code()
+            }
+        },
         Some("review") => match parse_review_options(&args[1..]) {
             Ok(options) => match run_review(options) {
                 Ok(receipt) => {
@@ -453,7 +504,7 @@ pub fn run_cli_with_io(
 fn print_usage(writer: &mut dyn Write) {
     let _ = writeln!(
         writer,
-        "Usage:\n  allie run --manifest <flow.yml> --out <output-dir>\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie remediate --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
+        "Usage:\n  allie run --manifest <flow.yml> --out <output-dir>\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie remediate --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
     );
 }
 
@@ -662,6 +713,98 @@ fn parse_report_options(args: &[String]) -> std::result::Result<ReportOptions, S
         packet_path: packet_path.ok_or_else(|| "--packet is required".to_string())?,
         out_dir: out_dir.ok_or_else(|| "--out is required".to_string())?,
     })
+}
+
+fn parse_workbench_command(args: &[String]) -> std::result::Result<WorkbenchCommand, String> {
+    let Some(command) = args.first().map(String::as_str) else {
+        return Err("workbench requires start, status, cancel, or resume".to_string());
+    };
+    match command {
+        "start" => parse_workbench_start_options(&args[1..]).map(WorkbenchCommand::Start),
+        "status" => {
+            parse_workbench_job_dir(&args[1..]).map(|job_dir| WorkbenchCommand::Status { job_dir })
+        }
+        "cancel" => {
+            parse_workbench_job_dir(&args[1..]).map(|job_dir| WorkbenchCommand::Cancel { job_dir })
+        }
+        "resume" => {
+            parse_workbench_job_dir(&args[1..]).map(|job_dir| WorkbenchCommand::Resume { job_dir })
+        }
+        unexpected => Err(format!(
+            "unsupported workbench command {unexpected}; expected start, status, cancel, or resume"
+        )),
+    }
+}
+
+fn parse_workbench_start_options(
+    args: &[String],
+) -> std::result::Result<WorkbenchStartOptions, String> {
+    let mut manifest_path = None;
+    let mut out_dir = None;
+    let mut project_root = None;
+    let mut agent_runner = AgentRunnerKind::Local;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--manifest" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--manifest requires a path".to_string())?;
+                manifest_path = Some(PathBuf::from(value));
+            }
+            "--out" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--out requires a directory".to_string())?;
+                out_dir = Some(PathBuf::from(value));
+            }
+            "--project-root" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--project-root requires a directory".to_string())?;
+                project_root = Some(PathBuf::from(value));
+            }
+            "--agent" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--agent requires local, opencode, or omp".to_string())?;
+                agent_runner = AgentRunnerKind::parse(value)?;
+            }
+            unexpected => return Err(format!("unexpected argument: {unexpected}")),
+        }
+        index += 1;
+    }
+
+    Ok(WorkbenchStartOptions {
+        manifest_path: manifest_path.ok_or_else(|| "--manifest is required".to_string())?,
+        out_dir: out_dir.ok_or_else(|| "--out is required".to_string())?,
+        project_root,
+        agent_runner,
+    })
+}
+
+fn parse_workbench_job_dir(args: &[String]) -> std::result::Result<PathBuf, String> {
+    let mut job_dir = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--job" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--job requires a directory".to_string())?;
+                job_dir = Some(PathBuf::from(value));
+            }
+            unexpected => return Err(format!("unexpected argument: {unexpected}")),
+        }
+        index += 1;
+    }
+    job_dir.ok_or_else(|| "--job is required".to_string())
 }
 
 fn parse_promote_flow_options(args: &[String]) -> std::result::Result<PromoteFlowOptions, String> {
@@ -1063,6 +1206,564 @@ fn run_map(options: MapOptions) -> Result<MapReceipt> {
         runner_receipt_path,
         flow_manifest_path,
     })
+}
+
+fn run_workbench(command: WorkbenchCommand) -> Result<WorkbenchReceipt> {
+    match command {
+        WorkbenchCommand::Start(options) => run_workbench_start(options),
+        WorkbenchCommand::Status { job_dir } => run_workbench_status(&job_dir),
+        WorkbenchCommand::Cancel { job_dir } => run_workbench_cancel(&job_dir),
+        WorkbenchCommand::Resume { job_dir } => run_workbench_resume(&job_dir),
+    }
+}
+
+fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceipt> {
+    fs::create_dir_all(&options.out_dir).map_err(|source| AllieError::Io {
+        context: format!(
+            "create workbench job directory {}",
+            options.out_dir.display()
+        ),
+        source,
+    })?;
+    write_string(&options.out_dir.join("events.jsonl"), "")?;
+
+    let manifest = FlowManifest::load(&options.manifest_path)?;
+    manifest.validate()?;
+    let project_root = options
+        .project_root
+        .unwrap_or_else(|| default_project_root_for_manifest(&options.manifest_path, &manifest));
+    let project_root = fs::canonicalize(&project_root).unwrap_or(project_root);
+    let mut job = new_workbench_job(
+        &options.manifest_path,
+        &project_root,
+        options.agent_runner,
+        manifest.policy.worker_timeout_ms,
+    );
+    append_workbench_event(
+        &options.out_dir,
+        "job_started",
+        None,
+        Some(&job.status),
+        "durable workbench job started",
+    )?;
+    write_workbench_job(&options.out_dir, &job)?;
+
+    let discovery_dir = options.out_dir.join("steps/discovery");
+    let map_dir = options.out_dir.join("steps/map");
+    let run_dir = options.out_dir.join("steps/run");
+    let report_dir = options.out_dir.join("steps/report");
+    let review_dir = options.out_dir.join("steps/review");
+    let remediation_dir = options.out_dir.join("steps/remediation");
+    let release_dir = options.out_dir.join("steps/release");
+
+    workbench_step_start(&options.out_dir, &mut job, "discover")?;
+    let discovery = match run_discovery(DiscoveryOptions {
+        manifest_path: options.manifest_path.clone(),
+        out_dir: discovery_dir.clone(),
+    }) {
+        Ok(receipt) => receipt,
+        Err(error) => return workbench_step_error(&options.out_dir, job, "discover", error),
+    };
+    job.pointers.discovery = Some(path_relative_to(
+        &options.out_dir,
+        &discovery.discovery_path,
+    ));
+    job.pointers.flow_plan = Some(path_relative_to(
+        &options.out_dir,
+        &discovery.flow_plan_path,
+    ));
+    job.artifacts.push(WorkbenchArtifactRef {
+        kind: "discovery".to_string(),
+        path: path_relative_to(&options.out_dir, &discovery.discovery_path),
+    });
+    workbench_step_complete(
+        &options.out_dir,
+        &mut job,
+        "discover",
+        "completed",
+        Some(&discovery.discovery_path),
+        ExitClass::Success,
+        "discovery packet written",
+    )?;
+
+    let generated_flow_path = discovery_dir.join("generated-flow.yml");
+    workbench_step_start(&options.out_dir, &mut job, "promote-flow")?;
+    let promoted = match run_promote_flow(PromoteFlowOptions {
+        discovery_path: discovery.discovery_path.clone(),
+        flow_plan_path: discovery.flow_plan_path.clone(),
+        out_path: generated_flow_path,
+    }) {
+        Ok(receipt) => receipt,
+        Err(error) => return workbench_step_error(&options.out_dir, job, "promote-flow", error),
+    };
+    job.pointers.generated_flow = Some(path_relative_to(&options.out_dir, &promoted.manifest_path));
+    job.artifacts.push(WorkbenchArtifactRef {
+        kind: "generated_flow".to_string(),
+        path: path_relative_to(&options.out_dir, &promoted.manifest_path),
+    });
+    workbench_step_complete(
+        &options.out_dir,
+        &mut job,
+        "promote-flow",
+        "completed",
+        Some(&promoted.manifest_path),
+        ExitClass::Success,
+        "generated flow manifest written",
+    )?;
+
+    workbench_step_start(&options.out_dir, &mut job, "map")?;
+    let map = match run_map(MapOptions {
+        manifest_path: options.manifest_path.clone(),
+        out_dir: map_dir,
+        project_root: project_root.clone(),
+        agent_runner: options.agent_runner,
+    }) {
+        Ok(receipt) => receipt,
+        Err(error) => return workbench_step_error(&options.out_dir, job, "map", error),
+    };
+    job.pointers.product_map = Some(path_relative_to(&options.out_dir, &map.map_path));
+    job.pointers.surface_map = Some(path_relative_to(&options.out_dir, &map.report_path));
+    job.artifacts.push(WorkbenchArtifactRef {
+        kind: "product_map".to_string(),
+        path: path_relative_to(&options.out_dir, &map.map_path),
+    });
+    workbench_step_complete(
+        &options.out_dir,
+        &mut job,
+        "map",
+        "completed",
+        Some(&map.map_path),
+        ExitClass::Success,
+        "product map written",
+    )?;
+
+    workbench_step_start(&options.out_dir, &mut job, "run")?;
+    let run = match run_v0(RunOptions {
+        manifest_path: promoted.manifest_path.clone(),
+        out_dir: run_dir,
+    }) {
+        Ok(receipt) => receipt,
+        Err(error) => return workbench_step_error(&options.out_dir, job, "run", error),
+    };
+    job.pointers.evidence_packet = Some(path_relative_to(&options.out_dir, &run.evidence_path));
+    job.pointers.evidence_report = Some(path_relative_to(&options.out_dir, &run.report_path));
+    job.artifacts.push(WorkbenchArtifactRef {
+        kind: "evidence_packet".to_string(),
+        path: path_relative_to(&options.out_dir, &run.evidence_path),
+    });
+    let run_step_status = status_for_exit_class(run.exit_class);
+    workbench_step_complete(
+        &options.out_dir,
+        &mut job,
+        "run",
+        run_step_status,
+        Some(&run.evidence_path),
+        run.exit_class,
+        "evidence replay completed",
+    )?;
+    if run.exit_class == ExitClass::InfrastructureFailure {
+        return workbench_finish(
+            &options.out_dir,
+            job,
+            "failed",
+            ExitClass::InfrastructureFailure,
+            "run stopped on infrastructure failure",
+        );
+    }
+
+    workbench_step_start(&options.out_dir, &mut job, "report")?;
+    let report = match run_compliance_report(ReportOptions {
+        map_path: map.map_path.clone(),
+        packet_path: run.evidence_path.clone(),
+        out_dir: report_dir,
+    }) {
+        Ok(receipt) => receipt,
+        Err(error) => return workbench_step_error(&options.out_dir, job, "report", error),
+    };
+    job.pointers.compliance_report =
+        Some(path_relative_to(&options.out_dir, &report.report_json_path));
+    job.pointers.compliance_html =
+        Some(path_relative_to(&options.out_dir, &report.report_html_path));
+    job.artifacts.push(WorkbenchArtifactRef {
+        kind: "compliance_report".to_string(),
+        path: path_relative_to(&options.out_dir, &report.report_json_path),
+    });
+    workbench_step_complete(
+        &options.out_dir,
+        &mut job,
+        "report",
+        "completed",
+        Some(&report.report_json_path),
+        ExitClass::Success,
+        "compliance report written",
+    )?;
+
+    workbench_step_start(&options.out_dir, &mut job, "review")?;
+    let review = match run_review(ReviewOptions {
+        packet_path: run.evidence_path.clone(),
+        out_dir: review_dir,
+    }) {
+        Ok(receipt) => receipt,
+        Err(error) => return workbench_step_error(&options.out_dir, job, "review", error),
+    };
+    job.pointers.reviewed_packet = Some(path_relative_to(&options.out_dir, &review.packet_path));
+    job.pointers.review_report = Some(path_relative_to(&options.out_dir, &review.report_path));
+    job.artifacts.push(WorkbenchArtifactRef {
+        kind: "reviewed_packet".to_string(),
+        path: path_relative_to(&options.out_dir, &review.packet_path),
+    });
+    workbench_step_complete(
+        &options.out_dir,
+        &mut job,
+        "review",
+        "completed",
+        Some(&review.packet_path),
+        ExitClass::Success,
+        "agentic review context written",
+    )?;
+
+    workbench_step_start(&options.out_dir, &mut job, "remediation")?;
+    let remediation = match run_remediate(RemediateOptions {
+        packet_path: run.evidence_path.clone(),
+        out_dir: remediation_dir,
+    }) {
+        Ok(receipt) => receipt,
+        Err(error) => return workbench_step_error(&options.out_dir, job, "remediation", error),
+    };
+    job.pointers.remediation_queue =
+        Some(path_relative_to(&options.out_dir, &remediation.queue_path));
+    job.artifacts.push(WorkbenchArtifactRef {
+        kind: "remediation_queue".to_string(),
+        path: path_relative_to(&options.out_dir, &remediation.queue_path),
+    });
+    workbench_step_complete(
+        &options.out_dir,
+        &mut job,
+        "remediation",
+        "completed",
+        Some(&remediation.queue_path),
+        ExitClass::Success,
+        "remediation queue written",
+    )?;
+
+    workbench_step_start(&options.out_dir, &mut job, "release")?;
+    let changed_surface = workbench_changed_surface(&discovery.flow_plan_path)?;
+    let release = match run_release(ReleaseOptions {
+        packet_path: review.packet_path.clone(),
+        out_dir: release_dir,
+        changed_surfaces: vec![changed_surface],
+        stale_after_days: 7,
+    }) {
+        Ok(receipt) => receipt,
+        Err(error) => return workbench_step_error(&options.out_dir, job, "release", error),
+    };
+    job.pointers.release_summary = Some(path_relative_to(&options.out_dir, &release.summary_path));
+    job.pointers.release_report = Some(path_relative_to(&options.out_dir, &release.report_path));
+    job.artifacts.push(WorkbenchArtifactRef {
+        kind: "release_summary".to_string(),
+        path: path_relative_to(&options.out_dir, &release.summary_path),
+    });
+    let release_step_status = status_for_exit_class(release.exit_class);
+    workbench_step_complete(
+        &options.out_dir,
+        &mut job,
+        "release",
+        release_step_status,
+        Some(&release.summary_path),
+        release.exit_class,
+        "release projection written",
+    )?;
+
+    let final_status = match release.exit_class {
+        ExitClass::Success => "completed",
+        ExitClass::BlockingFinding => "blocked",
+        ExitClass::InfrastructureFailure | ExitClass::Usage => "failed",
+    };
+    workbench_finish(
+        &options.out_dir,
+        job,
+        final_status,
+        release.exit_class,
+        "workbench job finished",
+    )
+}
+
+fn run_workbench_status(job_dir: &Path) -> Result<WorkbenchReceipt> {
+    let job = read_workbench_job(job_dir)?;
+    Ok(workbench_receipt(job_dir, &job, ExitClass::Success))
+}
+
+fn run_workbench_cancel(job_dir: &Path) -> Result<WorkbenchReceipt> {
+    let mut job = read_workbench_job(job_dir)?;
+    job.status = "cancelled".to_string();
+    job.current_step = "cancelled".to_string();
+    job.cancel_requested = true;
+    job.resumable = true;
+    job.updated_at = now_utc().to_rfc3339();
+    append_workbench_event(
+        job_dir,
+        "job_cancel_requested",
+        None,
+        Some(&job.status),
+        "operator requested cancellation",
+    )?;
+    write_workbench_job(job_dir, &job)?;
+    Ok(workbench_receipt(job_dir, &job, ExitClass::Success))
+}
+
+fn run_workbench_resume(job_dir: &Path) -> Result<WorkbenchReceipt> {
+    let mut job = read_workbench_job(job_dir)?;
+    job.cancel_requested = false;
+    job.resume_count += 1;
+    job.updated_at = now_utc().to_rfc3339();
+    if let Some(summary_path) = job.pointers.release_summary.clone() {
+        let summary: serde_json::Value = read_json_file(&job_dir.join(summary_path))?;
+        job.status = match summary["status"].as_str().unwrap_or("unknown") {
+            "blocked" => "blocked".to_string(),
+            "pass" | "needs_review" => "completed".to_string(),
+            _ => "failed".to_string(),
+        };
+        job.current_step = "finished".to_string();
+    } else {
+        job.status = "failed".to_string();
+        job.warnings
+            .push("resume requested before a release summary existed".to_string());
+    }
+    append_workbench_event(
+        job_dir,
+        "job_resumed",
+        None,
+        Some(&job.status),
+        "operator resumed durable job ledger",
+    )?;
+    write_workbench_job(job_dir, &job)?;
+    Ok(workbench_receipt(job_dir, &job, ExitClass::Success))
+}
+
+fn new_workbench_job(
+    manifest_path: &Path,
+    project_root: &Path,
+    runner: AgentRunnerKind,
+    worker_timeout_ms: u64,
+) -> WorkbenchJobPacket {
+    let now = now_utc().to_rfc3339();
+    WorkbenchJobPacket {
+        schema: JOB_SCHEMA.to_string(),
+        id: new_job_id(),
+        status: "running".to_string(),
+        current_step: "queued".to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        finished_at: None,
+        manifest_path: manifest_path.to_string_lossy().to_string(),
+        project_root: project_root.to_string_lossy().to_string(),
+        runtime_policy: WorkbenchRuntimePolicy {
+            max_runtime_ms: DEFAULT_WORKBENCH_MAX_RUNTIME_MS,
+            idle_timeout_ms: DEFAULT_WORKBENCH_IDLE_TIMEOUT_MS,
+            agent_step_timeout_ms: None,
+            worker_timeout_ms,
+            ci_mode: false,
+            enforcement_note:
+                "agent job lifecycle is budgeted by job policy, not the 120s advisory runner guard"
+                    .to_string(),
+        },
+        runner: WorkbenchRunnerState {
+            kind: runner.as_str().to_string(),
+            adapter_mode: "foreground-durable-local-job".to_string(),
+            resume_contract:
+                "job.json plus events.jsonl are sufficient to inspect, cancel, and resume"
+                    .to_string(),
+        },
+        steps: Vec::new(),
+        pointers: WorkbenchPointers::default(),
+        artifacts: Vec::new(),
+        resumable: true,
+        cancel_requested: false,
+        resume_count: 0,
+        warnings: Vec::new(),
+    }
+}
+
+fn workbench_step_start(job_dir: &Path, job: &mut WorkbenchJobPacket, step: &str) -> Result<()> {
+    let now = now_utc().to_rfc3339();
+    job.status = "running".to_string();
+    job.current_step = step.to_string();
+    job.updated_at = now.clone();
+    job.steps.push(WorkbenchStepRecord {
+        id: step.to_string(),
+        status: "running".to_string(),
+        started_at: Some(now),
+        finished_at: None,
+        receipt_path: None,
+        exit_code: None,
+        message: "step started".to_string(),
+    });
+    append_workbench_event(job_dir, "step_started", Some(step), Some("running"), "")?;
+    write_workbench_job(job_dir, job)
+}
+
+fn workbench_step_complete(
+    job_dir: &Path,
+    job: &mut WorkbenchJobPacket,
+    step: &str,
+    status: &str,
+    receipt_path: Option<&Path>,
+    exit_class: ExitClass,
+    message: &str,
+) -> Result<()> {
+    let now = now_utc().to_rfc3339();
+    job.updated_at = now.clone();
+    if let Some(record) = job.steps.iter_mut().rev().find(|record| record.id == step) {
+        record.status = status.to_string();
+        record.finished_at = Some(now);
+        record.receipt_path = receipt_path.map(|path| path_relative_to(job_dir, path));
+        record.exit_code = Some(exit_class.code());
+        record.message = message.to_string();
+    }
+    append_workbench_event(job_dir, "step_completed", Some(step), Some(status), message)?;
+    write_workbench_job(job_dir, job)
+}
+
+fn workbench_step_error(
+    job_dir: &Path,
+    mut job: WorkbenchJobPacket,
+    step: &str,
+    error: AllieError,
+) -> Result<WorkbenchReceipt> {
+    let message = error.to_string();
+    job.warnings.push(message.clone());
+    workbench_step_complete(
+        job_dir,
+        &mut job,
+        step,
+        "failed",
+        None,
+        ExitClass::InfrastructureFailure,
+        &message,
+    )?;
+    workbench_finish(
+        job_dir,
+        job,
+        "failed",
+        ExitClass::InfrastructureFailure,
+        "workbench job failed",
+    )
+}
+
+fn workbench_finish(
+    job_dir: &Path,
+    mut job: WorkbenchJobPacket,
+    status: &str,
+    exit_class: ExitClass,
+    message: &str,
+) -> Result<WorkbenchReceipt> {
+    let now = now_utc().to_rfc3339();
+    job.status = status.to_string();
+    job.current_step = "finished".to_string();
+    job.updated_at = now.clone();
+    job.finished_at = Some(now);
+    append_workbench_event(job_dir, "job_finished", None, Some(status), message)?;
+    write_workbench_job(job_dir, &job)?;
+    Ok(workbench_receipt(job_dir, &job, exit_class))
+}
+
+fn status_for_exit_class(exit_class: ExitClass) -> &'static str {
+    match exit_class {
+        ExitClass::Success => "completed",
+        ExitClass::BlockingFinding => "blocked",
+        ExitClass::InfrastructureFailure | ExitClass::Usage => "failed",
+    }
+}
+
+fn workbench_receipt(
+    job_dir: &Path,
+    job: &WorkbenchJobPacket,
+    exit_class: ExitClass,
+) -> WorkbenchReceipt {
+    WorkbenchReceipt {
+        job_path: job_dir.join("job.json"),
+        events_path: job_dir.join("events.jsonl"),
+        status: job.status.clone(),
+        current_step: job.current_step.clone(),
+        resumable: job.resumable,
+        exit_class,
+    }
+}
+
+fn write_workbench_job(job_dir: &Path, job: &WorkbenchJobPacket) -> Result<()> {
+    write_json_pretty(&job_dir.join("job.json"), job)
+}
+
+fn read_workbench_job(job_dir: &Path) -> Result<WorkbenchJobPacket> {
+    let job: WorkbenchJobPacket = read_json_file(&job_dir.join("job.json"))?;
+    if job.schema != JOB_SCHEMA {
+        return Err(AllieError::InvalidManifest(format!(
+            "invalid workbench job schema {}; expected {JOB_SCHEMA}",
+            job.schema
+        )));
+    }
+    Ok(job)
+}
+
+fn append_workbench_event(
+    job_dir: &Path,
+    event: &str,
+    step: Option<&str>,
+    status: Option<&str>,
+    message: &str,
+) -> Result<()> {
+    let event_path = job_dir.join("events.jsonl");
+    if let Some(parent) = event_path.parent() {
+        fs::create_dir_all(parent).map_err(|source| AllieError::Io {
+            context: format!("create directory {}", parent.display()),
+            source,
+        })?;
+    }
+    let line = serde_json::json!({
+        "at": now_utc().to_rfc3339(),
+        "event": event,
+        "step": step,
+        "status": status,
+        "message": message
+    })
+    .to_string();
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&event_path)
+        .map_err(|source| AllieError::Io {
+            context: format!("open event log {}", event_path.display()),
+            source,
+        })?;
+    writeln!(file, "{line}").map_err(|source| AllieError::Io {
+        context: format!("append event log {}", event_path.display()),
+        source,
+    })
+}
+
+fn default_project_root_for_manifest(manifest_path: &Path, manifest: &FlowManifest) -> PathBuf {
+    if manifest.target.kind == "local_fixture"
+        && let Some(fixture_dir) = &manifest.target.fixture_dir
+    {
+        let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+        return if fixture_dir.is_absolute() {
+            fixture_dir.clone()
+        } else {
+            manifest_dir.join(fixture_dir)
+        };
+    }
+    PathBuf::from(".")
+}
+
+fn workbench_changed_surface(flow_plan_path: &Path) -> Result<String> {
+    let flow_plan: FlowPlanPacket = read_json_file(flow_plan_path)?;
+    Ok(flow_plan
+        .candidates
+        .iter()
+        .find(|candidate| candidate.id == "settings")
+        .or_else(|| flow_plan.candidates.first())
+        .map(|candidate| candidate.id.clone())
+        .unwrap_or_else(|| "generated-flow".to_string()))
 }
 
 fn run_agent_mapper(
@@ -3520,6 +4221,80 @@ struct AgentRunnerReceiptPacket {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+struct WorkbenchJobPacket {
+    schema: String,
+    id: String,
+    status: String,
+    current_step: String,
+    created_at: String,
+    updated_at: String,
+    finished_at: Option<String>,
+    manifest_path: String,
+    project_root: String,
+    runtime_policy: WorkbenchRuntimePolicy,
+    runner: WorkbenchRunnerState,
+    steps: Vec<WorkbenchStepRecord>,
+    pointers: WorkbenchPointers,
+    artifacts: Vec<WorkbenchArtifactRef>,
+    resumable: bool,
+    cancel_requested: bool,
+    resume_count: u32,
+    warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct WorkbenchRuntimePolicy {
+    max_runtime_ms: u64,
+    idle_timeout_ms: u64,
+    agent_step_timeout_ms: Option<u64>,
+    worker_timeout_ms: u64,
+    ci_mode: bool,
+    enforcement_note: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct WorkbenchRunnerState {
+    kind: String,
+    adapter_mode: String,
+    resume_contract: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct WorkbenchStepRecord {
+    id: String,
+    status: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    receipt_path: Option<String>,
+    exit_code: Option<i32>,
+    message: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct WorkbenchPointers {
+    discovery: Option<String>,
+    flow_plan: Option<String>,
+    generated_flow: Option<String>,
+    product_map: Option<String>,
+    surface_map: Option<String>,
+    evidence_packet: Option<String>,
+    evidence_report: Option<String>,
+    compliance_report: Option<String>,
+    compliance_html: Option<String>,
+    reviewed_packet: Option<String>,
+    review_report: Option<String>,
+    remediation_queue: Option<String>,
+    release_summary: Option<String>,
+    release_report: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct WorkbenchArtifactRef {
+    kind: String,
+    path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct StandardsProfileSummary {
     id: String,
     source_urls: Vec<String>,
@@ -5008,6 +5783,14 @@ fn new_run_id() -> String {
     format!("run-{millis}")
 }
 
+fn new_job_id() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    format!("job-{millis}")
+}
+
 fn git_metadata(args: &[&str]) -> Option<String> {
     let output = Command::new("git").args(args).output().ok()?;
     if !output.status.success() {
@@ -5586,6 +6369,152 @@ mod tests {
         let html = fs::read_to_string(report_dir.join("compliance-report.html")).unwrap();
         assert!(html.contains("WCAG 2.2 A/AA Obligations"));
         assert!(html.contains("not a legal compliance guarantee"));
+    }
+
+    #[test]
+    fn workbench_start_writes_durable_job_lifecycle() {
+        let temp = tempdir().unwrap();
+        let job_dir = temp.path().join("job");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_cli_with_io(
+            vec![
+                "workbench".to_string(),
+                "start".to_string(),
+                "--manifest".to_string(),
+                "examples/autonomous-workbench.yml".to_string(),
+                "--out".to_string(),
+                job_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 1, "stderr={}", String::from_utf8_lossy(&stderr));
+        let job_path = job_dir.join("job.json");
+        let events_path = job_dir.join("events.jsonl");
+        assert!(job_path.exists());
+        assert!(events_path.exists());
+        assert!(job_dir.join("steps/discovery/discovery.json").exists());
+        assert!(job_dir.join("steps/map/product-map.json").exists());
+        assert!(job_dir.join("steps/run/evidence.json").exists());
+        assert!(job_dir.join("steps/report/compliance-report.json").exists());
+        assert!(job_dir.join("steps/review/evidence-reviewed.json").exists());
+        assert!(
+            job_dir
+                .join("steps/remediation/remediation-queue.json")
+                .exists()
+        );
+        assert!(job_dir.join("steps/release/release-summary.json").exists());
+
+        let job: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(job_path).unwrap()).unwrap();
+        assert_eq!(job["schema"], "allie.job.v0");
+        assert_eq!(job["status"], "blocked");
+        assert_eq!(job["current_step"], "finished");
+        assert_eq!(
+            job["runtime_policy"]["agent_step_timeout_ms"],
+            serde_json::Value::Null
+        );
+        assert_eq!(job["runner"]["kind"], "local");
+        assert!(job["resumable"].as_bool().unwrap());
+        assert_eq!(job["pointers"]["product_map"], "steps/map/product-map.json");
+        assert_eq!(
+            job["pointers"]["compliance_report"],
+            "steps/report/compliance-report.json"
+        );
+        assert_eq!(
+            job["pointers"]["release_summary"],
+            "steps/release/release-summary.json"
+        );
+
+        let events = fs::read_to_string(events_path).unwrap();
+        assert!(events.contains("\"event\":\"job_started\""));
+        assert!(events.contains("\"event\":\"step_completed\""));
+        assert!(events.contains("\"step\":\"map\""));
+        assert!(events.contains("\"event\":\"job_finished\""));
+    }
+
+    #[test]
+    fn workbench_status_cancel_and_resume_are_auditable() {
+        let temp = tempdir().unwrap();
+        let job_dir = temp.path().join("job");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_cli_with_io(
+            vec![
+                "workbench".to_string(),
+                "start".to_string(),
+                "--manifest".to_string(),
+                "examples/autonomous-workbench.yml".to_string(),
+                "--out".to_string(),
+                job_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_eq!(code, 1, "stderr={}", String::from_utf8_lossy(&stderr));
+
+        stdout.clear();
+        stderr.clear();
+        let code = run_cli_with_io(
+            vec![
+                "workbench".to_string(),
+                "status".to_string(),
+                "--job".to_string(),
+                job_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let output = String::from_utf8(stdout.clone()).unwrap();
+        assert!(output.contains("Status: blocked"));
+        assert!(output.contains("Current step: finished"));
+        assert!(output.contains("Resumable: true"));
+
+        stdout.clear();
+        stderr.clear();
+        let code = run_cli_with_io(
+            vec![
+                "workbench".to_string(),
+                "cancel".to_string(),
+                "--job".to_string(),
+                job_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let cancelled: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(job_dir.join("job.json")).unwrap()).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        assert_eq!(cancelled["cancel_requested"], true);
+
+        stdout.clear();
+        stderr.clear();
+        let code = run_cli_with_io(
+            vec![
+                "workbench".to_string(),
+                "resume".to_string(),
+                "--job".to_string(),
+                job_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let resumed: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(job_dir.join("job.json")).unwrap()).unwrap();
+        assert_eq!(resumed["status"], "blocked");
+        assert_eq!(resumed["cancel_requested"], false);
+        assert_eq!(resumed["resume_count"], 1);
+
+        let events = fs::read_to_string(job_dir.join("events.jsonl")).unwrap();
+        assert!(events.contains("\"event\":\"job_cancel_requested\""));
+        assert!(events.contains("\"event\":\"job_resumed\""));
     }
 
     #[test]

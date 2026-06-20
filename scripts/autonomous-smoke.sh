@@ -6,8 +6,9 @@ RUN_DIR=.allie/runs/autonomous-smoke
 REVIEW_DIR=.allie/reviews/autonomous-smoke
 REMEDIATION_DIR=.allie/remediation/autonomous-smoke
 RELEASE_DIR=.allie/releases/autonomous-smoke
+JOB_DIR=.allie/jobs/autonomous-smoke
 
-rm -rf "$DISCOVERY_DIR" "$RUN_DIR" "$REVIEW_DIR" "$REMEDIATION_DIR" "$RELEASE_DIR"
+rm -rf "$DISCOVERY_DIR" "$RUN_DIR" "$REVIEW_DIR" "$REMEDIATION_DIR" "$RELEASE_DIR" "$JOB_DIR"
 
 cargo run --locked -- discover \
   --manifest examples/autonomous-workbench.yml \
@@ -49,5 +50,26 @@ node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$REVIEW_DIR
 node -e "const fs=require('fs'); const q=JSON.parse(fs.readFileSync('$REMEDIATION_DIR/remediation-queue.json','utf8')); if(q.schema!=='allie.remediation-queue.v0') process.exit(1); if(!q.items.length) process.exit(1);"
 grep -q "Replay:" "$REMEDIATION_DIR/patch-plan.md"
 node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync('$RELEASE_DIR/release-summary.json','utf8')); if(r.status!=='blocked') process.exit(1);"
+
+set +e
+cargo run --locked -- workbench start \
+  --manifest examples/autonomous-workbench.yml \
+  --out "$JOB_DIR"
+workbench_status=$?
+set -e
+test "$workbench_status" -eq 1
+
+cargo run --locked -- workbench status \
+  --job "$JOB_DIR"
+
+node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('$JOB_DIR/job.json','utf8')); if(j.schema!=='allie.job.v0') process.exit(1); if(j.status!=='blocked') process.exit(1); if(j.runtime_policy.agent_step_timeout_ms!==null) process.exit(1); for (const p of ['product_map','compliance_report','evidence_packet','reviewed_packet','release_summary']) if(!j.pointers[p]) process.exit(1);"
+node -e "const fs=require('fs'); const events=fs.readFileSync('$JOB_DIR/events.jsonl','utf8').trim().split('\\n').map(JSON.parse); if(!events.some(e=>e.event==='job_started')) process.exit(1); if(!events.some(e=>e.event==='step_completed' && e.step==='map')) process.exit(1); if(!events.some(e=>e.event==='job_finished')) process.exit(1);"
+test -f "$JOB_DIR/steps/discovery/discovery.json"
+test -f "$JOB_DIR/steps/map/product-map.json"
+test -f "$JOB_DIR/steps/run/evidence.json"
+test -f "$JOB_DIR/steps/report/compliance-report.json"
+test -f "$JOB_DIR/steps/review/evidence-reviewed.json"
+test -f "$JOB_DIR/steps/remediation/remediation-queue.json"
+test -f "$JOB_DIR/steps/release/release-summary.json"
 
 echo "autonomous smoke passed"
