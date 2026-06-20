@@ -104,6 +104,9 @@ cargo run --locked -- workbench status --job .allie/jobs/autonomous-smoke
 The expected completed fixture job has `schema: allie.job.v0`, `status:
 blocked`, release status `blocked`, resumable state, and artifact pointers for
 map, evidence, compliance report, review, remediation, and release outputs.
+The smoke also verifies that `workbench start` refuses to reuse an existing job
+directory and that non-local advisory agent modes stay on the one-shot `map`
+path until durable session adapters exist.
 
 ## Failure Meanings
 

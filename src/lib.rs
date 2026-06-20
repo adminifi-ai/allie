@@ -504,7 +504,7 @@ pub fn run_cli_with_io(
 fn print_usage(writer: &mut dyn Write) {
     let _ = writeln!(
         writer,
-        "Usage:\n  allie run --manifest <flow.yml> --out <output-dir>\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie remediate --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
+        "Usage:\n  allie run --manifest <flow.yml> --out <output-dir>\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie remediate --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
     );
 }
 
@@ -774,6 +774,12 @@ fn parse_workbench_start_options(
                     .get(index)
                     .ok_or_else(|| "--agent requires local, opencode, or omp".to_string())?;
                 agent_runner = AgentRunnerKind::parse(value)?;
+                if agent_runner != AgentRunnerKind::Local {
+                    return Err(
+                        "workbench jobs currently support only --agent local; use allie map --agent for one-shot advisory agent runners"
+                            .to_string(),
+                    );
+                }
             }
             unexpected => return Err(format!("unexpected argument: {unexpected}")),
         }
@@ -1218,6 +1224,14 @@ fn run_workbench(command: WorkbenchCommand) -> Result<WorkbenchReceipt> {
 }
 
 fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceipt> {
+    ensure_new_workbench_dir(&options.out_dir)?;
+    run_workbench_start_with_job(options, None)
+}
+
+fn run_workbench_start_with_job(
+    options: WorkbenchStartOptions,
+    resume_from: Option<WorkbenchJobPacket>,
+) -> Result<WorkbenchReceipt> {
     fs::create_dir_all(&options.out_dir).map_err(|source| AllieError::Io {
         context: format!(
             "create workbench job directory {}",
@@ -1225,7 +1239,10 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
         ),
         source,
     })?;
-    write_string(&options.out_dir.join("events.jsonl"), "")?;
+    let resuming = resume_from.is_some();
+    if !resuming {
+        write_string(&options.out_dir.join("events.jsonl"), "")?;
+    }
 
     let manifest = FlowManifest::load(&options.manifest_path)?;
     manifest.validate()?;
@@ -1233,18 +1250,35 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
         .project_root
         .unwrap_or_else(|| default_project_root_for_manifest(&options.manifest_path, &manifest));
     let project_root = fs::canonicalize(&project_root).unwrap_or(project_root);
-    let mut job = new_workbench_job(
-        &options.manifest_path,
-        &project_root,
-        options.agent_runner,
-        manifest.policy.worker_timeout_ms,
-    );
+    let mut job = match resume_from {
+        Some(job) => reset_workbench_job_for_resume(
+            job,
+            &options.manifest_path,
+            &project_root,
+            options.agent_runner,
+            manifest.policy.worker_timeout_ms,
+        ),
+        None => new_workbench_job(
+            &options.manifest_path,
+            &project_root,
+            options.agent_runner,
+            manifest.policy.worker_timeout_ms,
+        ),
+    };
     append_workbench_event(
         &options.out_dir,
-        "job_started",
+        if resuming {
+            "job_resumed"
+        } else {
+            "job_started"
+        },
         None,
         Some(&job.status),
-        "durable workbench job started",
+        if resuming {
+            "operator resumed durable job execution"
+        } else {
+            "durable workbench job started"
+        },
     )?;
     write_workbench_job(&options.out_dir, &job)?;
 
@@ -1256,7 +1290,9 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
     let remediation_dir = options.out_dir.join("steps/remediation");
     let release_dir = options.out_dir.join("steps/release");
 
-    workbench_step_start(&options.out_dir, &mut job, "discover")?;
+    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "discover")? {
+        return Ok(receipt);
+    }
     let discovery = match run_discovery(DiscoveryOptions {
         manifest_path: options.manifest_path.clone(),
         out_dir: discovery_dir.clone(),
@@ -1285,9 +1321,16 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
         ExitClass::Success,
         "discovery packet written",
     )?;
+    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
+        return Ok(receipt);
+    }
 
     let generated_flow_path = discovery_dir.join("generated-flow.yml");
-    workbench_step_start(&options.out_dir, &mut job, "promote-flow")?;
+    if let Some(receipt) =
+        workbench_start_step_or_cancel(&options.out_dir, &mut job, "promote-flow")?
+    {
+        return Ok(receipt);
+    }
     let promoted = match run_promote_flow(PromoteFlowOptions {
         discovery_path: discovery.discovery_path.clone(),
         flow_plan_path: discovery.flow_plan_path.clone(),
@@ -1310,8 +1353,13 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
         ExitClass::Success,
         "generated flow manifest written",
     )?;
+    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
+        return Ok(receipt);
+    }
 
-    workbench_step_start(&options.out_dir, &mut job, "map")?;
+    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "map")? {
+        return Ok(receipt);
+    }
     let map = match run_map(MapOptions {
         manifest_path: options.manifest_path.clone(),
         out_dir: map_dir,
@@ -1336,8 +1384,13 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
         ExitClass::Success,
         "product map written",
     )?;
+    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
+        return Ok(receipt);
+    }
 
-    workbench_step_start(&options.out_dir, &mut job, "run")?;
+    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "run")? {
+        return Ok(receipt);
+    }
     let run = match run_v0(RunOptions {
         manifest_path: promoted.manifest_path.clone(),
         out_dir: run_dir,
@@ -1370,8 +1423,13 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
             "run stopped on infrastructure failure",
         );
     }
+    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
+        return Ok(receipt);
+    }
 
-    workbench_step_start(&options.out_dir, &mut job, "report")?;
+    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "report")? {
+        return Ok(receipt);
+    }
     let report = match run_compliance_report(ReportOptions {
         map_path: map.map_path.clone(),
         packet_path: run.evidence_path.clone(),
@@ -1397,8 +1455,13 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
         ExitClass::Success,
         "compliance report written",
     )?;
+    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
+        return Ok(receipt);
+    }
 
-    workbench_step_start(&options.out_dir, &mut job, "review")?;
+    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "review")? {
+        return Ok(receipt);
+    }
     let review = match run_review(ReviewOptions {
         packet_path: run.evidence_path.clone(),
         out_dir: review_dir,
@@ -1421,8 +1484,15 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
         ExitClass::Success,
         "agentic review context written",
     )?;
+    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
+        return Ok(receipt);
+    }
 
-    workbench_step_start(&options.out_dir, &mut job, "remediation")?;
+    if let Some(receipt) =
+        workbench_start_step_or_cancel(&options.out_dir, &mut job, "remediation")?
+    {
+        return Ok(receipt);
+    }
     let remediation = match run_remediate(RemediateOptions {
         packet_path: run.evidence_path.clone(),
         out_dir: remediation_dir,
@@ -1445,8 +1515,13 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
         ExitClass::Success,
         "remediation queue written",
     )?;
+    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
+        return Ok(receipt);
+    }
 
-    workbench_step_start(&options.out_dir, &mut job, "release")?;
+    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "release")? {
+        return Ok(receipt);
+    }
     let changed_surface = workbench_changed_surface(&discovery.flow_plan_path)?;
     let release = match run_release(ReleaseOptions {
         packet_path: review.packet_path.clone(),
@@ -1473,6 +1548,9 @@ fn run_workbench_start(options: WorkbenchStartOptions) -> Result<WorkbenchReceip
         release.exit_class,
         "release projection written",
     )?;
+    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
+        return Ok(receipt);
+    }
 
     let final_status = match release.exit_class {
         ExitClass::Success => "completed",
@@ -1512,32 +1590,23 @@ fn run_workbench_cancel(job_dir: &Path) -> Result<WorkbenchReceipt> {
 }
 
 fn run_workbench_resume(job_dir: &Path) -> Result<WorkbenchReceipt> {
-    let mut job = read_workbench_job(job_dir)?;
-    job.cancel_requested = false;
-    job.resume_count += 1;
-    job.updated_at = now_utc().to_rfc3339();
-    if let Some(summary_path) = job.pointers.release_summary.clone() {
-        let summary: serde_json::Value = read_json_file(&job_dir.join(summary_path))?;
-        job.status = match summary["status"].as_str().unwrap_or("unknown") {
-            "blocked" => "blocked".to_string(),
-            "pass" | "needs_review" => "completed".to_string(),
-            _ => "failed".to_string(),
-        };
-        job.current_step = "finished".to_string();
-    } else {
-        job.status = "failed".to_string();
-        job.warnings
-            .push("resume requested before a release summary existed".to_string());
+    let job = read_workbench_job(job_dir)?;
+    let runner = AgentRunnerKind::parse(&job.runner.kind).map_err(AllieError::InvalidManifest)?;
+    if runner != AgentRunnerKind::Local {
+        return Err(AllieError::InvalidManifest(format!(
+            "workbench resume currently supports only local jobs; rerun allie map --agent {} for one-shot advisory agent mapping",
+            runner.as_str()
+        )));
     }
-    append_workbench_event(
-        job_dir,
-        "job_resumed",
-        None,
-        Some(&job.status),
-        "operator resumed durable job ledger",
-    )?;
-    write_workbench_job(job_dir, &job)?;
-    Ok(workbench_receipt(job_dir, &job, ExitClass::Success))
+    run_workbench_start_with_job(
+        WorkbenchStartOptions {
+            manifest_path: PathBuf::from(&job.manifest_path),
+            out_dir: job_dir.to_path_buf(),
+            project_root: Some(PathBuf::from(&job.project_root)),
+            agent_runner: runner,
+        },
+        Some(job),
+    )
 }
 
 fn new_workbench_job(
@@ -1582,6 +1651,54 @@ fn new_workbench_job(
         resume_count: 0,
         warnings: Vec::new(),
     }
+}
+
+fn ensure_new_workbench_dir(job_dir: &Path) -> Result<()> {
+    for relative in ["job.json", "events.jsonl", "steps"] {
+        let path = job_dir.join(relative);
+        if path.exists() {
+            return Err(AllieError::InvalidManifest(format!(
+                "workbench job directory {} already contains durable state at {}; choose a new --out directory or use workbench resume",
+                job_dir.display(),
+                relative
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn reset_workbench_job_for_resume(
+    mut job: WorkbenchJobPacket,
+    manifest_path: &Path,
+    project_root: &Path,
+    runner: AgentRunnerKind,
+    worker_timeout_ms: u64,
+) -> WorkbenchJobPacket {
+    let now = now_utc().to_rfc3339();
+    job.status = "running".to_string();
+    job.current_step = "queued".to_string();
+    job.updated_at = now;
+    job.finished_at = None;
+    job.manifest_path = manifest_path.to_string_lossy().to_string();
+    job.project_root = project_root.to_string_lossy().to_string();
+    job.runtime_policy.worker_timeout_ms = worker_timeout_ms;
+    job.runner.kind = runner.as_str().to_string();
+    job.resumable = true;
+    job.cancel_requested = false;
+    job.resume_count += 1;
+    job
+}
+
+fn workbench_start_step_or_cancel(
+    job_dir: &Path,
+    job: &mut WorkbenchJobPacket,
+    step: &str,
+) -> Result<Option<WorkbenchReceipt>> {
+    if let Some(receipt) = workbench_cancel_checkpoint(job_dir, job)? {
+        return Ok(Some(receipt));
+    }
+    workbench_step_start(job_dir, job, step)?;
+    workbench_cancel_checkpoint(job_dir, job)
 }
 
 fn workbench_step_start(job_dir: &Path, job: &mut WorkbenchJobPacket, step: &str) -> Result<()> {
@@ -1658,13 +1775,62 @@ fn workbench_finish(
     message: &str,
 ) -> Result<WorkbenchReceipt> {
     let now = now_utc().to_rfc3339();
-    job.status = status.to_string();
-    job.current_step = "finished".to_string();
+    let cancelled = status == "cancelled" || workbench_cancel_requested(job_dir)?;
+    let durable_status = if cancelled { "cancelled" } else { status };
+    job.status = durable_status.to_string();
+    job.current_step = if cancelled {
+        "cancelled".to_string()
+    } else {
+        "finished".to_string()
+    };
     job.updated_at = now.clone();
     job.finished_at = Some(now);
-    append_workbench_event(job_dir, "job_finished", None, Some(status), message)?;
+    if cancelled {
+        job.cancel_requested = true;
+    }
+    append_workbench_event(
+        job_dir,
+        if cancelled {
+            "job_cancelled"
+        } else {
+            "job_finished"
+        },
+        None,
+        Some(durable_status),
+        if cancelled {
+            "workbench job stopped after operator cancellation"
+        } else {
+            message
+        },
+    )?;
     write_workbench_job(job_dir, &job)?;
-    Ok(workbench_receipt(job_dir, &job, exit_class))
+    Ok(workbench_receipt(
+        job_dir,
+        &job,
+        if cancelled {
+            ExitClass::Success
+        } else {
+            exit_class
+        },
+    ))
+}
+
+fn workbench_cancel_checkpoint(
+    job_dir: &Path,
+    job: &mut WorkbenchJobPacket,
+) -> Result<Option<WorkbenchReceipt>> {
+    if workbench_cancel_requested(job_dir)? {
+        let cancelled_job = job.clone();
+        return workbench_finish(
+            job_dir,
+            cancelled_job,
+            "cancelled",
+            ExitClass::Success,
+            "workbench job cancelled",
+        )
+        .map(Some);
+    }
+    Ok(None)
 }
 
 fn status_for_exit_class(exit_class: ExitClass) -> &'static str {
@@ -1691,7 +1857,31 @@ fn workbench_receipt(
 }
 
 fn write_workbench_job(job_dir: &Path, job: &WorkbenchJobPacket) -> Result<()> {
-    write_json_pretty(&job_dir.join("job.json"), job)
+    let mut durable_job = job.clone();
+    match read_workbench_job(job_dir) {
+        Ok(existing) => {
+            let same_resume_generation = existing.resume_count == durable_job.resume_count;
+            if same_resume_generation && existing.cancel_requested {
+                durable_job.cancel_requested = true;
+            }
+            if same_resume_generation
+                && existing.status == "cancelled"
+                && durable_job.status != "cancelled"
+            {
+                durable_job.status = existing.status;
+                durable_job.current_step = existing.current_step;
+                durable_job.finished_at = existing.finished_at;
+            }
+        }
+        Err(AllieError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let job_path = job_dir.join("job.json");
+    let json = serde_json::to_string_pretty(&durable_job).map_err(|source| AllieError::Json {
+        context: format!("serialize json {}", job_path.display()),
+        source,
+    })?;
+    write_string_atomic(&job_path, &(json + "\n"))
 }
 
 fn read_workbench_job(job_dir: &Path) -> Result<WorkbenchJobPacket> {
@@ -1703,6 +1893,14 @@ fn read_workbench_job(job_dir: &Path) -> Result<WorkbenchJobPacket> {
         )));
     }
     Ok(job)
+}
+
+fn workbench_cancel_requested(job_dir: &Path) -> Result<bool> {
+    match read_workbench_job(job_dir) {
+        Ok(job) => Ok(job.cancel_requested || job.status == "cancelled"),
+        Err(AllieError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn append_workbench_event(
@@ -1759,9 +1957,7 @@ fn workbench_changed_surface(flow_plan_path: &Path) -> Result<String> {
     let flow_plan: FlowPlanPacket = read_json_file(flow_plan_path)?;
     Ok(flow_plan
         .candidates
-        .iter()
-        .find(|candidate| candidate.id == "settings")
-        .or_else(|| flow_plan.candidates.first())
+        .first()
         .map(|candidate| candidate.id.clone())
         .unwrap_or_else(|| "generated-flow".to_string()))
 }
@@ -5723,6 +5919,66 @@ fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     write_string(path, &(json + "\n"))
 }
 
+fn write_string_atomic(path: &Path, contents: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| AllieError::Io {
+            context: format!("create directory {}", parent.display()),
+            source,
+        })?;
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("atomic-write");
+    for attempt in 0..16 {
+        let temp_path = path.with_file_name(format!(
+            ".{file_name}.tmp-{}-{}-{attempt}",
+            std::process::id(),
+            current_time_millis()
+        ));
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => file,
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(source) => {
+                return Err(AllieError::Io {
+                    context: format!("open temp file {}", temp_path.display()),
+                    source,
+                });
+            }
+        };
+        if let Err(source) = file.write_all(contents.as_bytes()) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(AllieError::Io {
+                context: format!("write temp file {}", temp_path.display()),
+                source,
+            });
+        }
+        if let Err(source) = file.sync_all() {
+            let _ = fs::remove_file(&temp_path);
+            return Err(AllieError::Io {
+                context: format!("sync temp file {}", temp_path.display()),
+                source,
+            });
+        }
+        drop(file);
+        return fs::rename(&temp_path, path).map_err(|source| AllieError::Io {
+            context: format!("replace {}", path.display()),
+            source,
+        });
+    }
+    Err(AllieError::Io {
+        context: format!("create temp file for {}", path.display()),
+        source: io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "exhausted atomic write temp file attempts",
+        ),
+    })
+}
+
 fn write_string(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| AllieError::Io {
@@ -5775,19 +6031,20 @@ fn now_utc() -> DateTime<Utc> {
     Utc::now()
 }
 
-fn new_run_id() -> String {
-    let millis = SystemTime::now()
+fn current_time_millis() -> u128 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+fn new_run_id() -> String {
+    let millis = current_time_millis();
     format!("run-{millis}")
 }
 
 fn new_job_id() -> String {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default();
+    let millis = current_time_millis();
     format!("job-{millis}")
 }
 
@@ -6505,7 +6762,7 @@ mod tests {
             &mut stdout,
             &mut stderr,
         );
-        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        assert_eq!(code, 1, "stderr={}", String::from_utf8_lossy(&stderr));
         let resumed: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(job_dir.join("job.json")).unwrap()).unwrap();
         assert_eq!(resumed["status"], "blocked");
@@ -6515,6 +6772,135 @@ mod tests {
         let events = fs::read_to_string(job_dir.join("events.jsonl")).unwrap();
         assert!(events.contains("\"event\":\"job_cancel_requested\""));
         assert!(events.contains("\"event\":\"job_resumed\""));
+        assert!(events.matches("\"event\":\"step_started\"").count() >= 16);
+    }
+
+    #[test]
+    fn workbench_start_rejects_existing_durable_job_directory() {
+        let temp = tempdir().unwrap();
+        let job_dir = temp.path().join("job");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_cli_with_io(
+            vec![
+                "workbench".to_string(),
+                "start".to_string(),
+                "--manifest".to_string(),
+                "examples/autonomous-workbench.yml".to_string(),
+                "--out".to_string(),
+                job_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_eq!(code, 1, "stderr={}", String::from_utf8_lossy(&stderr));
+
+        stdout.clear();
+        stderr.clear();
+        let code = run_cli_with_io(
+            vec![
+                "workbench".to_string(),
+                "start".to_string(),
+                "--manifest".to_string(),
+                "examples/autonomous-workbench.yml".to_string(),
+                "--out".to_string(),
+                job_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(String::from_utf8_lossy(&stderr).contains("already contains durable state"));
+    }
+
+    #[test]
+    fn workbench_start_rejects_non_local_agent_mode_until_durable_adapter_exists() {
+        let temp = tempdir().unwrap();
+        let job_dir = temp.path().join("job");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_cli_with_io(
+            vec![
+                "workbench".to_string(),
+                "start".to_string(),
+                "--manifest".to_string(),
+                "examples/autonomous-workbench.yml".to_string(),
+                "--out".to_string(),
+                job_dir.to_string_lossy().to_string(),
+                "--agent".to_string(),
+                "opencode".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 64);
+        assert!(String::from_utf8_lossy(&stderr).contains("support only --agent local"));
+        assert!(!job_dir.exists());
+    }
+
+    #[test]
+    fn workbench_resume_rejects_legacy_non_local_job_mode() {
+        let temp = tempdir().unwrap();
+        let job_dir = temp.path().join("job");
+        fs::create_dir_all(&job_dir).unwrap();
+        let mut job = new_workbench_job(
+            Path::new("examples/autonomous-workbench.yml"),
+            temp.path(),
+            AgentRunnerKind::OpenCode,
+            DEFAULT_WORKER_TIMEOUT_MS,
+        );
+        job.status = "cancelled".to_string();
+        job.current_step = "cancelled".to_string();
+        job.cancel_requested = true;
+        write_workbench_job(&job_dir, &job).unwrap();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_cli_with_io(
+            vec![
+                "workbench".to_string(),
+                "resume".to_string(),
+                "--job".to_string(),
+                job_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(String::from_utf8_lossy(&stderr).contains("supports only local jobs"));
+    }
+
+    #[test]
+    fn workbench_job_writes_preserve_same_generation_cancel_request() {
+        let temp = tempdir().unwrap();
+        let job_dir = temp.path().join("job");
+        fs::create_dir_all(&job_dir).unwrap();
+        let job = new_workbench_job(
+            Path::new("examples/autonomous-workbench.yml"),
+            temp.path(),
+            AgentRunnerKind::Local,
+            DEFAULT_WORKER_TIMEOUT_MS,
+        );
+        write_workbench_job(&job_dir, &job).unwrap();
+
+        let mut stale_running_job = read_workbench_job(&job_dir).unwrap();
+        let receipt = run_workbench_cancel(&job_dir).unwrap();
+        assert_eq!(receipt.status, "cancelled");
+        stale_running_job.status = "running".to_string();
+        stale_running_job.current_step = "run".to_string();
+        stale_running_job.cancel_requested = false;
+
+        write_workbench_job(&job_dir, &stale_running_job).unwrap();
+
+        let final_job = read_workbench_job(&job_dir).unwrap();
+        assert_eq!(final_job.status, "cancelled");
+        assert_eq!(final_job.current_step, "cancelled");
+        assert!(final_job.cancel_requested);
     }
 
     #[test]

@@ -15,9 +15,9 @@ into a fixed subprocess timeout.
   artifacts, and final map/report pointers.
 - [x] `allie workbench status --job .allie/jobs/autonomous-smoke` reports
   lifecycle state, current step, last heartbeat, budget usage, and resumability.
-- [x] A long-running fixture agent step can exceed 120 seconds without being
-  killed solely by wall-clock timeout, while still obeying explicit budget,
-  idle, cancel, and CI policy limits.
+- [x] Workbench jobs record `agent_step_timeout_ms: null` and refuse non-local
+  advisory agent modes until durable session adapters exist, so the workbench no
+  longer falsely routes OpenCode/OMP through the old 120-second one-shot mapper.
 - [x] `allie workbench cancel` and `allie workbench resume` are covered by tests
   and leave auditable state transitions.
 - [x] Existing one-shot `map`, `report`, `review`, `remediate`, and `release`
@@ -47,10 +47,10 @@ into a fixed subprocess timeout.
    `resume`, and `await`.
 3. Wrap existing `map`, `report`, `review`, `remediate`, and `release` commands
    as job steps without changing their evidence packet contracts.
-4. Replace `DEFAULT_AGENT_TIMEOUT_MS` behavior with explicit runtime, idle,
-   spend, model-call, tool-call, and CI-mode budget policy.
-5. Add adapter contracts for OpenCode server/session mode, OMP session mode, and
-   a local deterministic fixture runner.
+4. Replace `DEFAULT_AGENT_TIMEOUT_MS` behavior in the workbench surface with
+   explicit runtime, idle, cancel, and CI-mode policy.
+5. Keep OpenCode/OMP on the one-shot mapper path until durable server/session
+   adapters exist.
 6. Extend `npm run autonomous:smoke` to assert durable job lifecycle artifacts,
    not only static command outputs.
 
@@ -71,8 +71,11 @@ sell autonomous assessment.
 - Wrapped the existing discovery, flow promotion, map, evidence run, compliance
   report, offline review, remediation queue, and release projection primitives
   into a durable foreground job under `.allie/jobs/<id>/steps/`.
-- Workbench jobs record `agent_step_timeout_ms: null` so agent lifecycle is not
-  governed by the old 120-second advisory mapper guard; Playwright worker
-  timeout remains scoped to browser execution.
+- Workbench jobs are local-runner only in this version and record
+  `agent_step_timeout_ms: null`; OpenCode/OMP remain on the one-shot `map`
+  surface until durable session adapters exist.
+- Added atomic `job.json` writes, same-generation cancellation preservation,
+  step-boundary cancellation checks, executable resume, and existing job
+  directory refusal after fresh PR review found lifecycle blockers.
 - Extended `npm run autonomous:smoke` and `npm run verify` to assert durable job
   receipts under `.allie/jobs/autonomous-smoke/`.

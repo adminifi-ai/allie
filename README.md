@@ -80,9 +80,9 @@ produce a neutral review-required decision instead of a hard block.
 cargo run --locked -- workbench start --manifest examples/autonomous-workbench.yml --out .allie/jobs/autonomous
 ```
 
-The workbench command is the durable operator entrypoint for autonomous work. It
-writes a job ledger, lifecycle events, step receipts, generated artifacts, and
-final pointers under one directory:
+The workbench command is the durable operator entrypoint for autonomous local
+work. It writes a job ledger, lifecycle events, step receipts, generated
+artifacts, and final pointers under one fresh directory:
 
 ```sh
 .allie/jobs/autonomous/job.json
@@ -102,6 +102,11 @@ cargo run --locked -- workbench status --job .allie/jobs/autonomous
 cargo run --locked -- workbench cancel --job .allie/jobs/autonomous
 cargo run --locked -- workbench resume --job .allie/jobs/autonomous
 ```
+
+`workbench start` refuses an existing durable job directory; use `workbench
+resume` for an existing job or choose a new `--out` path. Workbench jobs are
+local-runner only in this version; `allie map --agent opencode|omp` remains
+available as a one-shot advisory mapper until durable session adapters exist.
 
 The one-shot task primitives remain available for debugging or custom
 orchestration:

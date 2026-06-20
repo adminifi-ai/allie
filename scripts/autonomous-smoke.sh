@@ -72,4 +72,18 @@ test -f "$JOB_DIR/steps/review/evidence-reviewed.json"
 test -f "$JOB_DIR/steps/remediation/remediation-queue.json"
 test -f "$JOB_DIR/steps/release/release-summary.json"
 
+set +e
+cargo run --locked -- workbench start \
+  --manifest examples/autonomous-workbench.yml \
+  --out "$JOB_DIR"
+reuse_status=$?
+cargo run --locked -- workbench start \
+  --manifest examples/autonomous-workbench.yml \
+  --out .allie/jobs/autonomous-smoke-opencode \
+  --agent opencode
+agent_status=$?
+set -e
+test "$reuse_status" -eq 2
+test "$agent_status" -eq 64
+
 echo "autonomous smoke passed"
