@@ -348,6 +348,15 @@ fn run_verify_pipeline(options: &VerifyOptions) -> Result<VerifyPipelineReceipts
         manifest_path: promoted.manifest_path.clone(),
         out_dir: options.out_dir.join("run"),
     })?;
+    if manifest.model.enabled {
+        match run_agentic_review(&manifest, &run.evidence_path) {
+            Ok(summary) => eprintln!(
+                "Agentic review: {} criteria, {} model call(s), status {}",
+                summary.criteria, summary.calls, summary.status
+            ),
+            Err(error) => eprintln!("Agentic review skipped (criteria stay needs_review): {error}"),
+        }
+    }
     let report = run_compliance_report(ReportOptions {
         map_path: map.map_path.clone(),
         packet_path: run.evidence_path.clone(),

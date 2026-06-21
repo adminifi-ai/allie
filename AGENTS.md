@@ -13,6 +13,7 @@ npm run worker:smoke
 npm run evidence:smoke
 npm run consumer:smoke
 npm run consumer-cwd:smoke
+npm run agentic:smoke
 npm run release:smoke
 npm run autonomous:smoke
 ```
