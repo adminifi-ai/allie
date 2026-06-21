@@ -59,6 +59,11 @@ async function run(request) {
     for (const group of groups) {
       if (group.items.length === 0) continue;
       const groupMedia = mediaForGroup(group.kind, media);
+      // The model sees the full page; the report attaches only criterion-specific
+      // media (focus montage, clips) since the full page already shows once in
+      // the report's "what Allie inspected" gallery — avoids inlining the same
+      // screenshot dozens of times.
+      const reportMedia = groupMedia.filter((entry) => entry !== media.fullpage);
       const verdicts = {};
       for (const batch of chunk(group.items, 8)) {
         if (apiKey && calls < maxCalls) {
@@ -85,7 +90,7 @@ async function run(request) {
           rationale: verdict?.rationale || 'Agentic review did not return an assessment for this criterion; the captured evidence is attached for human review.',
           reviewer_guidance: verdict?.reviewer_guidance || 'Review the attached evidence manually against this criterion.',
           confidence: verdict ? 'agent_inferred' : 'not_observed',
-          media: groupMedia.map((entry) => ({
+          media: reportMedia.map((entry) => ({
             kind: entry.kind,
             caption: entry.caption,
             path: path.relative(artifactsDir, entry.absPath).split(path.sep).join('/'),
