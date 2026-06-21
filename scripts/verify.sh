@@ -8,6 +8,7 @@ npm run evidence:smoke
 npm run visibility:smoke
 npm run coverage:smoke
 npm run consumer:smoke
+npm run consumer-cwd:smoke
 npm run release:smoke
 npm run autonomous:smoke
 
