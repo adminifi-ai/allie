@@ -150,6 +150,28 @@ finding, artifact, or test refs; a replay command is drilldown context but is
 not enough by itself. Model-only findings remain review context until scripted
 or human-attested evidence promotes them.
 
+## Verify Reporter Contract
+
+`allie verify --manifest .allie/manifest.yml --out .allie/verify/latest`
+is the host-agnostic consuming-app command. It runs discovery, generated-flow
+promotion, product mapping, evidence replay, WCAG reporting, and release
+projection, then writes a stable reporter matrix under `reporters/`:
+
+- `allie-report.json`: `allie.verify.v0` summary with paths to all generated
+  artifacts;
+- `allie-compliance-report.json`: stable JSON copy of the WCAG report;
+- `allie-report.html`: local drilldown entrypoint linking to map, report, and
+  release artifacts;
+- `allie-report.md`: Markdown summary for terminals and pull request bodies;
+- `junit.xml`: one-suite CI reporter for pass/fail/error ingestion;
+- `allie.sarif`: SARIF 2.1.0 summary for hosts that ingest code-scanning
+  artifacts.
+
+GitHub, Azure, and local runs use the same command and reporter names. Host
+wrappers archive `.allie/verify/latest` as the artifact root so HTML drilldown
+links can reach sibling map, evidence, report, and release outputs; they do not
+define accessibility policy.
+
 ## Replay
 
 Every packet needs enough data to rerun the same path:

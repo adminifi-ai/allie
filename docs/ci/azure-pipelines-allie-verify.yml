@@ -1,0 +1,35 @@
+trigger:
+  branches:
+    include:
+      - main
+      - master
+
+pr:
+  branches:
+    include:
+      - main
+      - master
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+
+  - script: |
+      git clone --depth 1 https://github.com/adminifi-ai/allie .allie/tooling/allie
+      cargo install --path .allie/tooling/allie --locked
+      cd .allie/tooling/allie
+      npm ci
+      npx playwright install chromium
+    displayName: Install Allie
+
+  - script: allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
+    displayName: Run Allie
+    env:
+      ALLIE_BROWSER_WORKER: .allie/tooling/allie/workers/browser/run.mjs
+
+  - publish: .allie/verify/latest
+    artifact: allie-verify
+    displayName: Publish Allie evidence
+    condition: always()

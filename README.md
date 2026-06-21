@@ -26,6 +26,56 @@ Accessibility work is often split across manual expert review, browser extension
 - Model gateway for multimodal first-pass review, with OpenRouter only behind strict privacy and provider-routing policy.
 - Local HTML/JSON reports first; hosted dashboards later.
 
+## Consumer Contract
+
+Allie's consuming-app contract is local and host-agnostic first:
+
+```sh
+allie init --manifest .allie/manifest.yml --app-name "My App"
+allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
+```
+
+`allie init` writes a minimal manifest without assuming GitHub, Azure, or a
+hosted dashboard. By default it points at `http://127.0.0.1:3000`; pass
+`--fixture-dir <dir>` when the target is a checked-in static fixture.
+
+`allie verify` is the primary operator command for consuming apps. It composes
+the existing discovery, generated-flow, product-map, evidence-run, WCAG report,
+and release-projection primitives, then writes stable reporter files:
+
+```sh
+.allie/verify/latest/reporters/allie-report.json
+.allie/verify/latest/reporters/allie-compliance-report.json
+.allie/verify/latest/reporters/allie-report.html
+.allie/verify/latest/reporters/allie-report.md
+.allie/verify/latest/reporters/junit.xml
+.allie/verify/latest/reporters/allie.sarif
+```
+
+GitHub and Azure examples live in [docs/ci](docs/ci). They call the same
+`allie verify` command and upload the full `.allie/verify/latest` artifact root
+so HTML drilldowns can reach the map, evidence, WCAG report, release summary,
+JUnit, and SARIF files. Host-specific files do not fork accessibility policy.
+
+Until Allie has a packaged worker distribution, arbitrary repositories need the
+Rust binary plus the browser worker checkout:
+
+```sh
+git clone --depth 1 https://github.com/adminifi-ai/allie .allie/tooling/allie
+cargo install --path .allie/tooling/allie --locked
+cd .allie/tooling/allie
+npm ci
+npx playwright install chromium
+cd -
+ALLIE_BROWSER_WORKER=.allie/tooling/allie/workers/browser/run.mjs \
+  allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
+```
+
+Interpret results as evidence status: `approved` exits `0`, `needs_review`
+exits `0` with neutral review-required evidence, `blocked` exits `1` because
+deterministic or required evidence blocks release, and infrastructure failures
+exit `2`.
+
 ## Repository Map
 
 - [SPEC.md](SPEC.md): product contract and acceptance model.
@@ -164,6 +214,7 @@ cargo fmt --check
 cargo test --locked
 npm run worker:smoke
 npm run evidence:smoke
+npm run consumer:smoke
 npm run release:smoke
 npm run autonomous:smoke
 cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest
@@ -172,6 +223,8 @@ cargo run --locked -- release --packet .allie/runs/latest/evidence.json --out .a
 
 The worker smoke proves Playwright plus axe can inspect the checked-in fixture.
 The evidence smoke leaves a stable receipt under `.allie/runs/v0-smoke/`. The
+consumer smoke proves `allie init` and `allie verify` produce JSON, HTML,
+Markdown, JUnit, and SARIF reporters from the same local manifest contract. The
 release smoke projects that packet into `.allie/releases/v0-smoke/`. The final
 two commands are the V0 live oracle and release projection, leaving inspectable
 evidence under `.allie/runs/latest/` and `.allie/releases/latest/`.

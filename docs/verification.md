@@ -11,6 +11,24 @@ npm ci
 npx playwright install chromium
 ```
 
+In a consuming repository that does not vendor Allie's worker yet, install the
+Rust binary and browser worker checkout together:
+
+```sh
+git clone --depth 1 https://github.com/adminifi-ai/allie .allie/tooling/allie
+cargo install --path .allie/tooling/allie --locked
+cd .allie/tooling/allie
+npm ci
+npx playwright install chromium
+cd -
+ALLIE_BROWSER_WORKER=.allie/tooling/allie/workers/browser/run.mjs \
+  allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
+```
+
+CI should archive the whole `.allie/verify/latest` directory, not just
+`reporters/`, because `reporters/allie-report.html` links to sibling map,
+evidence, WCAG report, and release artifacts.
+
 ## Gate
 
 Run the full local gate:
@@ -26,6 +44,7 @@ cargo fmt --check
 cargo test --locked
 npm run worker:smoke
 npm run evidence:smoke
+npm run consumer:smoke
 npm run release:smoke
 npm run autonomous:smoke
 ```
@@ -55,6 +74,28 @@ writer work together. It leaves:
 The expected happy-path packet summary is `status: pass`, `exit_code: 0`,
 one captured state, and artifact types `axe_json`, `screenshot`, and
 `html_report`.
+
+`npm run consumer:smoke` proves the portable consuming-app contract. It
+scaffolds a manifest with `allie init`, runs `allie verify` over the same
+manifest, checks that GitHub and Azure examples call the same CLI command, and
+leaves:
+
+```text
+.allie/consumer-contract-smoke/manifest.yml
+.allie/consumer-contract-smoke/discovery/discovery.json
+.allie/consumer-contract-smoke/flow/generated-flow.yml
+.allie/consumer-contract-smoke/map/product-map.json
+.allie/consumer-contract-smoke/run/evidence.json
+.allie/consumer-contract-smoke/report/compliance-report.json
+.allie/consumer-contract-smoke/report/compliance-report.html
+.allie/consumer-contract-smoke/release/release-summary.json
+.allie/consumer-contract-smoke/reporters/allie-report.json
+.allie/consumer-contract-smoke/reporters/allie-compliance-report.json
+.allie/consumer-contract-smoke/reporters/allie-report.html
+.allie/consumer-contract-smoke/reporters/allie-report.md
+.allie/consumer-contract-smoke/reporters/junit.xml
+.allie/consumer-contract-smoke/reporters/allie.sarif
+```
 
 `npm run release:smoke` proves the packet can drive release decisions without a
 second status model. It reads `.allie/runs/v0-smoke/evidence.json` and leaves:
@@ -122,6 +163,10 @@ For `allie release`, exit `1` means a packet failure, missing changed-surface
 evidence, expired touched waiver, or invalid touched-waiver metadata blocked the
 release decision. Stale evidence and model-only findings are review-required
 neutral outputs, not hard release blocks.
+
+For `allie verify`, `approved` and `needs_review` exit `0`; `blocked` exits `1`
+because required evidence blocks the projection; infrastructure failures exit
+`2`.
 
 ## Trust-Boundary Fixtures
 

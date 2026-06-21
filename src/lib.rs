@@ -13,6 +13,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wait_timeout::ChildExt;
 
+mod consumer;
+
 const PRODUCT_LINE: &str = "Allie: accessibility evidence for every release.";
 const NEXT_STEP: &str = "Next implementation target: allie run --manifest <flow.yml>";
 const EVIDENCE_SCHEMA: &str = "allie.evidence.v0";
@@ -292,6 +294,78 @@ pub fn run_cli_with_io(
     }
 
     match args.first().map(String::as_str) {
+        Some("init") => match consumer::parse_init_options(&args[1..]) {
+            Ok(options) => match consumer::run_init(options) {
+                Ok(receipt) => {
+                    let _ = writeln!(
+                        stdout,
+                        "Allie manifest: {}",
+                        receipt.manifest_path.display()
+                    );
+                    let _ = writeln!(stdout, "Next: {}", receipt.next_command);
+                    ExitClass::Success.code()
+                }
+                Err(error) => {
+                    let _ = writeln!(stderr, "allie: {error}");
+                    ExitClass::InfrastructureFailure.code()
+                }
+            },
+            Err(error) => {
+                let _ = writeln!(stderr, "allie: {error}");
+                print_usage(stderr);
+                ExitClass::Usage.code()
+            }
+        },
+        Some("verify") => match consumer::parse_verify_options(&args[1..]) {
+            Ok(options) => match consumer::run_verify(options) {
+                Ok(receipt) => {
+                    let _ = writeln!(stdout, "Allie verification status: {}", receipt.status);
+                    let _ = writeln!(
+                        stdout,
+                        "Summary JSON: {}",
+                        receipt.summary_json_path.display()
+                    );
+                    let _ = writeln!(
+                        stdout,
+                        "Summary Markdown: {}",
+                        receipt.summary_markdown_path.display()
+                    );
+                    let _ = writeln!(
+                        stdout,
+                        "Report JSON: {}",
+                        receipt.report_json_path.display()
+                    );
+                    let _ = writeln!(
+                        stdout,
+                        "Report HTML: {}",
+                        receipt.report_html_path.display()
+                    );
+                    let _ = writeln!(stdout, "JUnit: {}", receipt.junit_path.display());
+                    let _ = writeln!(stdout, "SARIF: {}", receipt.sarif_path.display());
+                    let _ = writeln!(
+                        stdout,
+                        "Release summary: {}",
+                        receipt.release_summary_path.display()
+                    );
+                    let _ = writeln!(
+                        stdout,
+                        "Product map: {}",
+                        receipt.product_map_path.display()
+                    );
+                    let _ = writeln!(stdout, "Evidence: {}", receipt.evidence_path.display());
+                    receipt.exit_class.code()
+                }
+                Err(error) => {
+                    let _ = writeln!(stderr, "allie: {error}");
+                    ExitClass::InfrastructureFailure.code()
+                }
+            },
+            Err(error) => {
+                let _ = writeln!(stderr, "allie: {error}");
+                print_usage(stderr);
+                ExitClass::Usage.code()
+            }
+        },
         Some("run") => match parse_run_options(&args[1..]) {
             Ok(options) => match run_v0(options) {
                 Ok(receipt) => {
@@ -505,7 +579,7 @@ pub fn run_cli_with_io(
 fn print_usage(writer: &mut dyn Write) {
     let _ = writeln!(
         writer,
-        "Usage:\n  allie run --manifest <flow.yml> --out <output-dir>\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie remediate --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
+        "Usage:\n  allie init [--manifest .allie/manifest.yml] [--app-name <name>] [--base-url <url> | --fixture-dir <dir>] [--force]\n  allie verify [--manifest .allie/manifest.yml] [--out .allie/verify/latest] [--project-root <dir>] [--changed-surface <id>] [--agent local|opencode|omp] [--stale-after-days <days>]\n  allie run --manifest <flow.yml> --out <output-dir>\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie remediate --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
     );
 }
 
@@ -6937,6 +7011,60 @@ mod tests {
         assert_eq!(manifest.id, "login-flow");
         assert_eq!(manifest.policy.profile, "wcag22-aa");
         assert_eq!(manifest.flow.states[0].id, "login-form");
+    }
+
+    #[test]
+    fn init_cli_scaffolds_manifest_and_next_verify_command() {
+        let temp = tempdir().unwrap();
+        let manifest_path = temp.path().join(".allie/manifest.yml");
+        let fixture_dir = fs::canonicalize("fixtures/login").unwrap();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_cli_with_io(
+            vec![
+                "init".to_string(),
+                "--manifest".to_string(),
+                manifest_path.to_string_lossy().to_string(),
+                "--app-name".to_string(),
+                "Allie Consumer Fixture".to_string(),
+                "--fixture-dir".to_string(),
+                fixture_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let stdout = String::from_utf8(stdout).unwrap();
+        assert!(stdout.contains("allie verify --manifest"));
+        assert!(!stdout.to_lowercase().contains("github"));
+        let manifest = FlowManifest::load(&manifest_path).unwrap();
+        manifest.validate().unwrap();
+        assert_eq!(manifest.app_name, "Allie Consumer Fixture");
+        assert_eq!(manifest.target.kind, "local_fixture");
+        assert_eq!(manifest.policy.profile, "wcag22-aa");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_cli_with_io(
+            vec![
+                "init".to_string(),
+                "--manifest".to_string(),
+                manifest_path.to_string_lossy().to_string(),
+                "--app-name".to_string(),
+                "Allie Consumer Fixture".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, ExitClass::InfrastructureFailure.code());
+        assert!(
+            String::from_utf8(stderr)
+                .unwrap()
+                .contains("already exists")
+        );
     }
 
     #[test]

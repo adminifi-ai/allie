@@ -1,0 +1,32 @@
+name: Allie accessibility evidence
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  allie:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Allie
+        run: |
+          git clone --depth 1 https://github.com/adminifi-ai/allie .allie/tooling/allie
+          cargo install --path .allie/tooling/allie --locked
+          cd .allie/tooling/allie
+          npm ci
+          npx playwright install chromium
+
+      - name: Run Allie
+        env:
+          ALLIE_BROWSER_WORKER: .allie/tooling/allie/workers/browser/run.mjs
+        run: allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
+
+      - name: Upload Allie evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allie-verify
+          path: .allie/verify/latest
