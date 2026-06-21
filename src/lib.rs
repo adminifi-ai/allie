@@ -3055,7 +3055,7 @@ fn compliance_status(verdicts: &[&Verdict], findings: &[&Finding]) -> String {
     } else if verdicts.iter().any(|verdict| verdict.status == "pass") {
         "pass".to_string()
     } else {
-        "not_tested".to_string()
+        "needs_review".to_string()
     }
 }
 
@@ -3181,7 +3181,7 @@ fn obligation_why(
             "{} has no deterministic, scripted, agentic, or human-attested evidence in this packet.",
             criterion_title(obligation)
         ),
-        "not_applicable" => format!("{} was marked not applicable.", criterion_title(obligation)),
+        "not_applicable" => applicability_reason(obligation),
         _ => format!("{} has status {}.", criterion_title(obligation), status),
     }
 }
@@ -3195,6 +3195,7 @@ fn human_review_status(status: &str, evidence_class: &str) -> String {
         ("fail", _) => "required_for_remediation_signoff".to_string(),
         ("needs_review", _) => "required".to_string(),
         ("not_tested", _) => "required_before_claim".to_string(),
+        ("not_applicable", _) => "not_required".to_string(),
         _ => "review_status_unknown".to_string(),
     }
 }
@@ -3359,6 +3360,7 @@ fn criterion_matrix_why(
             "{} has supporting evidence in {} of {} surface/state cell(s).",
             criterion.title, with_evidence, total
         ),
+        "not_applicable" => applicability_reason(&criterion.id),
         _ => format!(
             "{} has aggregate status {} across {} surface/state cell(s).",
             criterion.title, status, total
@@ -3506,7 +3508,7 @@ fn criterion_cell_status(
     } else if method == "human_review" {
         "needs_review".to_string()
     } else {
-        "not_tested".to_string()
+        "needs_review".to_string()
     }
 }
 
@@ -6035,6 +6037,41 @@ struct WorkerStateResult {
     network_errors: Vec<String>,
     #[serde(default)]
     state_errors: Vec<String>,
+    #[serde(default)]
+    features: Option<PageFeatures>,
+}
+
+/// Lightweight inventory of page content + scripted signals the worker reports,
+/// used by Allie's applicability oracle to decide automatically which criteria
+/// do not apply and to run a couple of deterministic/scripted checks.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct PageFeatures {
+    #[serde(default)]
+    audio: u32,
+    #[serde(default)]
+    video: u32,
+    #[serde(default)]
+    forms: u32,
+    #[serde(default)]
+    inputs: u32,
+    #[serde(default)]
+    draggable: u32,
+    #[serde(default)]
+    iframes: u32,
+    #[serde(default)]
+    images: u32,
+    #[serde(default)]
+    links: u32,
+    #[serde(default)]
+    headings: u32,
+    #[serde(default)]
+    lang: bool,
+    #[serde(default)]
+    lang_value: String,
+    #[serde(default)]
+    reflow_overflow: bool,
+    #[serde(default)]
+    reflow_checked: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -6149,6 +6186,8 @@ struct StateMetadata {
     console_errors: Vec<String>,
     network_errors: Vec<String>,
     state_errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    features: Option<PageFeatures>,
 }
 
 #[derive(Debug)]
@@ -6880,6 +6919,174 @@ fn profile_obligation_title(obligation: &str) -> Option<String> {
         .and_then(|item| item["title"].as_str().map(ToString::to_string))
 }
 
+/// Combine the per-state feature inventories into one page-level view: counts
+/// sum, `lang` holds only if every inspected state declared it, and a reflow
+/// overflow on any state counts as an overflow.
+fn aggregate_features<'a>(
+    states: impl IntoIterator<Item = Option<&'a PageFeatures>>,
+) -> PageFeatures {
+    let mut agg = PageFeatures::default();
+    let mut saw_state = false;
+    let mut lang_all = true;
+    for state in states {
+        let Some(features) = state else { continue };
+        saw_state = true;
+        agg.audio += features.audio;
+        agg.video += features.video;
+        agg.forms += features.forms;
+        agg.inputs += features.inputs;
+        agg.draggable += features.draggable;
+        agg.iframes += features.iframes;
+        agg.images += features.images;
+        agg.links += features.links;
+        agg.headings += features.headings;
+        if !features.lang {
+            lang_all = false;
+        }
+        if agg.lang_value.is_empty() && !features.lang_value.is_empty() {
+            agg.lang_value = features.lang_value.clone();
+        }
+        if features.reflow_overflow {
+            agg.reflow_overflow = true;
+        }
+        if features.reflow_checked {
+            agg.reflow_checked = true;
+        }
+    }
+    agg.lang = saw_state && lang_all;
+    agg
+}
+
+/// True when a criterion does not apply given the page's content — e.g. no
+/// media for the time-based-media criteria, or no forms for input-assistance.
+fn feature_not_applicable(obligation: &str, features: &PageFeatures) -> bool {
+    let media_absent = features.audio == 0 && features.video == 0;
+    let inputs_absent = features.forms == 0 && features.inputs == 0;
+    matches!(
+        obligation,
+        "wcag22-aa:1.2.1-audio-only-and-video-only-prerecorded"
+            | "wcag22-aa:1.2.2-captions-prerecorded"
+            | "wcag22-aa:1.2.3-audio-description-or-media-alternative-prerecorded"
+            | "wcag22-aa:1.2.4-captions-live"
+            | "wcag22-aa:1.2.5-audio-description-prerecorded"
+        if media_absent
+    ) || (obligation == "wcag22-aa:1.4.2-audio-control" && features.audio == 0)
+        || (matches!(
+            obligation,
+            "wcag22-aa:1.3.5-identify-input-purpose"
+                | "wcag22-aa:3.3.1-error-identification"
+                | "wcag22-aa:3.3.3-error-suggestion"
+                | "wcag22-aa:3.3.4-error-prevention-legal-financial-data"
+                | "wcag22-aa:3.3.7-redundant-entry"
+                | "wcag22-aa:3.3.8-accessible-authentication-minimum"
+        ) && inputs_absent)
+        || (obligation == "wcag22-aa:2.5.7-dragging-movements" && features.draggable == 0)
+}
+
+/// Human-readable reason an applicable-by-default criterion was ruled out.
+fn applicability_reason(obligation: &str) -> String {
+    match obligation {
+        o if o.starts_with("wcag22-aa:1.2.") => {
+            "No <audio> or <video> elements were detected on the inspected states, so this time-based media criterion does not apply.".to_string()
+        }
+        "wcag22-aa:1.4.2-audio-control" => {
+            "No <audio> elements were detected, so audio control does not apply.".to_string()
+        }
+        "wcag22-aa:1.3.5-identify-input-purpose"
+        | "wcag22-aa:3.3.1-error-identification"
+        | "wcag22-aa:3.3.3-error-suggestion"
+        | "wcag22-aa:3.3.4-error-prevention-legal-financial-data"
+        | "wcag22-aa:3.3.7-redundant-entry"
+        | "wcag22-aa:3.3.8-accessible-authentication-minimum" => {
+            "No forms or input fields were detected on the inspected states, so this input-assistance criterion does not apply.".to_string()
+        }
+        "wcag22-aa:2.5.7-dragging-movements" => {
+            "No draggable elements were detected, so dragging-movement alternatives do not apply.".to_string()
+        }
+        other => format!(
+            "{} was determined not applicable to the inspected content.",
+            criterion_title(other)
+        ),
+    }
+}
+
+/// Decide a criterion's verdict from page features and observed signals. This
+/// is the rule that guarantees no criterion is left `not_tested`: every path
+/// returns applicable evidence (pass/fail/not_applicable) or queues the
+/// criterion for agentic (AI) review.
+fn criterion_feature_verdict(
+    obligation: &str,
+    method: &str,
+    features: &PageFeatures,
+    keyboard_observed: bool,
+) -> (&'static str, &'static str, &'static str, &'static str) {
+    if feature_not_applicable(obligation, features) {
+        return (
+            "not_applicable",
+            "machine_proven",
+            "applicability",
+            "allie-applicability-oracle",
+        );
+    }
+    match obligation {
+        "wcag22-aa:3.1.1-language-of-page" => {
+            return if features.lang {
+                (
+                    "pass",
+                    "machine_proven",
+                    "deterministic",
+                    "allie-lang-attribute-check",
+                )
+            } else {
+                (
+                    "fail",
+                    "machine_proven",
+                    "deterministic",
+                    "allie-lang-attribute-check",
+                )
+            };
+        }
+        "wcag22-aa:1.4.10-reflow" if features.reflow_checked => {
+            return if features.reflow_overflow {
+                (
+                    "fail",
+                    "script_observed",
+                    "scripted",
+                    "allie-reflow-320px-check",
+                )
+            } else {
+                (
+                    "pass",
+                    "script_observed",
+                    "scripted",
+                    "allie-reflow-320px-check",
+                )
+            };
+        }
+        _ => {}
+    }
+    match method {
+        "axe" => (
+            "pass",
+            "machine_proven",
+            "deterministic",
+            "axe-core-success-criterion-tags",
+        ),
+        "scripted" if keyboard_observed && obligation.contains("keyboard") => (
+            "pass",
+            "script_observed",
+            "scripted",
+            "playwright-keyboard-traversal",
+        ),
+        _ => (
+            "needs_review",
+            "requires_human_or_agent_review",
+            "agentic",
+            "allie-agentic-review-queue",
+        ),
+    }
+}
+
 fn verdicts_from_findings(
     manifest: &FlowManifest,
     response: &WorkerResponse,
@@ -6929,6 +7136,12 @@ fn verdicts_from_findings(
         .collect::<Vec<_>>();
 
     if manifest.policy.profile == "wcag22-aa" {
+        let features =
+            aggregate_features(response.states.iter().map(|state| state.features.as_ref()));
+        let keyboard_observed = response
+            .states
+            .iter()
+            .any(|state| !state.keyboard_focus_order.is_empty());
         for criterion in wcag22_success_criteria() {
             let Some(obligation) = criterion["obligation"].as_str() else {
                 continue;
@@ -6946,36 +7159,8 @@ fn verdicts_from_findings(
                 continue;
             }
             let method = criterion["method"].as_str().unwrap_or("human_review");
-            let keyboard_observed = response
-                .states
-                .iter()
-                .any(|state| !state.keyboard_focus_order.is_empty());
-            let (status, confidence, evidence_class, source) = match method {
-                "axe" => (
-                    "pass",
-                    "machine_proven",
-                    "deterministic",
-                    "axe-core-success-criterion-tags",
-                ),
-                "scripted" if keyboard_observed && obligation.contains("keyboard") => (
-                    "pass",
-                    "script_observed",
-                    "scripted",
-                    "playwright-keyboard-traversal",
-                ),
-                "scripted" => (
-                    "not_tested",
-                    "script_observed",
-                    "scripted",
-                    "allie-obligation-profile",
-                ),
-                _ => (
-                    "needs_review",
-                    "requires_human_or_agent_review",
-                    "human",
-                    "allie-obligation-profile",
-                ),
-            };
+            let (status, confidence, evidence_class, source) =
+                criterion_feature_verdict(obligation, method, &features, keyboard_observed);
             verdicts.push(Verdict {
                 obligation: obligation.to_string(),
                 status: status.to_string(),
@@ -6995,10 +7180,10 @@ fn verdicts_from_findings(
             if seen.insert(obligation.clone()) {
                 verdicts.push(Verdict {
                     obligation,
-                    status: "not_tested".to_string(),
-                    confidence: "script_observed".to_string(),
+                    status: "needs_review".to_string(),
+                    confidence: "requires_human_or_agent_review".to_string(),
                     evidence_class: "scripted".to_string(),
-                    source: "allie-obligation-profile".to_string(),
+                    source: "allie-agentic-review-queue".to_string(),
                     affected_states: captured_states.clone(),
                     finding_refs: Vec::new(),
                 });
@@ -7025,10 +7210,10 @@ fn verdicts_from_findings(
                 .into_iter()
                 .map(|obligation| Verdict {
                     obligation,
-                    status: "not_tested".to_string(),
-                    confidence: "script_observed".to_string(),
+                    status: "needs_review".to_string(),
+                    confidence: "requires_human_or_agent_review".to_string(),
                     evidence_class: "scripted".to_string(),
-                    source: "allie-obligation-profile".to_string(),
+                    source: "allie-agentic-review-queue".to_string(),
                     affected_states: captured_states.clone(),
                     finding_refs: Vec::new(),
                 }),
@@ -7105,6 +7290,7 @@ fn coverage_from_response(
                 console_errors: state.console_errors.clone(),
                 network_errors: state.network_errors.clone(),
                 state_errors: state.state_errors.clone(),
+                features: state.features.clone(),
             })
             .collect(),
         standards_obligations_evaluated: obligations.into_iter().collect(),
@@ -7586,7 +7772,8 @@ mod tests {
         assert!(packet.contains("\"infrastructure_failures\": 0"));
         assert!(packet.contains("\"title\": \"Allie Fixture Login\""));
         assert!(packet.contains("wcag22-aa:deterministic-axe-rules"));
-        assert!(packet.contains("\"status\": \"not_tested\""));
+        // Every criterion is attempted: nothing is left "not tested".
+        assert!(!packet.contains("\"status\": \"not_tested\""));
         assert!(packet.contains("\"status\": \"needs_review\""));
         assert!(packet.contains("cargo run --locked -- run --manifest examples/login-flow.yml"));
 
@@ -7865,8 +8052,18 @@ mod tests {
 
         assert!(verdicts.iter().any(|verdict| verdict.status == "pass"
             && verdict.obligation == "wcag22-aa:deterministic-axe-rules"));
-        assert!(verdicts.iter().any(|verdict| verdict.status == "not_tested"
-            && verdict.obligation == "wcag22-aa:2.1.1-keyboard-traversal"));
+        assert!(
+            verdicts
+                .iter()
+                .any(|verdict| verdict.status == "needs_review"
+                    && verdict.obligation == "wcag22-aa:2.1.1-keyboard-traversal")
+        );
+        assert!(
+            !verdicts
+                .iter()
+                .any(|verdict| verdict.status == "not_tested"),
+            "no criterion may be left not_tested"
+        );
         assert!(
             verdicts
                 .iter()
@@ -8244,7 +8441,7 @@ mod tests {
                 .any(|value| value == "axe-core")
         );
 
-        assert_eq!(scripted_cell.status, "not_tested");
+        assert_eq!(scripted_cell.status, "needs_review");
         assert_eq!(scripted_cell.confidence, "script_observed");
         assert!(scripted_cell.artifact_refs.is_empty());
         assert!(scripted_cell.test_refs.is_empty());
@@ -8390,6 +8587,7 @@ mod tests {
             console_errors: Vec::new(),
             network_errors: Vec::new(),
             state_errors: Vec::new(),
+            features: None,
         });
 
         let report = build_compliance_report(
@@ -9298,6 +9496,17 @@ flow:
                 console_errors: Vec::new(),
                 network_errors: Vec::new(),
                 state_errors: Vec::new(),
+                features: Some(PageFeatures {
+                    forms: 1,
+                    inputs: 2,
+                    links: 1,
+                    headings: 1,
+                    lang: true,
+                    lang_value: "en".to_string(),
+                    reflow_checked: true,
+                    reflow_overflow: false,
+                    ..Default::default()
+                }),
             }],
             errors: Vec::new(),
             nondeterminism: Vec::new(),
