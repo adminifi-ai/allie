@@ -11,11 +11,12 @@ cargo fmt --check
 cargo test --locked
 npm run worker:smoke
 npm run evidence:smoke
+npm run consumer:smoke
 npm run release:smoke
 npm run autonomous:smoke
 ```
 
-The browser worker smoke, V0 evidence smoke, release projection smoke, and autonomous workbench smoke are part of the gate; keep them green when worker, fixture, packet, report, release-decision, discovery, review, remediation, or verification behavior changes.
+The browser worker smoke, V0 evidence smoke, consumer contract smoke, release projection smoke, and autonomous workbench smoke are part of the gate; keep them green when worker, fixture, packet, report, release-decision, discovery, review, remediation, verification, or consumer CLI behavior changes.
 
 ## Design Rules
 

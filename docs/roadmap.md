@@ -2,19 +2,24 @@
 
 ## Current V0 Loop
 
-The first local evidence loop is implemented around:
+The first local evidence loop is implemented around the portable consumer
+contract:
 
 ```sh
-cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest
+allie init --manifest .allie/manifest.yml --app-name "My App"
+allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
 ```
 
-It reads the checked-in login manifest, serves the local fixture through the
-browser worker, runs Playwright plus axe, captures a screenshot, writes raw axe
-JSON, emits an `allie.evidence.v0` packet, and generates a local HTML report.
+`allie verify` composes discovery, generated-flow promotion, product mapping,
+browser evidence capture, WCAG reporting, and release projection into one
+host-agnostic command. It writes stable JSON, HTML, Markdown, JUnit, and SARIF
+reporters under `reporters/`.
 
-This is a proof foundation, not the autonomous product. The current system does
-not yet discover application surfaces, generate tests, run vision AI, complete a
-WCAG matrix, or draft remediation.
+This is a proof foundation, not a legal compliance guarantee. The current
+system discovers static/local surfaces, generates replay manifests, runs
+deterministic browser evidence, builds a complete WCAG 2.2 A/AA matrix, adds
+offline agentic review context, and projects release decisions. Authenticated
+staged-app crawling and live multimodal provider calls remain future work.
 
 ## Product Target
 
@@ -34,24 +39,20 @@ Allie should let a compliance engineer point it at an application and receive:
 
 ## Now
 
-1. Replace the synchronous advisory agent helper with durable autonomous jobs
-   (`backlog.d/011-replace-synchronous-agent-helper-with-durable-jobs.md`).
-   A 120-second subprocess timeout is acceptable as a smoke guard, not as the
-   product contract for agentic assessment.
-2. Make WCAG reporting an exact 55-criterion surface matrix
-   (`backlog.d/012-make-wcag-coverage-a-55-criterion-surface-matrix.md`).
-   Supporting checks and aggregate gates should explain evidence, not inflate
-   the standards denominator.
-3. Keep the autonomous workbench smoke green as the primary regression oracle
-   while the V1 job and coverage contracts land (`npm run autonomous:smoke`).
+1. Keep the autonomous workbench and consumer contract smokes green as the
+   primary regression oracles (`npm run autonomous:smoke` and
+   `npm run consumer:smoke`).
+2. Dogfood `allie verify` in real app repos and preserve receipts that show map,
+   evidence, report, release, JUnit, and SARIF artifacts.
+3. Use the competitive landscape to prioritize packet provenance,
+   replayability, privacy governance, and criterion-by-surface drilldown.
 
 ## Next
 
-1. Package the host-agnostic consumer contract with `allie init`, `allie verify`,
-   stable reporter outputs, and GitHub/Azure examples as thin wrappers
-   (`backlog.d/014-package-host-agnostic-consumer-contract.md`).
-2. Add authenticated staged-app discovery and changed-surface inference once the
+1. Add authenticated staged-app discovery and changed-surface inference once the
    job and coverage contracts are explicit.
+2. Add hosted PR/check annotations as adapters over the existing reporter
+   outputs, without duplicating policy in CI-specific files.
 
 Before adding hosted, dashboard, browser-cloud, or AI-heavy work, refresh
 [competitive-landscape.md](competitive-landscape.md) and prefer roadmap slices
