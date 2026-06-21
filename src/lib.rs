@@ -2686,6 +2686,7 @@ fn build_compliance_report(
         .collect::<Vec<_>>();
     let criterion_coverage = criterion_coverage_matrix(map, packet);
     let criteria = aggregate_criteria_from_cells(base_criteria, &criterion_coverage);
+    let criteria = attach_agentic_reviews(criteria, packet, packet_path);
     let summary = compliance_summary(packet, &criteria, supporting_checks.len());
     let surfaces = map
         .surfaces
@@ -2704,7 +2705,166 @@ fn build_compliance_report(
         supporting_checks,
         obligations: criteria,
         surfaces,
+        state_evidence: build_state_evidence(packet, packet_path),
     }
+}
+
+/// Resolve each captured state's full-page screenshot (and focus order) once,
+/// inlining the image as a data URI so the report is self-contained.
+fn build_state_evidence(packet: &EvidencePacket, packet_path: &Path) -> Vec<StateEvidence> {
+    let run_dir = packet_path.parent().unwrap_or_else(|| Path::new("."));
+    packet
+        .coverage
+        .state_metadata
+        .iter()
+        .map(|state| {
+            let media = packet
+                .artifacts
+                .iter()
+                .filter(|artifact| {
+                    is_screenshot_artifact(artifact)
+                        && artifact.related_flow_state.as_deref() == Some(state.id.as_str())
+                        && is_safe_run_relative(&artifact.path)
+                })
+                .filter_map(|artifact| {
+                    artifact_data_uri(&run_dir.join(&artifact.path)).map(|uri| EvidenceMedia {
+                        kind: "screenshot".to_string(),
+                        caption: format!("{} — full page as Allie captured it", state.id),
+                        data_uri: Some(uri),
+                        artifact_ref: Some(artifact.id.clone()),
+                    })
+                })
+                .collect();
+            StateEvidence {
+                id: state.id.clone(),
+                route: state.route.clone(),
+                url: state.url.clone(),
+                title: state.title.clone(),
+                http_status: state.http_status,
+                keyboard_focus_order: state.keyboard_focus_order.clone(),
+                media,
+            }
+        })
+        .collect()
+}
+
+/// Attach each criterion's agentic (vision-model) assessment and its captured
+/// media (screenshots, focus montage, focus/motion clips) to the report,
+/// inlining the media as data URIs so the report is self-contained.
+fn attach_agentic_reviews(
+    mut criteria: Vec<ComplianceObligation>,
+    packet: &EvidencePacket,
+    packet_path: &Path,
+) -> Vec<ComplianceObligation> {
+    if packet.agentic_assessments.is_empty() {
+        return criteria;
+    }
+    let run_dir = packet_path.parent().unwrap_or_else(|| Path::new("."));
+    let by_obligation = packet
+        .agentic_assessments
+        .iter()
+        .map(|record| (record.obligation.as_str(), record))
+        .collect::<BTreeMap<_, _>>();
+    for criterion in &mut criteria {
+        let Some(record) = by_obligation.get(criterion.id.as_str()) else {
+            continue;
+        };
+        let media = record
+            .media
+            .iter()
+            .filter(|media_ref| is_safe_run_relative(&media_ref.path))
+            .filter_map(|media_ref| {
+                artifact_data_uri(&run_dir.join(&media_ref.path)).map(|uri| EvidenceMedia {
+                    kind: media_ref.kind.clone(),
+                    caption: media_ref.caption.clone(),
+                    data_uri: Some(uri),
+                    artifact_ref: None,
+                })
+            })
+            .collect::<Vec<_>>();
+        criterion.agentic_review = Some(AgenticAssessment {
+            assessment: record.assessment.clone(),
+            rationale: record.rationale.clone(),
+            reviewer_guidance: record.reviewer_guidance.clone(),
+            confidence: record.confidence.clone(),
+            provider: record.provider.clone(),
+            model: record.model.clone(),
+            media,
+        });
+    }
+    criteria
+}
+
+fn is_screenshot_artifact(artifact: &ArtifactMetadata) -> bool {
+    artifact.artifact_type == "screenshot"
+        || artifact.path.ends_with(".png")
+        || artifact.path.ends_with(".jpg")
+        || artifact.path.ends_with(".jpeg")
+        || artifact.path.ends_with(".webp")
+}
+
+/// Reject run-relative paths that escape the run directory (absolute, or with a
+/// `..` component), so a hand-edited evidence packet cannot make the report
+/// inline an arbitrary file from disk.
+fn is_safe_run_relative(rel: &str) -> bool {
+    !rel.is_empty()
+        && !Path::new(rel).is_absolute()
+        && !Path::new(rel)
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
+/// Read a binary artifact and encode it as a `data:` URI for inline embedding.
+/// Returns None if the file is missing or too large to inline sensibly.
+fn artifact_data_uri(abs_path: &Path) -> Option<String> {
+    const MAX_INLINE_BYTES: u64 = 6 * 1024 * 1024;
+    let metadata = fs::metadata(abs_path).ok()?;
+    if metadata.len() > MAX_INLINE_BYTES {
+        return None;
+    }
+    let bytes = fs::read(abs_path).ok()?;
+    let mime = match abs_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        Some("svg") => "image/svg+xml",
+        Some("webm") => "video/webm",
+        Some("mp4") => "video/mp4",
+        _ => "application/octet-stream",
+    };
+    Some(format!("data:{};base64,{}", mime, base64_encode(&bytes)))
+}
+
+/// Minimal standard base64 encoder. Kept in-tree to inline evidence images
+/// without adding a dependency to a deliberately small crate graph.
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((triple >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(triple & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 fn compliance_criterion_order(policy_profile: &str, packet: &EvidencePacket) -> Vec<String> {
@@ -2829,7 +2989,26 @@ fn compliance_obligation(
         evidence_class,
         source_url: criterion_source_url(obligation),
         finding_refs: findings.iter().map(|finding| finding.id.clone()).collect(),
+        principle: criterion_principle(obligation),
+        level: criterion_level(obligation),
+        media: Vec::new(),
+        agentic_review: None,
     }
+}
+
+fn criterion_principle(obligation: &str) -> String {
+    criterion_field(obligation, "principle").unwrap_or_else(|| "Supporting Checks".to_string())
+}
+
+fn criterion_level(obligation: &str) -> String {
+    criterion_field(obligation, "level").unwrap_or_default()
+}
+
+fn criterion_field(obligation: &str, field: &str) -> Option<String> {
+    wcag22_success_criteria()
+        .into_iter()
+        .find(|criterion| criterion["obligation"].as_str() == Some(obligation))
+        .and_then(|criterion| criterion[field].as_str().map(ToString::to_string))
 }
 
 fn compliance_supporting_check(
@@ -2938,7 +3117,7 @@ fn compliance_status(verdicts: &[&Verdict], findings: &[&Finding]) -> String {
     } else if verdicts.iter().any(|verdict| verdict.status == "pass") {
         "pass".to_string()
     } else {
-        "not_tested".to_string()
+        "needs_review".to_string()
     }
 }
 
@@ -3064,7 +3243,7 @@ fn obligation_why(
             "{} has no deterministic, scripted, agentic, or human-attested evidence in this packet.",
             criterion_title(obligation)
         ),
-        "not_applicable" => format!("{} was marked not applicable.", criterion_title(obligation)),
+        "not_applicable" => applicability_reason(obligation),
         _ => format!("{} has status {}.", criterion_title(obligation), status),
     }
 }
@@ -3078,6 +3257,7 @@ fn human_review_status(status: &str, evidence_class: &str) -> String {
         ("fail", _) => "required_for_remediation_signoff".to_string(),
         ("needs_review", _) => "required".to_string(),
         ("not_tested", _) => "required_before_claim".to_string(),
+        ("not_applicable", _) => "not_required".to_string(),
         _ => "review_status_unknown".to_string(),
     }
 }
@@ -3242,6 +3422,7 @@ fn criterion_matrix_why(
             "{} has supporting evidence in {} of {} surface/state cell(s).",
             criterion.title, with_evidence, total
         ),
+        "not_applicable" => applicability_reason(&criterion.id),
         _ => format!(
             "{} has aggregate status {} across {} surface/state cell(s).",
             criterion.title, status, total
@@ -3389,7 +3570,7 @@ fn criterion_cell_status(
     } else if method == "human_review" {
         "needs_review".to_string()
     } else {
-        "not_tested".to_string()
+        "needs_review".to_string()
     }
 }
 
@@ -3787,174 +3968,487 @@ fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
     output
 }
 
-fn render_compliance_report(report: &ComplianceReportPacket) -> String {
-    let criteria = report
-        .criteria
+const REPORT_CSS: &str = r#"
+*{box-sizing:border-box}
+body{margin:0;color:#1a1d24;background:#eef1f6;font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+main{width:min(100% - 32px,1080px);margin:0 auto;padding:34px 0 90px}
+a{color:#3450c4;text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid #3450c4;outline-offset:2px;border-radius:4px}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}
+.eyebrow{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:#5a6473;font-weight:700;margin:0 0 8px}
+h1{margin:0;font-size:34px;line-height:1.08;letter-spacing:-.02em}
+.sub{color:#5a6473;margin:8px 0 0;font-size:13px}
+.banner{margin:24px 0 6px;padding:18px 22px;border-radius:16px;border:1px solid;display:flex;gap:15px;align-items:center}
+.banner .dot{width:13px;height:13px;border-radius:50%;flex:none}
+.banner h2{margin:0;font-size:18px;letter-spacing:-.01em}
+.banner p{margin:3px 0 0;font-size:13.5px;opacity:.88}
+.b-fail{background:#fbe9e7;border-color:#f3c8c2}
+.b-review{background:#fbf3e1;border-color:#efdcb0}
+.b-pass{background:#e6f4ec;border-color:#c2e3d0}
+.scorecard{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:20px 0 6px}
+.score{background:#fff;border:1px solid #e4e8ef;border-radius:13px;padding:14px 16px}
+.score .n{font-size:27px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.score .k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#5a6473;margin-top:3px}
+.score.zero .n{color:#1a9457}
+.bar{height:11px;border-radius:7px;overflow:hidden;display:flex;border:1px solid #e4e8ef;margin:8px 0 4px;background:#fff}
+.bar i{display:block;height:100%}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#5a6473;margin:0 0 6px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend b{width:10px;height:10px;border-radius:3px;display:inline-block}
+section{margin:38px 0}
+.sh{font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:#5a6473;margin:0 0 16px;font-weight:700}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+figure{margin:0;background:#fff;border:1px solid #e4e8ef;border-radius:13px;overflow:hidden}
+figure img{display:block;width:100%;height:auto;border-bottom:1px solid #e4e8ef;background:#f4f5f8}
+figure video{display:block;width:100%;height:auto;border-bottom:1px solid #e4e8ef;background:#000}
+figcaption{padding:11px 13px;font-size:12.5px;color:#5a6473}
+.principle{margin:24px 0}
+.principle h3{font-size:19px;margin:0 0 2px;letter-spacing:-.01em}
+.principle .pmeta{color:#5a6473;font-size:12.5px;margin:0 0 14px}
+.crit{background:#fff;border:1px solid #e4e8ef;border-left:4px solid #c7ced9;border-radius:13px;padding:16px 18px;margin:11px 0}
+.crit.s-pass{border-left-color:#1a9457}
+.crit.s-fail{border-left-color:#d23b30}
+.crit.s-review{border-left-color:#d39a2a}
+.crit.s-na{border-left-color:#9aa6b6}
+.crit.s-nottested{border-left-color:#8b5cf6}
+.crit-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.crit-id{font-weight:600;font-size:15.5px;letter-spacing:-.01em}
+.crit-id .num{color:#5a6473;font-variant-numeric:tabular-nums;margin-right:9px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;letter-spacing:.02em}
+.chip-pass{background:#e6f4ec;color:#0f6b3c}
+.chip-fail{background:#fbe9e7;color:#b3271d}
+.chip-review{background:#fbf0db;color:#875400}
+.chip-na{background:#eceff4;color:#4a5566}
+.chip-nottested{background:#efe6fb;color:#6d28b8}
+.chip-method{background:#eef1f7;color:#42506a}
+.chip-level{background:#eef1f7;color:#5a6473}
+.why{margin:11px 0 0;color:#39414f;font-size:14px}
+.crit-foot{margin-top:12px;display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:#5a6473;align-items:center}
+.ai{margin-top:13px;border:1px solid #e3e7f3;border-radius:11px;background:#f7f8fd;padding:13px 15px}
+.ai-h{display:flex;gap:8px;align-items:center;font-size:11.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#3f4b8a}
+.ai-h .v{margin-left:auto;font-weight:700}
+.ai p{margin:8px 0 0;font-size:13.5px;color:#2c3340}
+.ai .guide{margin-top:9px;padding:10px 12px;background:#fff;border:1px solid #e7eaf2;border-radius:9px;font-size:13px}
+.ai .guide b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#5a6473;margin-bottom:3px}
+.ai-media{display:flex;gap:10px;flex-wrap:wrap;margin-top:11px}
+.ai-media figure{max-width:260px}
+.pending{margin-top:13px;border:1px dashed #d7deea;border-radius:11px;background:#fafbfd;padding:11px 14px;color:#6b7280;font-size:13px}
+.matrix-wrap>summary{cursor:pointer;font-weight:700;color:#3450c4;padding:10px 0;font-size:13.5px}
+table.matrix{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+table.matrix th,table.matrix td{border-bottom:1px solid #e9edf3;padding:8px 10px;text-align:left;vertical-align:top}
+table.matrix th{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#5a6473;position:sticky;top:0;background:#fff}
+.foot{margin-top:46px;color:#5a6473;font-size:12.5px;border-top:1px solid #e1e6ef;padding-top:16px}
+@media(max-width:840px){.scorecard{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:560px){.scorecard{grid-template-columns:repeat(2,1fr)}h1{font-size:27px}}
+"#;
+
+fn cr_status_suffix(status: &str) -> &'static str {
+    match status {
+        "pass" => "pass",
+        "fail" => "fail",
+        "needs_review" => "review",
+        "not_applicable" | "waived" | "risk_accepted" => "na",
+        "not_tested" => "nottested",
+        _ => "na",
+    }
+}
+
+fn cr_status_label(status: &str) -> String {
+    match status {
+        "pass" => "Pass".to_string(),
+        "fail" => "Fail".to_string(),
+        "needs_review" => "Needs review".to_string(),
+        "not_applicable" => "Not applicable".to_string(),
+        "not_tested" => "Not tested".to_string(),
+        "waived" => "Waived".to_string(),
+        "risk_accepted" => "Risk accepted".to_string(),
+        other => pretty_token(other),
+    }
+}
+
+fn pretty_token(value: &str) -> String {
+    let spaced = value.replace(['_', '-'], " ");
+    let mut chars = spaced.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => spaced,
+    }
+}
+
+fn cr_status_chip(status: &str) -> String {
+    format!(
+        "<span class=\"chip chip-{}\">{}</span>",
+        cr_status_suffix(status),
+        escape_html(&cr_status_label(status))
+    )
+}
+
+fn cr_method_label(evidence_class: &str) -> Option<&'static str> {
+    match evidence_class {
+        "deterministic" => Some("Automated · axe"),
+        "scripted" => Some("Scripted"),
+        "agentic" => Some("AI review"),
+        "human" => Some("Needs human"),
+        "applicability" => Some("Applicability"),
+        _ => None,
+    }
+}
+
+fn cr_method_chip(evidence_class: &str) -> String {
+    match cr_method_label(evidence_class) {
+        Some(label) => format!(
+            "<span class=\"chip chip-method\">{}</span>",
+            escape_html(label)
+        ),
+        None => String::new(),
+    }
+}
+
+fn cr_media(media: &[EvidenceMedia]) -> String {
+    if media.is_empty() {
+        return String::new();
+    }
+    let figures = media
         .iter()
-        .map(|obligation| {
+        .filter_map(|item| {
+            let uri = item.data_uri.as_ref()?;
+            let inner = if matches!(item.kind.as_str(), "clip" | "video" | "video_clip") {
+                format!(
+                    "<video src=\"{}\" autoplay loop muted playsinline controls></video>",
+                    escape_html(uri)
+                )
+            } else {
+                format!(
+                    "<img loading=\"lazy\" src=\"{}\" alt=\"{}\">",
+                    escape_html(uri),
+                    escape_html(&item.caption)
+                )
+            };
+            Some(format!(
+                "<figure>{}<figcaption>{}</figcaption></figure>",
+                inner,
+                escape_html(&item.caption)
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    if figures.is_empty() {
+        String::new()
+    } else {
+        format!("<div class=\"ai-media\">{figures}</div>")
+    }
+}
+
+fn cr_agentic_block(obligation: &ComplianceObligation) -> String {
+    if let Some(review) = &obligation.agentic_review {
+        let guide = if review.reviewer_guidance.trim().is_empty() {
+            String::new()
+        } else {
             format!(
-                "<tr class=\"status-{status}\"><td><code>{id}</code><br>{title}</td><td>{status}</td><td>{why}<details><summary>Evidence</summary><p>Surfaces: <code>{surfaces}</code></p><p>Tests: <code>{tests}</code></p><p>Artifacts: <code>{artifacts}</code></p><p>Agentic context: <code>{agentic}</code></p><p>Human review: {human}</p></details></td></tr>",
-                status = escape_html(&obligation.status),
-                id = escape_html(&obligation.id),
-                title = escape_html(&obligation.title),
-                why = escape_html(&obligation.why),
-                surfaces = escape_html(&obligation.surfaces.join(", ")),
-                tests = escape_html(&obligation.tests.join(", ")),
-                artifacts = escape_html(&obligation.artifact_refs.join(", ")),
-                agentic = escape_html(&obligation.agentic_context.join(", ")),
-                human = escape_html(&obligation.human_review)
+                "<div class=\"guide\"><b>For the human reviewer</b>{}</div>",
+                escape_html(&review.reviewer_guidance)
+            )
+        };
+        format!(
+            "<div class=\"ai\"><div class=\"ai-h\">AI accessibility review <span class=\"v\">{verdict} · {confidence}</span></div><p>{rationale}</p>{guide}{media}<p class=\"sub\" style=\"margin-top:9px\">{provider} · {model}</p></div>",
+            verdict = escape_html(&pretty_token(&review.assessment)),
+            confidence = escape_html(&pretty_token(&review.confidence)),
+            rationale = escape_html(&review.rationale),
+            guide = guide,
+            media = cr_media(&review.media),
+            provider = escape_html(&review.provider),
+            model = escape_html(&review.model),
+        )
+    } else if matches!(obligation.evidence_class.as_str(), "human" | "agentic")
+        || obligation.status == "needs_review"
+    {
+        "<div class=\"pending\">Agentic review pending — this criterion needs visual or contextual judgment; the AI reviewer will attach a screenshot, assessment, and reviewer guidance here.</div>".to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn cr_criterion_card(obligation: &ComplianceObligation) -> String {
+    let level = if obligation.level.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<span class=\"chip chip-level\">Level {}</span>",
+            escape_html(&obligation.level)
+        )
+    };
+    let source = obligation
+        .source_url
+        .as_ref()
+        .map(|url| {
+            format!(
+                " · <a href=\"{}\" rel=\"noreferrer\">WCAG reference ↗</a>",
+                escape_html(url)
+            )
+        })
+        .unwrap_or_default();
+    let (num, title) = split_criterion_title(&obligation.title);
+    format!(
+        "<article class=\"crit s-{suffix}\"><div class=\"crit-head\"><div class=\"crit-id\"><span class=\"num\">{num}</span>{title}</div><div class=\"chips\">{level}{method}{status}</div></div><p class=\"why\">{why}</p>{ai}<div class=\"crit-foot\"><span>Confidence: {confidence}</span><span>{review}{source}</span></div></article>",
+        suffix = cr_status_suffix(&obligation.status),
+        num = escape_html(&num),
+        title = escape_html(&title),
+        level = level,
+        method = cr_method_chip(&obligation.evidence_class),
+        status = cr_status_chip(&obligation.status),
+        why = escape_html(&obligation.why),
+        ai = cr_agentic_block(obligation),
+        confidence = escape_html(&pretty_token(&obligation.confidence)),
+        review = escape_html(&pretty_token(&obligation.human_review)),
+        source = source,
+    )
+}
+
+fn split_criterion_title(title: &str) -> (String, String) {
+    match title.split_once(' ') {
+        Some((num, rest)) if num.chars().all(|c| c.is_ascii_digit() || c == '.') => {
+            (num.to_string(), rest.to_string())
+        }
+        _ => (String::new(), title.to_string()),
+    }
+}
+
+fn cr_principle_sections(criteria: &[ComplianceObligation]) -> String {
+    const ORDER: [&str; 4] = ["Perceivable", "Operable", "Understandable", "Robust"];
+    let mut sections = String::new();
+    for principle in ORDER {
+        let rows = criteria
+            .iter()
+            .filter(|criterion| criterion.principle == principle)
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            continue;
+        }
+        let pass = rows.iter().filter(|row| row.status == "pass").count();
+        let cards = rows
+            .iter()
+            .map(|row| cr_criterion_card(row))
+            .collect::<Vec<_>>()
+            .join("");
+        sections.push_str(&format!(
+            "<div class=\"principle\"><h3>{principle}</h3><p class=\"pmeta\">{total} criteria · {pass} passing</p>{cards}</div>",
+            principle = escape_html(principle),
+            total = rows.len(),
+            pass = pass,
+            cards = cards,
+        ));
+    }
+    sections
+}
+
+fn cr_state_gallery(states: &[StateEvidence]) -> String {
+    let figures = states
+        .iter()
+        .map(|state| {
+            let img = state
+                .media
+                .iter()
+                .find_map(|item| item.data_uri.as_ref())
+                .map(|uri| {
+                    format!(
+                        "<img loading=\"lazy\" src=\"{}\" alt=\"Screenshot of {} state\">",
+                        escape_html(uri),
+                        escape_html(&state.id)
+                    )
+                })
+                .unwrap_or_default();
+            let focus = if state.keyboard_focus_order.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<br>Tab order: {}",
+                    escape_html(&state.keyboard_focus_order.join(" → "))
+                )
+            };
+            format!(
+                "<figure>{img}<figcaption><strong>{id}</strong> · <code>{route}</code><br>{title}{focus}</figcaption></figure>",
+                img = img,
+                id = escape_html(&state.id),
+                route = escape_html(&state.route),
+                title = escape_html(&state.title),
+                focus = focus,
             )
         })
         .collect::<Vec<_>>()
         .join("");
-    let cells = report
-        .criterion_coverage
+    if figures.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<section><h2 class=\"sh\">What Allie inspected</h2><div class=\"gallery\">{figures}</div></section>"
+        )
+    }
+}
+
+fn cr_matrix_rows(cells: &[CriterionCoverageCell]) -> String {
+    cells
         .iter()
         .map(|cell| {
             format!(
-                "<tr class=\"status-{status}\"><td><code>{criterion}</code><br>Surface <code>{surface}</code><br>State <code>{state}</code></td><td>{status}</td><td>{applicability}</td><td>{method}</td><td>{confidence}</td><td><details><summary>criterion -> surface -> state -> finding -> artifact -> replay command</summary><p>Evidence refs: <code>{evidence}</code></p><p>Findings: <code>{findings}</code></p><p>Artifacts: <code>{artifacts}</code></p><p>Tests: <code>{tests}</code></p><p>Agentic refs: <code>{agentic}</code></p><p>Waivers: <code>{waivers}</code></p><p>Replay command: <code>{replay}</code></p><p>Residual review: {residual}</p></details></td></tr>",
-                status = escape_html(&cell.status),
+                "<tr><td><code>{criterion}</code><br>{surface} · {state}</td><td>{status}</td><td>{applicability}</td><td>{method}</td><td>{confidence}</td><td>{residual}</td></tr>",
                 criterion = escape_html(&cell.criterion_id),
                 surface = escape_html(&cell.surface_id),
                 state = escape_html(&cell.state_id),
-                applicability = escape_html(&cell.applicability),
-                method = escape_html(&cell.method),
-                confidence = escape_html(&cell.confidence),
-                evidence = escape_html(&cell.evidence_refs.join(", ")),
-                findings = escape_html(&cell.finding_refs.join(", ")),
-                artifacts = escape_html(&cell.artifact_refs.join(", ")),
-                tests = escape_html(&cell.test_refs.join(", ")),
-                agentic = escape_html(&cell.agentic_refs.join(", ")),
-                waivers = escape_html(&cell.waiver_refs.join(", ")),
-                replay = escape_html(cell.replay_command.as_deref().unwrap_or("")),
-                residual = escape_html(&cell.residual_review_need)
+                status = cr_status_chip(&cell.status),
+                applicability = escape_html(&pretty_token(&cell.applicability)),
+                method = escape_html(&pretty_token(&cell.method)),
+                confidence = escape_html(&pretty_token(&cell.confidence)),
+                residual = escape_html(&cell.residual_review_need),
             )
         })
         .collect::<Vec<_>>()
-        .join("");
-    let supporting_checks = report
-        .supporting_checks
+        .join("")
+}
+
+fn cr_supporting_checks(checks: &[ComplianceSupportingCheck]) -> String {
+    if checks.is_empty() {
+        return String::new();
+    }
+    let cards = checks
         .iter()
         .map(|check| {
+            let related = if check.related_criteria.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<div class=\"crit-foot\"><span>Covers {} criteria: <code>{}</code></span></div>",
+                    check.related_criteria.len(),
+                    escape_html(&check.related_criteria.join(", "))
+                )
+            };
             format!(
-                "<tr class=\"status-{status}\"><td><code>{id}</code><br>{title}</td><td>{status}</td><td>{why}<details><summary>Related Criteria And Evidence</summary><p>Related criteria: <code>{criteria}</code></p><p>Surfaces: <code>{surfaces}</code></p><p>Tests: <code>{tests}</code></p><p>Artifacts: <code>{artifacts}</code></p><p>Agentic context: <code>{agentic}</code></p><p>Human review: {human}</p></details></td></tr>",
-                status = escape_html(&check.status),
-                id = escape_html(&check.id),
+                "<article class=\"crit s-{suffix}\"><div class=\"crit-head\"><div class=\"crit-id\">{title}<br><code style=\"font-size:11px;color:#5a6473\">{id}</code></div><div class=\"chips\">{method}{status}</div></div><p class=\"why\">{why}</p>{related}</article>",
+                suffix = cr_status_suffix(&check.status),
                 title = escape_html(&check.title),
+                id = escape_html(&check.id),
+                method = cr_method_chip(&check.evidence_class),
+                status = cr_status_chip(&check.status),
                 why = escape_html(&check.why),
-                criteria = escape_html(&check.related_criteria.join(", ")),
-                surfaces = escape_html(&check.surfaces.join(", ")),
-                tests = escape_html(&check.tests.join(", ")),
-                artifacts = escape_html(&check.artifact_refs.join(", ")),
-                agentic = escape_html(&check.agentic_context.join(", ")),
-                human = escape_html(&check.human_review)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
-    let surfaces = report
-        .surfaces
-        .iter()
-        .map(|surface| {
-            format!(
-                "<li><strong>{}</strong> <code>{}</code><br>Status: {}. Routes: <code>{}</code>. Findings: <code>{}</code>.</li>",
-                escape_html(&surface.title),
-                escape_html(&surface.surface_id),
-                escape_html(&surface.status),
-                escape_html(&surface.routes.join(", ")),
-                escape_html(&surface.finding_refs.join(", "))
+                related = related,
             )
         })
         .collect::<Vec<_>>()
         .join("");
     format!(
-        r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Allie WCAG Evidence Report</title>
-  <style>
-    body {{ margin: 0; color: #151719; background: #f5f7fa; font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    main {{ width: min(100% - 40px, 1180px); margin: 0 auto; padding: 40px 0; }}
-    h1 {{ margin: 0 0 8px; font-size: 42px; line-height: 1.05; letter-spacing: 0; }}
-    h2 {{ margin: 0 0 12px; color: #58616c; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }}
-    section {{ background: #fff; border: 1px solid #d7dde5; margin-top: 18px; padding: 20px; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    th, td {{ border-bottom: 1px solid #d7dde5; padding: 10px; text-align: left; vertical-align: top; }}
-    th {{ color: #58616c; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }}
-    code {{ background: #edf1f6; padding: 0.08em 0.28em; border-radius: 4px; }}
-    details {{ margin-top: 8px; }}
-    .summary {{ display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 1px; background: #d7dde5; border: 1px solid #d7dde5; margin-top: 22px; }}
-    .summary div {{ background: #fff; padding: 14px; }}
-    .label {{ color: #58616c; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }}
-    .value {{ font-size: 24px; font-weight: 700; margin: 0; }}
-    .status-fail td:first-child {{ border-left: 4px solid #b42318; }}
-    .status-needs_review td:first-child, .status-not_tested td:first-child {{ border-left: 4px solid #b7791f; }}
-    .status-pass td:first-child {{ border-left: 4px solid #2f855a; }}
-    @media (max-width: 760px) {{ main {{ width: min(100% - 24px, 1180px); }} .summary {{ grid-template-columns: 1fr 1fr; }} table {{ display: block; overflow-x: auto; }} }}
-  </style>
-</head>
-<body>
-  <main>
-    <p class="label">Allie WCAG evidence report, not a legal compliance guarantee</p>
-    <h1>{app_name}</h1>
-    <p>Source packet <code>{packet}</code>. Source map <code>{map}</code>.</p>
-    <div class="summary" aria-label="Compliance evidence summary">
-      <div><p class="label">Status</p><p class="value">{status}</p></div>
-      <div><p class="label">Pass</p><p class="value">{pass}</p></div>
-      <div><p class="label">Fail</p><p class="value">{fail}</p></div>
-      <div><p class="label">Review</p><p class="value">{review}</p></div>
-      <div><p class="label">Not Tested</p><p class="value">{not_tested}</p></div>
-      <div><p class="label">Waived</p><p class="value">{waived}</p></div>
-      <div><p class="label">Risk</p><p class="value">{risk_accepted}</p></div>
-      <div><p class="label">Total</p><p class="value">{total}</p></div>
-    </div>
-    <section>
-      <h2>Surfaces</h2>
-      <ul>{surfaces}</ul>
-    </section>
-    <section>
-      <h2>WCAG 2.2 A/AA Success Criteria</h2>
-      <table>
-        <thead><tr><th>Requirement</th><th>Status</th><th>Why And Evidence</th></tr></thead>
-        <tbody>{criteria}</tbody>
-      </table>
-    </section>
-    <section>
-      <h2>Criterion Coverage Matrix</h2>
-      <table>
-        <thead><tr><th>Criterion / Surface / State</th><th>Status</th><th>Applicability</th><th>Method</th><th>Confidence</th><th>Drilldown</th></tr></thead>
-        <tbody>{cells}</tbody>
-      </table>
-    </section>
-    <section>
-      <h2>Supporting Checks</h2>
-      <table>
-        <thead><tr><th>Check</th><th>Status</th><th>Why And Evidence</th></tr></thead>
-        <tbody>{supporting_checks}</tbody>
-      </table>
-    </section>
-  </main>
-</body>
-</html>
-"#,
-        app_name = escape_html(&report.app_name),
+        "<section><h2 class=\"sh\">Supporting checks</h2><p class=\"sub\" style=\"margin:0 0 14px\">Cross-cutting evidence passes that back the individual criteria above.</p>{cards}</section>"
+    )
+}
+
+fn render_compliance_report(report: &ComplianceReportPacket) -> String {
+    let s = &report.summary;
+    let banner_class = match s.status.as_str() {
+        "fail" | "blocked" => "b-fail",
+        "pass" | "approved" => "b-pass",
+        _ => "b-review",
+    };
+    let total = s.total_obligations.max(1);
+    let seg = |count: usize, color: &str| -> String {
+        if count == 0 {
+            String::new()
+        } else {
+            format!(
+                "<i style=\"width:{:.3}%;background:{}\"></i>",
+                count as f64 / total as f64 * 100.0,
+                color
+            )
+        }
+    };
+    let bar = format!(
+        "{}{}{}{}{}",
+        seg(s.pass, "#1a9457"),
+        seg(s.fail, "#d23b30"),
+        seg(s.needs_review, "#d8a32f"),
+        seg(s.not_applicable, "#aab4c2"),
+        seg(s.not_tested, "#8b5cf6"),
+    );
+    let score = |n: usize, k: &str, zero_good: bool| -> String {
+        let cls = if zero_good && n == 0 {
+            "score zero"
+        } else {
+            "score"
+        };
+        format!(
+            "<div class=\"{cls}\"><div class=\"n\">{n}</div><div class=\"k\">{k}</div></div>",
+            cls = cls,
+            n = n,
+            k = k
+        )
+    };
+
+    let mut html = String::new();
+    html.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Allie · ");
+    html.push_str(&escape_html(&report.app_name));
+    html.push_str(" accessibility evidence</title>\n<style>");
+    html.push_str(REPORT_CSS);
+    html.push_str("</style>\n</head>\n<body>\n<main>\n");
+    html.push_str(&format!(
+        "<p class=\"eyebrow\">Allie · accessibility release evidence</p><h1>{app}</h1><p class=\"sub\">WCAG 2.2 A/AA · generated {generated} · evidence visibility, not a legal compliance guarantee</p>",
+        app = escape_html(&report.app_name),
+        generated = escape_html(&report.generated_at),
+    ));
+    html.push_str(&format!(
+        "<div class=\"banner {bcls}\"><span class=\"dot\" style=\"background:{dot}\"></span><div><h2>Status: {status}</h2><p>{pass} passing · {fail} failing · {review} need review · {na} not applicable · {nt} not tested across {total} success criteria.</p></div></div>",
+        bcls = banner_class,
+        dot = match s.status.as_str() { "fail" | "blocked" => "#d23b30", "pass" | "approved" => "#1a9457", _ => "#d8a32f" },
+        status = escape_html(&cr_status_label(&s.status)),
+        pass = s.pass, fail = s.fail, review = s.needs_review, na = s.not_applicable, nt = s.not_tested,
+        total = s.total_obligations,
+    ));
+    html.push_str("<div class=\"scorecard\">");
+    html.push_str(&score(s.pass, "Pass", false));
+    html.push_str(&score(s.fail, "Fail", false));
+    html.push_str(&score(s.needs_review, "Needs review", false));
+    html.push_str(&score(s.not_applicable, "Not applicable", false));
+    html.push_str(&score(s.not_tested, "Not tested", true));
+    html.push_str(&score(s.total_obligations, "Criteria", false));
+    html.push_str("</div>");
+    html.push_str(&format!("<div class=\"bar\">{bar}</div>"));
+    html.push_str("<div class=\"legend\"><span><b style=\"background:#1a9457\"></b>Pass</span><span><b style=\"background:#d23b30\"></b>Fail</span><span><b style=\"background:#d8a32f\"></b>Needs review</span><span><b style=\"background:#aab4c2\"></b>Not applicable</span><span><b style=\"background:#8b5cf6\"></b>Not tested</span></div>");
+
+    html.push_str(&cr_state_gallery(&report.state_evidence));
+
+    html.push_str("<section><h2 class=\"sh\">WCAG 2.2 success criteria</h2>");
+    html.push_str(&cr_principle_sections(&report.criteria));
+    html.push_str("</section>");
+
+    html.push_str(&cr_supporting_checks(&report.supporting_checks));
+
+    if !report.criterion_coverage.is_empty() {
+        html.push_str(&format!(
+            "<section><details class=\"matrix-wrap\"><summary>Criterion coverage matrix — {} cells (criterion · surface · state drilldown)</summary><table class=\"matrix\"><thead><tr><th>Criterion · surface · state</th><th>Status</th><th>Applicability</th><th>Method</th><th>Confidence</th><th>Residual review</th></tr></thead><tbody>{}</tbody></table></details></section>",
+            report.criterion_coverage.len(),
+            cr_matrix_rows(&report.criterion_coverage),
+        ));
+    }
+
+    let replay = report
+        .criterion_coverage
+        .iter()
+        .find_map(|cell| cell.replay_command.clone())
+        .filter(|command| !command.is_empty());
+    let reproduce = replay
+        .map(|command| {
+            format!(
+                "Reproduce this run: <code>{}</code>. ",
+                escape_html(&command)
+            )
+        })
+        .unwrap_or_default();
+    html.push_str(&format!(
+        "<p class=\"foot\">{reproduce}Source packet <code>{packet}</code> · source map <code>{map}</code>. Allie reports evidence, status, confidence, and residual review needs. It does not claim legal compliance and is not a replacement for expert or lived accessibility review — evidence visibility, not a legal compliance guarantee.</p>",
+        reproduce = reproduce,
         packet = escape_html(&report.source_packet),
         map = escape_html(&report.source_map),
-        status = escape_html(&report.summary.status),
-        pass = report.summary.pass,
-        fail = report.summary.fail,
-        review = report.summary.needs_review,
-        not_tested = report.summary.not_tested,
-        waived = report.summary.waived,
-        risk_accepted = report.summary.risk_accepted,
-        total = report.summary.total_obligations,
-        surfaces = surfaces,
-        criteria = criteria,
-        cells = cells,
-        supporting_checks = supporting_checks
-    )
+    ));
+    html.push_str("</main>\n</body>\n</html>\n");
+    html
 }
 
 fn render_compliance_summary(report: &ComplianceReportPacket) -> String {
@@ -4246,6 +4740,246 @@ fn run_review(options: ReviewOptions) -> Result<ReviewReceipt> {
         packet_path,
         report_path,
     })
+}
+
+#[derive(Debug)]
+struct AgenticReviewSummary {
+    criteria: usize,
+    calls: u64,
+    status: String,
+}
+
+fn agentic_worker_script() -> PathBuf {
+    std::env::var_os("ALLIE_AGENTIC_WORKER")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("workers/agentic/review.mjs")
+        })
+}
+
+fn agentic_model_setting(value: &Option<String>, fallback: &str) -> String {
+    value
+        .as_ref()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// Run the agentic (vision-model) review over the criteria a run left as
+/// needs_review, and fold the model's assessments + captured media into the
+/// evidence packet. Best-effort: returns an error the caller can log, never a
+/// fabricated verdict, and never promotes a model opinion to pass/fail.
+fn run_agentic_review(manifest: &FlowManifest, packet_path: &Path) -> Result<AgenticReviewSummary> {
+    let mut packet: EvidencePacket = read_json_file(packet_path)?;
+
+    let success_ids = wcag22_success_criterion_ids();
+    let obligations = packet
+        .verdicts
+        .iter()
+        .filter(|verdict| verdict.status == "needs_review")
+        .map(|verdict| verdict.obligation.clone())
+        .filter(|obligation| success_ids.contains(obligation))
+        .collect::<BTreeSet<_>>();
+    if obligations.is_empty() {
+        return Ok(AgenticReviewSummary {
+            criteria: 0,
+            calls: 0,
+            status: "skipped".to_string(),
+        });
+    }
+
+    let criteria = obligations
+        .iter()
+        .filter_map(|obligation| {
+            let criterion = wcag22_success_criteria()
+                .into_iter()
+                .find(|criterion| criterion["obligation"].as_str() == Some(obligation))?;
+            Some(serde_json::json!({
+                "obligation": obligation,
+                "num": criterion["num"],
+                "handle": criterion["handle"],
+                "level": criterion["level"],
+                "principle": criterion["principle"],
+            }))
+        })
+        .collect::<Vec<_>>();
+
+    let run_dir = fs::canonicalize(packet_path.parent().unwrap_or_else(|| Path::new(".")))
+        .unwrap_or_else(|_| {
+            packet_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf()
+        });
+    let artifacts_dir = run_dir.join("artifacts");
+    fs::create_dir_all(&artifacts_dir).map_err(|source| AllieError::Io {
+        context: format!("create agentic artifacts dir {}", artifacts_dir.display()),
+        source,
+    })?;
+
+    let request = serde_json::json!({
+        "schema": "allie.agentic.request.v0",
+        "target": {
+            "base_url": packet.target.base_url.clone().or_else(|| manifest.target.base_url.clone()),
+            "fixture_dir": manifest.target.fixture_dir.as_ref().map(|dir| dir.to_string_lossy().to_string()),
+        },
+        "browser": {
+            "viewport": { "width": manifest.browser.viewport.width, "height": manifest.browser.viewport.height },
+            "color_scheme": manifest.browser.color_scheme,
+            "reduced_motion": manifest.browser.reduced_motion,
+            "locale": manifest.browser.locale,
+        },
+        "model": {
+            "provider": agentic_model_setting(&manifest.model.provider, "openrouter"),
+            "model": agentic_model_setting(&manifest.model.model, "anthropic/claude-sonnet-4.5"),
+            "api_key_env": agentic_model_setting(&manifest.model.api_key_env, "OPENROUTER_API_KEY"),
+            "base_url": agentic_model_setting(&manifest.model.base_url, "https://openrouter.ai/api/v1"),
+            "max_calls": manifest.model.max_model_calls.unwrap_or(4),
+        },
+        "artifacts_dir": artifacts_dir.to_string_lossy(),
+        "criteria": criteria,
+    });
+
+    let request_path = run_dir.join("agentic-request.json");
+    let response_path = run_dir.join("agentic-response.json");
+    write_json_pretty(&request_path, &request)?;
+
+    let script = agentic_worker_script();
+    if !script.exists() {
+        return Err(AllieError::Worker(format!(
+            "agentic worker script not found at {}",
+            script.display()
+        )));
+    }
+    let mut child = Command::new("node")
+        .arg(&script)
+        .arg("--request")
+        .arg(&request_path)
+        .arg("--response")
+        .arg(&response_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| AllieError::Worker(format!("spawn agentic worker: {source}")))?;
+    let status = child
+        .wait_timeout(Duration::from_millis(300_000))
+        .map_err(|source| AllieError::Worker(format!("wait for agentic worker: {source}")))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|source| AllieError::Worker(format!("collect agentic worker output: {source}")))?;
+    if status.is_none() {
+        return Err(AllieError::Worker(
+            "agentic worker timed out after 300s".to_string(),
+        ));
+    }
+    if !response_path.exists() {
+        return Err(AllieError::Worker(format!(
+            "agentic worker produced no response: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    let response: serde_json::Value = read_json_file(&response_path)?;
+    let timestamp = now_utc();
+    let policy = ArtifactPolicy {
+        redaction_status: "not_redacted_local".to_string(),
+        retention_class: "local_review".to_string(),
+    };
+    let mut seen_artifacts = packet
+        .artifacts
+        .iter()
+        .map(|artifact| artifact.path.clone())
+        .collect::<BTreeSet<_>>();
+
+    let provider = response["provider"]
+        .as_str()
+        .unwrap_or("openrouter")
+        .to_string();
+    let model = response["model"].as_str().unwrap_or_default().to_string();
+    let empty = Vec::new();
+    for assessment in response["assessments"].as_array().unwrap_or(&empty) {
+        let Some(obligation) = assessment["obligation"].as_str() else {
+            continue;
+        };
+        let media = assessment["media"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| {
+                        let rel = item["path"].as_str()?;
+                        Some(AgenticMediaRef {
+                            kind: item["kind"].as_str().unwrap_or("screenshot").to_string(),
+                            caption: item["caption"].as_str().unwrap_or_default().to_string(),
+                            path: format!("artifacts/{rel}"),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for media_ref in &media {
+            if seen_artifacts.insert(media_ref.path.clone()) {
+                let absolute = run_dir.join(&media_ref.path);
+                if let Ok(artifact) = artifact_for_path(
+                    &agentic_artifact_id(&media_ref.path),
+                    agentic_artifact_type(&media_ref.kind),
+                    &run_dir,
+                    &absolute,
+                    None,
+                    "allie-agentic-gateway",
+                    &policy,
+                    timestamp,
+                ) {
+                    packet.artifacts.push(artifact);
+                }
+            }
+        }
+        packet.agentic_assessments.push(AgenticAssessmentRecord {
+            obligation: obligation.to_string(),
+            assessment: assessment["assessment"]
+                .as_str()
+                .unwrap_or("unavailable")
+                .to_string(),
+            rationale: assessment["rationale"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            reviewer_guidance: assessment["reviewer_guidance"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            confidence: assessment["confidence"]
+                .as_str()
+                .unwrap_or("agent_inferred")
+                .to_string(),
+            provider: provider.clone(),
+            model: model.clone(),
+            media,
+        });
+    }
+
+    write_json_pretty(packet_path, &packet)?;
+    Ok(AgenticReviewSummary {
+        criteria: obligations.len(),
+        calls: response["calls"].as_u64().unwrap_or_default(),
+        status: response["status"].as_str().unwrap_or("unknown").to_string(),
+    })
+}
+
+fn agentic_artifact_id(path: &str) -> String {
+    path.rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .rsplit_once('.')
+        .map(|(stem, _)| stem.to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
+fn agentic_artifact_type(kind: &str) -> &'static str {
+    match kind {
+        "clip" | "video" | "video_clip" => "video_clip",
+        _ => "screenshot",
+    }
 }
 
 fn run_remediate(options: RemediateOptions) -> Result<RemediationReceipt> {
@@ -5071,6 +5805,16 @@ struct ModelPolicy {
     enabled: bool,
     provider_allowlist: Vec<String>,
     zdr_required: bool,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    api_key_env: Option<String>,
+    #[serde(default)]
+    base_url: Option<String>,
+    #[serde(default)]
+    max_model_calls: Option<u32>,
 }
 
 impl Default for ModelPolicy {
@@ -5079,6 +5823,11 @@ impl Default for ModelPolicy {
             enabled: false,
             provider_allowlist: Vec::new(),
             zdr_required: true,
+            provider: None,
+            model: None,
+            api_key_env: None,
+            base_url: None,
+            max_model_calls: None,
         }
     }
 }
@@ -5404,6 +6153,24 @@ struct ComplianceReportPacket {
     supporting_checks: Vec<ComplianceSupportingCheck>,
     obligations: Vec<ComplianceObligation>,
     surfaces: Vec<ComplianceSurfaceReport>,
+    #[serde(default)]
+    state_evidence: Vec<StateEvidence>,
+}
+
+/// Per-state evidence surfaced once at the top of the report (the captured
+/// screenshot and observed focus order), so criteria can reference it without
+/// re-inlining the same image dozens of times.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct StateEvidence {
+    id: String,
+    route: String,
+    url: String,
+    title: String,
+    http_status: Option<u16>,
+    #[serde(default)]
+    keyboard_focus_order: Vec<String>,
+    #[serde(default)]
+    media: Vec<EvidenceMedia>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -5437,6 +6204,43 @@ struct ComplianceObligation {
     evidence_class: String,
     source_url: Option<String>,
     finding_refs: Vec<String>,
+    #[serde(default)]
+    principle: String,
+    #[serde(default)]
+    level: String,
+    #[serde(default)]
+    media: Vec<EvidenceMedia>,
+    #[serde(default)]
+    agentic_review: Option<AgenticAssessment>,
+}
+
+/// A piece of visual evidence (screenshot, element crop, or motion GIF) inlined
+/// into the report as a self-contained data URI so the report travels intact in
+/// a PR diff, a CI artifact, or a committed snapshot without external files.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct EvidenceMedia {
+    kind: String,
+    caption: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data_uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    artifact_ref: Option<String>,
+}
+
+/// Structured output of the agentic (vision-model) review for one criterion:
+/// the model's assessment plus the context a human reviewer needs to confirm it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AgenticAssessment {
+    /// likely_pass | likely_fail | needs_human
+    assessment: String,
+    rationale: String,
+    /// concrete steps the human reviewer should take to confirm or refute.
+    reviewer_guidance: String,
+    confidence: String,
+    provider: String,
+    model: String,
+    #[serde(default)]
+    media: Vec<EvidenceMedia>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -5562,6 +6366,41 @@ struct WorkerStateResult {
     network_errors: Vec<String>,
     #[serde(default)]
     state_errors: Vec<String>,
+    #[serde(default)]
+    features: Option<PageFeatures>,
+}
+
+/// Lightweight inventory of page content + scripted signals the worker reports,
+/// used by Allie's applicability oracle to decide automatically which criteria
+/// do not apply and to run a couple of deterministic/scripted checks.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct PageFeatures {
+    #[serde(default)]
+    audio: u32,
+    #[serde(default)]
+    video: u32,
+    #[serde(default)]
+    forms: u32,
+    #[serde(default)]
+    inputs: u32,
+    #[serde(default)]
+    draggable: u32,
+    #[serde(default)]
+    iframes: u32,
+    #[serde(default)]
+    images: u32,
+    #[serde(default)]
+    links: u32,
+    #[serde(default)]
+    headings: u32,
+    #[serde(default)]
+    lang: bool,
+    #[serde(default)]
+    lang_value: String,
+    #[serde(default)]
+    reflow_overflow: bool,
+    #[serde(default)]
+    reflow_checked: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -5590,7 +6429,32 @@ struct EvidencePacket {
     verdicts: Vec<Verdict>,
     waivers: Vec<serde_json::Value>,
     review: Vec<ReviewAttempt>,
+    #[serde(default)]
+    agentic_assessments: Vec<AgenticAssessmentRecord>,
     replay: Replay,
+}
+
+/// One criterion's agentic (vision-model) assessment, recorded in the evidence
+/// packet. Media paths are relative to the run directory (alongside the run
+/// screenshots) so the report resolves them the same way.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AgenticAssessmentRecord {
+    obligation: String,
+    assessment: String,
+    rationale: String,
+    reviewer_guidance: String,
+    confidence: String,
+    provider: String,
+    model: String,
+    #[serde(default)]
+    media: Vec<AgenticMediaRef>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AgenticMediaRef {
+    kind: String,
+    caption: String,
+    path: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -5676,6 +6540,8 @@ struct StateMetadata {
     console_errors: Vec<String>,
     network_errors: Vec<String>,
     state_errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    features: Option<PageFeatures>,
 }
 
 #[derive(Debug)]
@@ -5908,6 +6774,7 @@ fn write_packet_and_report(
         verdicts,
         waivers: Vec::new(),
         review: Vec::new(),
+        agentic_assessments: Vec::new(),
         replay: Replay {
             command: replay_command,
             manifest_path: manifest_path.to_string_lossy().to_string(),
@@ -6407,6 +7274,174 @@ fn profile_obligation_title(obligation: &str) -> Option<String> {
         .and_then(|item| item["title"].as_str().map(ToString::to_string))
 }
 
+/// Combine the per-state feature inventories into one page-level view: counts
+/// sum, `lang` holds only if every inspected state declared it, and a reflow
+/// overflow on any state counts as an overflow.
+fn aggregate_features<'a>(
+    states: impl IntoIterator<Item = Option<&'a PageFeatures>>,
+) -> PageFeatures {
+    let mut agg = PageFeatures::default();
+    let mut saw_state = false;
+    let mut lang_all = true;
+    for state in states {
+        let Some(features) = state else { continue };
+        saw_state = true;
+        agg.audio += features.audio;
+        agg.video += features.video;
+        agg.forms += features.forms;
+        agg.inputs += features.inputs;
+        agg.draggable += features.draggable;
+        agg.iframes += features.iframes;
+        agg.images += features.images;
+        agg.links += features.links;
+        agg.headings += features.headings;
+        if !features.lang {
+            lang_all = false;
+        }
+        if agg.lang_value.is_empty() && !features.lang_value.is_empty() {
+            agg.lang_value = features.lang_value.clone();
+        }
+        if features.reflow_overflow {
+            agg.reflow_overflow = true;
+        }
+        if features.reflow_checked {
+            agg.reflow_checked = true;
+        }
+    }
+    agg.lang = saw_state && lang_all;
+    agg
+}
+
+/// True when a criterion does not apply given the page's content — e.g. no
+/// media for the time-based-media criteria, or no forms for input-assistance.
+fn feature_not_applicable(obligation: &str, features: &PageFeatures) -> bool {
+    let media_absent = features.audio == 0 && features.video == 0;
+    let inputs_absent = features.forms == 0 && features.inputs == 0;
+    matches!(
+        obligation,
+        "wcag22-aa:1.2.1-audio-only-and-video-only-prerecorded"
+            | "wcag22-aa:1.2.2-captions-prerecorded"
+            | "wcag22-aa:1.2.3-audio-description-or-media-alternative-prerecorded"
+            | "wcag22-aa:1.2.4-captions-live"
+            | "wcag22-aa:1.2.5-audio-description-prerecorded"
+        if media_absent
+    ) || (obligation == "wcag22-aa:1.4.2-audio-control" && features.audio == 0)
+        || (matches!(
+            obligation,
+            "wcag22-aa:1.3.5-identify-input-purpose"
+                | "wcag22-aa:3.3.1-error-identification"
+                | "wcag22-aa:3.3.3-error-suggestion"
+                | "wcag22-aa:3.3.4-error-prevention-legal-financial-data"
+                | "wcag22-aa:3.3.7-redundant-entry"
+                | "wcag22-aa:3.3.8-accessible-authentication-minimum"
+        ) && inputs_absent)
+        || (obligation == "wcag22-aa:2.5.7-dragging-movements" && features.draggable == 0)
+}
+
+/// Human-readable reason an applicable-by-default criterion was ruled out.
+fn applicability_reason(obligation: &str) -> String {
+    match obligation {
+        o if o.starts_with("wcag22-aa:1.2.") => {
+            "No <audio> or <video> elements were detected on the inspected states, so this time-based media criterion does not apply.".to_string()
+        }
+        "wcag22-aa:1.4.2-audio-control" => {
+            "No <audio> elements were detected, so audio control does not apply.".to_string()
+        }
+        "wcag22-aa:1.3.5-identify-input-purpose"
+        | "wcag22-aa:3.3.1-error-identification"
+        | "wcag22-aa:3.3.3-error-suggestion"
+        | "wcag22-aa:3.3.4-error-prevention-legal-financial-data"
+        | "wcag22-aa:3.3.7-redundant-entry"
+        | "wcag22-aa:3.3.8-accessible-authentication-minimum" => {
+            "No forms or input fields were detected on the inspected states, so this input-assistance criterion does not apply.".to_string()
+        }
+        "wcag22-aa:2.5.7-dragging-movements" => {
+            "No draggable elements were detected, so dragging-movement alternatives do not apply.".to_string()
+        }
+        other => format!(
+            "{} was determined not applicable to the inspected content.",
+            criterion_title(other)
+        ),
+    }
+}
+
+/// Decide a criterion's verdict from page features and observed signals. This
+/// is the rule that guarantees no criterion is left `not_tested`: every path
+/// returns applicable evidence (pass/fail/not_applicable) or queues the
+/// criterion for agentic (AI) review.
+fn criterion_feature_verdict(
+    obligation: &str,
+    method: &str,
+    features: &PageFeatures,
+    keyboard_observed: bool,
+) -> (&'static str, &'static str, &'static str, &'static str) {
+    if feature_not_applicable(obligation, features) {
+        return (
+            "not_applicable",
+            "machine_proven",
+            "applicability",
+            "allie-applicability-oracle",
+        );
+    }
+    match obligation {
+        "wcag22-aa:3.1.1-language-of-page" => {
+            return if features.lang {
+                (
+                    "pass",
+                    "machine_proven",
+                    "deterministic",
+                    "allie-lang-attribute-check",
+                )
+            } else {
+                (
+                    "fail",
+                    "machine_proven",
+                    "deterministic",
+                    "allie-lang-attribute-check",
+                )
+            };
+        }
+        "wcag22-aa:1.4.10-reflow" if features.reflow_checked => {
+            return if features.reflow_overflow {
+                (
+                    "fail",
+                    "script_observed",
+                    "scripted",
+                    "allie-reflow-320px-check",
+                )
+            } else {
+                (
+                    "pass",
+                    "script_observed",
+                    "scripted",
+                    "allie-reflow-320px-check",
+                )
+            };
+        }
+        _ => {}
+    }
+    match method {
+        "axe" => (
+            "pass",
+            "machine_proven",
+            "deterministic",
+            "axe-core-success-criterion-tags",
+        ),
+        "scripted" if keyboard_observed && obligation.contains("keyboard") => (
+            "pass",
+            "script_observed",
+            "scripted",
+            "playwright-keyboard-traversal",
+        ),
+        _ => (
+            "needs_review",
+            "requires_human_or_agent_review",
+            "agentic",
+            "allie-agentic-review-queue",
+        ),
+    }
+}
+
 fn verdicts_from_findings(
     manifest: &FlowManifest,
     response: &WorkerResponse,
@@ -6456,6 +7491,12 @@ fn verdicts_from_findings(
         .collect::<Vec<_>>();
 
     if manifest.policy.profile == "wcag22-aa" {
+        let features =
+            aggregate_features(response.states.iter().map(|state| state.features.as_ref()));
+        let keyboard_observed = response
+            .states
+            .iter()
+            .any(|state| !state.keyboard_focus_order.is_empty());
         for criterion in wcag22_success_criteria() {
             let Some(obligation) = criterion["obligation"].as_str() else {
                 continue;
@@ -6473,36 +7514,8 @@ fn verdicts_from_findings(
                 continue;
             }
             let method = criterion["method"].as_str().unwrap_or("human_review");
-            let keyboard_observed = response
-                .states
-                .iter()
-                .any(|state| !state.keyboard_focus_order.is_empty());
-            let (status, confidence, evidence_class, source) = match method {
-                "axe" => (
-                    "pass",
-                    "machine_proven",
-                    "deterministic",
-                    "axe-core-success-criterion-tags",
-                ),
-                "scripted" if keyboard_observed && obligation.contains("keyboard") => (
-                    "pass",
-                    "script_observed",
-                    "scripted",
-                    "playwright-keyboard-traversal",
-                ),
-                "scripted" => (
-                    "not_tested",
-                    "script_observed",
-                    "scripted",
-                    "allie-obligation-profile",
-                ),
-                _ => (
-                    "needs_review",
-                    "requires_human_or_agent_review",
-                    "human",
-                    "allie-obligation-profile",
-                ),
-            };
+            let (status, confidence, evidence_class, source) =
+                criterion_feature_verdict(obligation, method, &features, keyboard_observed);
             verdicts.push(Verdict {
                 obligation: obligation.to_string(),
                 status: status.to_string(),
@@ -6522,10 +7535,10 @@ fn verdicts_from_findings(
             if seen.insert(obligation.clone()) {
                 verdicts.push(Verdict {
                     obligation,
-                    status: "not_tested".to_string(),
-                    confidence: "script_observed".to_string(),
+                    status: "needs_review".to_string(),
+                    confidence: "requires_human_or_agent_review".to_string(),
                     evidence_class: "scripted".to_string(),
-                    source: "allie-obligation-profile".to_string(),
+                    source: "allie-agentic-review-queue".to_string(),
                     affected_states: captured_states.clone(),
                     finding_refs: Vec::new(),
                 });
@@ -6552,10 +7565,10 @@ fn verdicts_from_findings(
                 .into_iter()
                 .map(|obligation| Verdict {
                     obligation,
-                    status: "not_tested".to_string(),
-                    confidence: "script_observed".to_string(),
+                    status: "needs_review".to_string(),
+                    confidence: "requires_human_or_agent_review".to_string(),
                     evidence_class: "scripted".to_string(),
-                    source: "allie-obligation-profile".to_string(),
+                    source: "allie-agentic-review-queue".to_string(),
                     affected_states: captured_states.clone(),
                     finding_refs: Vec::new(),
                 }),
@@ -6632,6 +7645,7 @@ fn coverage_from_response(
                 console_errors: state.console_errors.clone(),
                 network_errors: state.network_errors.clone(),
                 state_errors: state.state_errors.clone(),
+                features: state.features.clone(),
             })
             .collect(),
         standards_obligations_evaluated: obligations.into_iter().collect(),
@@ -7113,7 +8127,8 @@ mod tests {
         assert!(packet.contains("\"infrastructure_failures\": 0"));
         assert!(packet.contains("\"title\": \"Allie Fixture Login\""));
         assert!(packet.contains("wcag22-aa:deterministic-axe-rules"));
-        assert!(packet.contains("\"status\": \"not_tested\""));
+        // Every criterion is attempted: nothing is left "not tested".
+        assert!(!packet.contains("\"status\": \"not_tested\""));
         assert!(packet.contains("\"status\": \"needs_review\""));
         assert!(packet.contains("cargo run --locked -- run --manifest examples/login-flow.yml"));
 
@@ -7392,8 +8407,18 @@ mod tests {
 
         assert!(verdicts.iter().any(|verdict| verdict.status == "pass"
             && verdict.obligation == "wcag22-aa:deterministic-axe-rules"));
-        assert!(verdicts.iter().any(|verdict| verdict.status == "not_tested"
-            && verdict.obligation == "wcag22-aa:2.1.1-keyboard-traversal"));
+        assert!(
+            verdicts
+                .iter()
+                .any(|verdict| verdict.status == "needs_review"
+                    && verdict.obligation == "wcag22-aa:2.1.1-keyboard-traversal")
+        );
+        assert!(
+            !verdicts
+                .iter()
+                .any(|verdict| verdict.status == "not_tested"),
+            "no criterion may be left not_tested"
+        );
         assert!(
             verdicts
                 .iter()
@@ -7635,8 +8660,9 @@ mod tests {
             )
         );
         let html = fs::read_to_string(report_dir.join("compliance-report.html")).unwrap();
-        assert!(html.contains("WCAG 2.2 A/AA Success Criteria"));
-        assert!(html.contains("criterion -> surface -> state -> finding -> artifact -> replay"));
+        assert!(html.contains("WCAG 2.2 success criteria"));
+        assert!(html.contains("Criterion coverage matrix"));
+        assert!(html.contains("Reproduce this run"));
         assert!(html.contains("not a legal compliance guarantee"));
     }
 
@@ -7700,9 +8726,9 @@ mod tests {
         }
         validate_criterion_coverage_cells(&report).unwrap();
         let html = fs::read_to_string(report_dir.join("compliance-report.html")).unwrap();
-        assert!(html.contains("Supporting Checks"));
+        assert!(html.contains("Supporting checks"));
         assert!(html.contains("wcag22-aa:deterministic-axe-rules"));
-        assert!(html.contains("replay command"));
+        assert!(html.contains("Reproduce this run"));
         assert!(html.contains("not a legal compliance guarantee"));
     }
 
@@ -7770,7 +8796,7 @@ mod tests {
                 .any(|value| value == "axe-core")
         );
 
-        assert_eq!(scripted_cell.status, "not_tested");
+        assert_eq!(scripted_cell.status, "needs_review");
         assert_eq!(scripted_cell.confidence, "script_observed");
         assert!(scripted_cell.artifact_refs.is_empty());
         assert!(scripted_cell.test_refs.is_empty());
@@ -7916,6 +8942,7 @@ mod tests {
             console_errors: Vec::new(),
             network_errors: Vec::new(),
             state_errors: Vec::new(),
+            features: None,
         });
 
         let report = build_compliance_report(
@@ -8720,6 +9747,10 @@ flow:
             evidence_class: "human".to_string(),
             source_url: criterion_source_url(id),
             finding_refs: Vec::new(),
+            principle: criterion_principle(id),
+            level: criterion_level(id),
+            media: Vec::new(),
+            agentic_review: None,
         }
     }
 
@@ -8820,6 +9851,17 @@ flow:
                 console_errors: Vec::new(),
                 network_errors: Vec::new(),
                 state_errors: Vec::new(),
+                features: Some(PageFeatures {
+                    forms: 1,
+                    inputs: 2,
+                    links: 1,
+                    headings: 1,
+                    lang: true,
+                    lang_value: "en".to_string(),
+                    reflow_checked: true,
+                    reflow_overflow: false,
+                    ..Default::default()
+                }),
             }],
             errors: Vec::new(),
             nondeterminism: Vec::new(),

@@ -11,6 +11,7 @@
     "landscape:smoke": "scripts/landscape-smoke.sh",
     "consumer:smoke": "scripts/consumer-contract-smoke.sh",
     "consumer-cwd:smoke": "scripts/consumer-cwd-smoke.sh",
+    "agentic:smoke": "scripts/agentic-smoke.sh",
     "release:smoke": "cargo run --locked -- release --packet .allie/runs/v0-smoke/evidence.json --out .allie/releases/v0-smoke --changed-surface login-form",
     "autonomous:smoke": "scripts/autonomous-smoke.sh",
     "verify": "scripts/verify.sh"

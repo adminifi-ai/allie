@@ -202,6 +202,8 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom) {
     }, null, 2)}\n`);
   }
 
+  const features = await captureFeatures(page);
+
   await page.close();
   let videoPath = null;
   if (state.video && pageVideo) {
@@ -232,7 +234,48 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom) {
     console_errors: consoleErrors,
     network_errors: networkErrors,
     state_errors: stateErrors,
+    features,
   };
+}
+
+// Page feature inventory + lightweight scripted signals. Allie uses these to
+// decide, automatically, which WCAG criteria are not applicable to the page
+// (no audio/video, no forms, no draggable targets) and to run a couple of
+// deterministic/scripted checks (page language, 320px reflow) so no criterion
+// is left simply "not tested".
+async function captureFeatures(page) {
+  const counts = await page.evaluate(() => {
+    const count = (selector) => document.querySelectorAll(selector).length;
+    return {
+      audio: count('audio'),
+      video: count('video'),
+      forms: count('form'),
+      inputs: count('input:not([type=hidden]), select, textarea'),
+      draggable: count('[draggable="true"]'),
+      iframes: count('iframe'),
+      images: count('img, svg[role="img"], [role="img"]'),
+      links: count('a[href]'),
+      headings: count('h1, h2, h3, h4, h5, h6'),
+      lang: Boolean(document.documentElement.getAttribute('lang')),
+      lang_value: document.documentElement.getAttribute('lang') || '',
+    };
+  });
+  let reflowOverflow = false;
+  let reflowChecked = false;
+  try {
+    const viewport = page.viewportSize();
+    await page.setViewportSize({ width: 320, height: viewport?.height ?? 900 });
+    reflowOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
+    );
+    reflowChecked = true;
+    if (viewport) {
+      await page.setViewportSize(viewport);
+    }
+  } catch {
+    reflowChecked = false;
+  }
+  return { ...counts, reflow_overflow: reflowOverflow, reflow_checked: reflowChecked };
 }
 
 async function captureKeyboardFocusOrder(page) {
