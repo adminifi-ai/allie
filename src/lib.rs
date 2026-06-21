@@ -2724,6 +2724,7 @@ fn build_state_evidence(packet: &EvidencePacket, packet_path: &Path) -> Vec<Stat
                 .filter(|artifact| {
                     is_screenshot_artifact(artifact)
                         && artifact.related_flow_state.as_deref() == Some(state.id.as_str())
+                        && is_safe_run_relative(&artifact.path)
                 })
                 .filter_map(|artifact| {
                     artifact_data_uri(&run_dir.join(&artifact.path)).map(|uri| EvidenceMedia {
@@ -2771,6 +2772,7 @@ fn attach_agentic_reviews(
         let media = record
             .media
             .iter()
+            .filter(|media_ref| is_safe_run_relative(&media_ref.path))
             .filter_map(|media_ref| {
                 artifact_data_uri(&run_dir.join(&media_ref.path)).map(|uri| EvidenceMedia {
                     kind: media_ref.kind.clone(),
@@ -2799,6 +2801,17 @@ fn is_screenshot_artifact(artifact: &ArtifactMetadata) -> bool {
         || artifact.path.ends_with(".jpg")
         || artifact.path.ends_with(".jpeg")
         || artifact.path.ends_with(".webp")
+}
+
+/// Reject run-relative paths that escape the run directory (absolute, or with a
+/// `..` component), so a hand-edited evidence packet cannot make the report
+/// inline an arbitrary file from disk.
+fn is_safe_run_relative(rel: &str) -> bool {
+    !rel.is_empty()
+        && !Path::new(rel).is_absolute()
+        && !Path::new(rel)
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
 }
 
 /// Read a binary artifact and encode it as a `data:` URI for inline embedding.

@@ -102,7 +102,7 @@ async function run(request) {
     await browser.close();
     browser = null;
 
-    const status = errors.length === 0 ? 'ok' : assessments.some((a) => a.assessment !== 'unavailable') ? 'degraded' : 'degraded';
+    const status = errors.length === 0 ? 'ok' : 'degraded';
     return {
       schema: RESPONSE_SCHEMA,
       status,
