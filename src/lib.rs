@@ -1003,15 +1003,23 @@ fn run_v0(options: RunOptions) -> Result<RunReceipt> {
     })?;
 
     let run_id = new_run_id();
-    let request_path = options.out_dir.join("worker-request.json");
-    let response_path = options.out_dir.join("worker-response.json");
+    // Absolutize the worker handshake paths. The bundled Node worker resolves
+    // request/response/artifacts paths against its own repoRoot (the Allie
+    // checkout), so relative paths only line up when Allie runs from its own
+    // repo. Run from a consumer repo, relative paths resolve under the Allie
+    // tree and the worker crashes on a missing request. Absolute paths make the
+    // handshake independent of the worker's CWD assumptions.
+    let out_dir_abs =
+        fs::canonicalize(&options.out_dir).unwrap_or_else(|_| options.out_dir.clone());
+    let request_path = out_dir_abs.join("worker-request.json");
+    let response_path = out_dir_abs.join("worker-response.json");
     let mut run_failures = manifest.preflight_failures();
     let response = if run_failures.is_empty() {
         let request = WorkerRequest::from_manifest(
             &run_id,
             &manifest,
             &options.manifest_path,
-            &options.out_dir.join("artifacts"),
+            &out_dir_abs.join("artifacts"),
         )?;
         write_json_pretty(&request_path, &request)?;
 
