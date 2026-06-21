@@ -2704,7 +2704,105 @@ fn build_compliance_report(
         supporting_checks,
         obligations: criteria,
         surfaces,
+        state_evidence: build_state_evidence(packet, packet_path),
     }
+}
+
+/// Resolve each captured state's full-page screenshot (and focus order) once,
+/// inlining the image as a data URI so the report is self-contained.
+fn build_state_evidence(packet: &EvidencePacket, packet_path: &Path) -> Vec<StateEvidence> {
+    let run_dir = packet_path.parent().unwrap_or_else(|| Path::new("."));
+    packet
+        .coverage
+        .state_metadata
+        .iter()
+        .map(|state| {
+            let media = packet
+                .artifacts
+                .iter()
+                .filter(|artifact| {
+                    is_screenshot_artifact(artifact)
+                        && artifact.related_flow_state.as_deref() == Some(state.id.as_str())
+                })
+                .filter_map(|artifact| {
+                    artifact_data_uri(&run_dir.join(&artifact.path)).map(|uri| EvidenceMedia {
+                        kind: "screenshot".to_string(),
+                        caption: format!("{} — full page as Allie captured it", state.id),
+                        data_uri: Some(uri),
+                        artifact_ref: Some(artifact.id.clone()),
+                    })
+                })
+                .collect();
+            StateEvidence {
+                id: state.id.clone(),
+                route: state.route.clone(),
+                url: state.url.clone(),
+                title: state.title.clone(),
+                http_status: state.http_status,
+                keyboard_focus_order: state.keyboard_focus_order.clone(),
+                media,
+            }
+        })
+        .collect()
+}
+
+fn is_screenshot_artifact(artifact: &ArtifactMetadata) -> bool {
+    artifact.artifact_type == "screenshot"
+        || artifact.path.ends_with(".png")
+        || artifact.path.ends_with(".jpg")
+        || artifact.path.ends_with(".jpeg")
+        || artifact.path.ends_with(".webp")
+}
+
+/// Read a binary artifact and encode it as a `data:` URI for inline embedding.
+/// Returns None if the file is missing or too large to inline sensibly.
+fn artifact_data_uri(abs_path: &Path) -> Option<String> {
+    const MAX_INLINE_BYTES: u64 = 6 * 1024 * 1024;
+    let metadata = fs::metadata(abs_path).ok()?;
+    if metadata.len() > MAX_INLINE_BYTES {
+        return None;
+    }
+    let bytes = fs::read(abs_path).ok()?;
+    let mime = match abs_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        Some("svg") => "image/svg+xml",
+        _ => "application/octet-stream",
+    };
+    Some(format!("data:{};base64,{}", mime, base64_encode(&bytes)))
+}
+
+/// Minimal standard base64 encoder. Kept in-tree to inline evidence images
+/// without adding a dependency to a deliberately small crate graph.
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((triple >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(triple & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 fn compliance_criterion_order(policy_profile: &str, packet: &EvidencePacket) -> Vec<String> {
@@ -2829,7 +2927,26 @@ fn compliance_obligation(
         evidence_class,
         source_url: criterion_source_url(obligation),
         finding_refs: findings.iter().map(|finding| finding.id.clone()).collect(),
+        principle: criterion_principle(obligation),
+        level: criterion_level(obligation),
+        media: Vec::new(),
+        agentic_review: None,
     }
+}
+
+fn criterion_principle(obligation: &str) -> String {
+    criterion_field(obligation, "principle").unwrap_or_else(|| "Supporting Checks".to_string())
+}
+
+fn criterion_level(obligation: &str) -> String {
+    criterion_field(obligation, "level").unwrap_or_default()
+}
+
+fn criterion_field(obligation: &str, field: &str) -> Option<String> {
+    wcag22_success_criteria()
+        .into_iter()
+        .find(|criterion| criterion["obligation"].as_str() == Some(obligation))
+        .and_then(|criterion| criterion[field].as_str().map(ToString::to_string))
 }
 
 fn compliance_supporting_check(
@@ -3787,174 +3904,475 @@ fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
     output
 }
 
-fn render_compliance_report(report: &ComplianceReportPacket) -> String {
-    let criteria = report
-        .criteria
+const REPORT_CSS: &str = r#"
+*{box-sizing:border-box}
+body{margin:0;color:#1a1d24;background:#eef1f6;font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+main{width:min(100% - 32px,1080px);margin:0 auto;padding:34px 0 90px}
+a{color:#3450c4;text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid #3450c4;outline-offset:2px;border-radius:4px}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}
+.eyebrow{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:#5a6473;font-weight:700;margin:0 0 8px}
+h1{margin:0;font-size:34px;line-height:1.08;letter-spacing:-.02em}
+.sub{color:#5a6473;margin:8px 0 0;font-size:13px}
+.banner{margin:24px 0 6px;padding:18px 22px;border-radius:16px;border:1px solid;display:flex;gap:15px;align-items:center}
+.banner .dot{width:13px;height:13px;border-radius:50%;flex:none}
+.banner h2{margin:0;font-size:18px;letter-spacing:-.01em}
+.banner p{margin:3px 0 0;font-size:13.5px;opacity:.88}
+.b-fail{background:#fbe9e7;border-color:#f3c8c2}
+.b-review{background:#fbf3e1;border-color:#efdcb0}
+.b-pass{background:#e6f4ec;border-color:#c2e3d0}
+.scorecard{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:20px 0 6px}
+.score{background:#fff;border:1px solid #e4e8ef;border-radius:13px;padding:14px 16px}
+.score .n{font-size:27px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.score .k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#5a6473;margin-top:3px}
+.score.zero .n{color:#1a9457}
+.bar{height:11px;border-radius:7px;overflow:hidden;display:flex;border:1px solid #e4e8ef;margin:8px 0 4px;background:#fff}
+.bar i{display:block;height:100%}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#5a6473;margin:0 0 6px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend b{width:10px;height:10px;border-radius:3px;display:inline-block}
+section{margin:38px 0}
+.sh{font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:#5a6473;margin:0 0 16px;font-weight:700}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+figure{margin:0;background:#fff;border:1px solid #e4e8ef;border-radius:13px;overflow:hidden}
+figure img{display:block;width:100%;height:auto;border-bottom:1px solid #e4e8ef;background:#f4f5f8}
+figcaption{padding:11px 13px;font-size:12.5px;color:#5a6473}
+.principle{margin:24px 0}
+.principle h3{font-size:19px;margin:0 0 2px;letter-spacing:-.01em}
+.principle .pmeta{color:#5a6473;font-size:12.5px;margin:0 0 14px}
+.crit{background:#fff;border:1px solid #e4e8ef;border-left:4px solid #c7ced9;border-radius:13px;padding:16px 18px;margin:11px 0}
+.crit.s-pass{border-left-color:#1a9457}
+.crit.s-fail{border-left-color:#d23b30}
+.crit.s-review{border-left-color:#d39a2a}
+.crit.s-na{border-left-color:#9aa6b6}
+.crit.s-nottested{border-left-color:#8b5cf6}
+.crit-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.crit-id{font-weight:600;font-size:15.5px;letter-spacing:-.01em}
+.crit-id .num{color:#5a6473;font-variant-numeric:tabular-nums;margin-right:9px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;letter-spacing:.02em}
+.chip-pass{background:#e6f4ec;color:#0f6b3c}
+.chip-fail{background:#fbe9e7;color:#b3271d}
+.chip-review{background:#fbf0db;color:#875400}
+.chip-na{background:#eceff4;color:#4a5566}
+.chip-nottested{background:#efe6fb;color:#6d28b8}
+.chip-method{background:#eef1f7;color:#42506a}
+.chip-level{background:#eef1f7;color:#5a6473}
+.why{margin:11px 0 0;color:#39414f;font-size:14px}
+.crit-foot{margin-top:12px;display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:#5a6473;align-items:center}
+.ai{margin-top:13px;border:1px solid #e3e7f3;border-radius:11px;background:#f7f8fd;padding:13px 15px}
+.ai-h{display:flex;gap:8px;align-items:center;font-size:11.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#3f4b8a}
+.ai-h .v{margin-left:auto;font-weight:700}
+.ai p{margin:8px 0 0;font-size:13.5px;color:#2c3340}
+.ai .guide{margin-top:9px;padding:10px 12px;background:#fff;border:1px solid #e7eaf2;border-radius:9px;font-size:13px}
+.ai .guide b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#5a6473;margin-bottom:3px}
+.ai-media{display:flex;gap:10px;flex-wrap:wrap;margin-top:11px}
+.ai-media figure{max-width:260px}
+.pending{margin-top:13px;border:1px dashed #d7deea;border-radius:11px;background:#fafbfd;padding:11px 14px;color:#6b7280;font-size:13px}
+.matrix-wrap>summary{cursor:pointer;font-weight:700;color:#3450c4;padding:10px 0;font-size:13.5px}
+table.matrix{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+table.matrix th,table.matrix td{border-bottom:1px solid #e9edf3;padding:8px 10px;text-align:left;vertical-align:top}
+table.matrix th{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#5a6473;position:sticky;top:0;background:#fff}
+.foot{margin-top:46px;color:#5a6473;font-size:12.5px;border-top:1px solid #e1e6ef;padding-top:16px}
+@media(max-width:840px){.scorecard{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:560px){.scorecard{grid-template-columns:repeat(2,1fr)}h1{font-size:27px}}
+"#;
+
+fn cr_status_suffix(status: &str) -> &'static str {
+    match status {
+        "pass" => "pass",
+        "fail" => "fail",
+        "needs_review" => "review",
+        "not_applicable" | "waived" | "risk_accepted" => "na",
+        "not_tested" => "nottested",
+        _ => "na",
+    }
+}
+
+fn cr_status_label(status: &str) -> String {
+    match status {
+        "pass" => "Pass".to_string(),
+        "fail" => "Fail".to_string(),
+        "needs_review" => "Needs review".to_string(),
+        "not_applicable" => "Not applicable".to_string(),
+        "not_tested" => "Not tested".to_string(),
+        "waived" => "Waived".to_string(),
+        "risk_accepted" => "Risk accepted".to_string(),
+        other => pretty_token(other),
+    }
+}
+
+fn pretty_token(value: &str) -> String {
+    let spaced = value.replace(['_', '-'], " ");
+    let mut chars = spaced.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => spaced,
+    }
+}
+
+fn cr_status_chip(status: &str) -> String {
+    format!(
+        "<span class=\"chip chip-{}\">{}</span>",
+        cr_status_suffix(status),
+        escape_html(&cr_status_label(status))
+    )
+}
+
+fn cr_method_label(evidence_class: &str) -> Option<&'static str> {
+    match evidence_class {
+        "deterministic" => Some("Automated · axe"),
+        "scripted" => Some("Scripted"),
+        "agentic" => Some("AI review"),
+        "human" => Some("Needs human"),
+        "applicability" => Some("Applicability"),
+        _ => None,
+    }
+}
+
+fn cr_method_chip(evidence_class: &str) -> String {
+    match cr_method_label(evidence_class) {
+        Some(label) => format!(
+            "<span class=\"chip chip-method\">{}</span>",
+            escape_html(label)
+        ),
+        None => String::new(),
+    }
+}
+
+fn cr_media(media: &[EvidenceMedia]) -> String {
+    if media.is_empty() {
+        return String::new();
+    }
+    let figures = media
         .iter()
-        .map(|obligation| {
+        .filter_map(|item| {
+            let uri = item.data_uri.as_ref()?;
+            Some(format!(
+                "<figure><img loading=\"lazy\" src=\"{}\" alt=\"{}\"><figcaption>{}</figcaption></figure>",
+                escape_html(uri),
+                escape_html(&item.caption),
+                escape_html(&item.caption)
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    if figures.is_empty() {
+        String::new()
+    } else {
+        format!("<div class=\"ai-media\">{figures}</div>")
+    }
+}
+
+fn cr_agentic_block(obligation: &ComplianceObligation) -> String {
+    if let Some(review) = &obligation.agentic_review {
+        let guide = if review.reviewer_guidance.trim().is_empty() {
+            String::new()
+        } else {
             format!(
-                "<tr class=\"status-{status}\"><td><code>{id}</code><br>{title}</td><td>{status}</td><td>{why}<details><summary>Evidence</summary><p>Surfaces: <code>{surfaces}</code></p><p>Tests: <code>{tests}</code></p><p>Artifacts: <code>{artifacts}</code></p><p>Agentic context: <code>{agentic}</code></p><p>Human review: {human}</p></details></td></tr>",
-                status = escape_html(&obligation.status),
-                id = escape_html(&obligation.id),
-                title = escape_html(&obligation.title),
-                why = escape_html(&obligation.why),
-                surfaces = escape_html(&obligation.surfaces.join(", ")),
-                tests = escape_html(&obligation.tests.join(", ")),
-                artifacts = escape_html(&obligation.artifact_refs.join(", ")),
-                agentic = escape_html(&obligation.agentic_context.join(", ")),
-                human = escape_html(&obligation.human_review)
+                "<div class=\"guide\"><b>For the human reviewer</b>{}</div>",
+                escape_html(&review.reviewer_guidance)
+            )
+        };
+        format!(
+            "<div class=\"ai\"><div class=\"ai-h\">AI accessibility review <span class=\"v\">{verdict} · {confidence}</span></div><p>{rationale}</p>{guide}{media}<p class=\"sub\" style=\"margin-top:9px\">{provider} · {model}</p></div>",
+            verdict = escape_html(&pretty_token(&review.assessment)),
+            confidence = escape_html(&pretty_token(&review.confidence)),
+            rationale = escape_html(&review.rationale),
+            guide = guide,
+            media = cr_media(&review.media),
+            provider = escape_html(&review.provider),
+            model = escape_html(&review.model),
+        )
+    } else if matches!(obligation.evidence_class.as_str(), "human" | "agentic")
+        || obligation.status == "needs_review"
+    {
+        "<div class=\"pending\">Agentic review pending — this criterion needs visual or contextual judgment; the AI reviewer will attach a screenshot, assessment, and reviewer guidance here.</div>".to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn cr_criterion_card(obligation: &ComplianceObligation) -> String {
+    let level = if obligation.level.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<span class=\"chip chip-level\">Level {}</span>",
+            escape_html(&obligation.level)
+        )
+    };
+    let source = obligation
+        .source_url
+        .as_ref()
+        .map(|url| {
+            format!(
+                " · <a href=\"{}\" rel=\"noreferrer\">WCAG reference ↗</a>",
+                escape_html(url)
+            )
+        })
+        .unwrap_or_default();
+    let (num, title) = split_criterion_title(&obligation.title);
+    format!(
+        "<article class=\"crit s-{suffix}\"><div class=\"crit-head\"><div class=\"crit-id\"><span class=\"num\">{num}</span>{title}</div><div class=\"chips\">{level}{method}{status}</div></div><p class=\"why\">{why}</p>{ai}<div class=\"crit-foot\"><span>Confidence: {confidence}</span><span>{review}{source}</span></div></article>",
+        suffix = cr_status_suffix(&obligation.status),
+        num = escape_html(&num),
+        title = escape_html(&title),
+        level = level,
+        method = cr_method_chip(&obligation.evidence_class),
+        status = cr_status_chip(&obligation.status),
+        why = escape_html(&obligation.why),
+        ai = cr_agentic_block(obligation),
+        confidence = escape_html(&pretty_token(&obligation.confidence)),
+        review = escape_html(&pretty_token(&obligation.human_review)),
+        source = source,
+    )
+}
+
+fn split_criterion_title(title: &str) -> (String, String) {
+    match title.split_once(' ') {
+        Some((num, rest)) if num.chars().all(|c| c.is_ascii_digit() || c == '.') => {
+            (num.to_string(), rest.to_string())
+        }
+        _ => (String::new(), title.to_string()),
+    }
+}
+
+fn cr_principle_sections(criteria: &[ComplianceObligation]) -> String {
+    const ORDER: [&str; 4] = ["Perceivable", "Operable", "Understandable", "Robust"];
+    let mut sections = String::new();
+    for principle in ORDER {
+        let rows = criteria
+            .iter()
+            .filter(|criterion| criterion.principle == principle)
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            continue;
+        }
+        let pass = rows.iter().filter(|row| row.status == "pass").count();
+        let cards = rows
+            .iter()
+            .map(|row| cr_criterion_card(row))
+            .collect::<Vec<_>>()
+            .join("");
+        sections.push_str(&format!(
+            "<div class=\"principle\"><h3>{principle}</h3><p class=\"pmeta\">{total} criteria · {pass} passing</p>{cards}</div>",
+            principle = escape_html(principle),
+            total = rows.len(),
+            pass = pass,
+            cards = cards,
+        ));
+    }
+    sections
+}
+
+fn cr_state_gallery(states: &[StateEvidence]) -> String {
+    let figures = states
+        .iter()
+        .map(|state| {
+            let img = state
+                .media
+                .iter()
+                .find_map(|item| item.data_uri.as_ref())
+                .map(|uri| {
+                    format!(
+                        "<img loading=\"lazy\" src=\"{}\" alt=\"Screenshot of {} state\">",
+                        escape_html(uri),
+                        escape_html(&state.id)
+                    )
+                })
+                .unwrap_or_default();
+            let focus = if state.keyboard_focus_order.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<br>Tab order: {}",
+                    escape_html(&state.keyboard_focus_order.join(" → "))
+                )
+            };
+            format!(
+                "<figure>{img}<figcaption><strong>{id}</strong> · <code>{route}</code><br>{title}{focus}</figcaption></figure>",
+                img = img,
+                id = escape_html(&state.id),
+                route = escape_html(&state.route),
+                title = escape_html(&state.title),
+                focus = focus,
             )
         })
         .collect::<Vec<_>>()
         .join("");
-    let cells = report
-        .criterion_coverage
+    if figures.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<section><h2 class=\"sh\">What Allie inspected</h2><div class=\"gallery\">{figures}</div></section>"
+        )
+    }
+}
+
+fn cr_matrix_rows(cells: &[CriterionCoverageCell]) -> String {
+    cells
         .iter()
         .map(|cell| {
             format!(
-                "<tr class=\"status-{status}\"><td><code>{criterion}</code><br>Surface <code>{surface}</code><br>State <code>{state}</code></td><td>{status}</td><td>{applicability}</td><td>{method}</td><td>{confidence}</td><td><details><summary>criterion -> surface -> state -> finding -> artifact -> replay command</summary><p>Evidence refs: <code>{evidence}</code></p><p>Findings: <code>{findings}</code></p><p>Artifacts: <code>{artifacts}</code></p><p>Tests: <code>{tests}</code></p><p>Agentic refs: <code>{agentic}</code></p><p>Waivers: <code>{waivers}</code></p><p>Replay command: <code>{replay}</code></p><p>Residual review: {residual}</p></details></td></tr>",
-                status = escape_html(&cell.status),
+                "<tr><td><code>{criterion}</code><br>{surface} · {state}</td><td>{status}</td><td>{applicability}</td><td>{method}</td><td>{confidence}</td><td>{residual}</td></tr>",
                 criterion = escape_html(&cell.criterion_id),
                 surface = escape_html(&cell.surface_id),
                 state = escape_html(&cell.state_id),
-                applicability = escape_html(&cell.applicability),
-                method = escape_html(&cell.method),
-                confidence = escape_html(&cell.confidence),
-                evidence = escape_html(&cell.evidence_refs.join(", ")),
-                findings = escape_html(&cell.finding_refs.join(", ")),
-                artifacts = escape_html(&cell.artifact_refs.join(", ")),
-                tests = escape_html(&cell.test_refs.join(", ")),
-                agentic = escape_html(&cell.agentic_refs.join(", ")),
-                waivers = escape_html(&cell.waiver_refs.join(", ")),
-                replay = escape_html(cell.replay_command.as_deref().unwrap_or("")),
-                residual = escape_html(&cell.residual_review_need)
+                status = cr_status_chip(&cell.status),
+                applicability = escape_html(&pretty_token(&cell.applicability)),
+                method = escape_html(&pretty_token(&cell.method)),
+                confidence = escape_html(&pretty_token(&cell.confidence)),
+                residual = escape_html(&cell.residual_review_need),
             )
         })
         .collect::<Vec<_>>()
-        .join("");
-    let supporting_checks = report
-        .supporting_checks
+        .join("")
+}
+
+fn cr_supporting_checks(checks: &[ComplianceSupportingCheck]) -> String {
+    if checks.is_empty() {
+        return String::new();
+    }
+    let cards = checks
         .iter()
         .map(|check| {
+            let related = if check.related_criteria.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<div class=\"crit-foot\"><span>Covers {} criteria: <code>{}</code></span></div>",
+                    check.related_criteria.len(),
+                    escape_html(&check.related_criteria.join(", "))
+                )
+            };
             format!(
-                "<tr class=\"status-{status}\"><td><code>{id}</code><br>{title}</td><td>{status}</td><td>{why}<details><summary>Related Criteria And Evidence</summary><p>Related criteria: <code>{criteria}</code></p><p>Surfaces: <code>{surfaces}</code></p><p>Tests: <code>{tests}</code></p><p>Artifacts: <code>{artifacts}</code></p><p>Agentic context: <code>{agentic}</code></p><p>Human review: {human}</p></details></td></tr>",
-                status = escape_html(&check.status),
-                id = escape_html(&check.id),
+                "<article class=\"crit s-{suffix}\"><div class=\"crit-head\"><div class=\"crit-id\">{title}<br><code style=\"font-size:11px;color:#5a6473\">{id}</code></div><div class=\"chips\">{method}{status}</div></div><p class=\"why\">{why}</p>{related}</article>",
+                suffix = cr_status_suffix(&check.status),
                 title = escape_html(&check.title),
+                id = escape_html(&check.id),
+                method = cr_method_chip(&check.evidence_class),
+                status = cr_status_chip(&check.status),
                 why = escape_html(&check.why),
-                criteria = escape_html(&check.related_criteria.join(", ")),
-                surfaces = escape_html(&check.surfaces.join(", ")),
-                tests = escape_html(&check.tests.join(", ")),
-                artifacts = escape_html(&check.artifact_refs.join(", ")),
-                agentic = escape_html(&check.agentic_context.join(", ")),
-                human = escape_html(&check.human_review)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
-    let surfaces = report
-        .surfaces
-        .iter()
-        .map(|surface| {
-            format!(
-                "<li><strong>{}</strong> <code>{}</code><br>Status: {}. Routes: <code>{}</code>. Findings: <code>{}</code>.</li>",
-                escape_html(&surface.title),
-                escape_html(&surface.surface_id),
-                escape_html(&surface.status),
-                escape_html(&surface.routes.join(", ")),
-                escape_html(&surface.finding_refs.join(", "))
+                related = related,
             )
         })
         .collect::<Vec<_>>()
         .join("");
     format!(
-        r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Allie WCAG Evidence Report</title>
-  <style>
-    body {{ margin: 0; color: #151719; background: #f5f7fa; font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    main {{ width: min(100% - 40px, 1180px); margin: 0 auto; padding: 40px 0; }}
-    h1 {{ margin: 0 0 8px; font-size: 42px; line-height: 1.05; letter-spacing: 0; }}
-    h2 {{ margin: 0 0 12px; color: #58616c; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }}
-    section {{ background: #fff; border: 1px solid #d7dde5; margin-top: 18px; padding: 20px; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    th, td {{ border-bottom: 1px solid #d7dde5; padding: 10px; text-align: left; vertical-align: top; }}
-    th {{ color: #58616c; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }}
-    code {{ background: #edf1f6; padding: 0.08em 0.28em; border-radius: 4px; }}
-    details {{ margin-top: 8px; }}
-    .summary {{ display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 1px; background: #d7dde5; border: 1px solid #d7dde5; margin-top: 22px; }}
-    .summary div {{ background: #fff; padding: 14px; }}
-    .label {{ color: #58616c; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }}
-    .value {{ font-size: 24px; font-weight: 700; margin: 0; }}
-    .status-fail td:first-child {{ border-left: 4px solid #b42318; }}
-    .status-needs_review td:first-child, .status-not_tested td:first-child {{ border-left: 4px solid #b7791f; }}
-    .status-pass td:first-child {{ border-left: 4px solid #2f855a; }}
-    @media (max-width: 760px) {{ main {{ width: min(100% - 24px, 1180px); }} .summary {{ grid-template-columns: 1fr 1fr; }} table {{ display: block; overflow-x: auto; }} }}
-  </style>
-</head>
-<body>
-  <main>
-    <p class="label">Allie WCAG evidence report, not a legal compliance guarantee</p>
-    <h1>{app_name}</h1>
-    <p>Source packet <code>{packet}</code>. Source map <code>{map}</code>.</p>
-    <div class="summary" aria-label="Compliance evidence summary">
-      <div><p class="label">Status</p><p class="value">{status}</p></div>
-      <div><p class="label">Pass</p><p class="value">{pass}</p></div>
-      <div><p class="label">Fail</p><p class="value">{fail}</p></div>
-      <div><p class="label">Review</p><p class="value">{review}</p></div>
-      <div><p class="label">Not Tested</p><p class="value">{not_tested}</p></div>
-      <div><p class="label">Waived</p><p class="value">{waived}</p></div>
-      <div><p class="label">Risk</p><p class="value">{risk_accepted}</p></div>
-      <div><p class="label">Total</p><p class="value">{total}</p></div>
-    </div>
-    <section>
-      <h2>Surfaces</h2>
-      <ul>{surfaces}</ul>
-    </section>
-    <section>
-      <h2>WCAG 2.2 A/AA Success Criteria</h2>
-      <table>
-        <thead><tr><th>Requirement</th><th>Status</th><th>Why And Evidence</th></tr></thead>
-        <tbody>{criteria}</tbody>
-      </table>
-    </section>
-    <section>
-      <h2>Criterion Coverage Matrix</h2>
-      <table>
-        <thead><tr><th>Criterion / Surface / State</th><th>Status</th><th>Applicability</th><th>Method</th><th>Confidence</th><th>Drilldown</th></tr></thead>
-        <tbody>{cells}</tbody>
-      </table>
-    </section>
-    <section>
-      <h2>Supporting Checks</h2>
-      <table>
-        <thead><tr><th>Check</th><th>Status</th><th>Why And Evidence</th></tr></thead>
-        <tbody>{supporting_checks}</tbody>
-      </table>
-    </section>
-  </main>
-</body>
-</html>
-"#,
-        app_name = escape_html(&report.app_name),
+        "<section><h2 class=\"sh\">Supporting checks</h2><p class=\"sub\" style=\"margin:0 0 14px\">Cross-cutting evidence passes that back the individual criteria above.</p>{cards}</section>"
+    )
+}
+
+fn render_compliance_report(report: &ComplianceReportPacket) -> String {
+    let s = &report.summary;
+    let banner_class = match s.status.as_str() {
+        "fail" | "blocked" => "b-fail",
+        "pass" | "approved" => "b-pass",
+        _ => "b-review",
+    };
+    let total = s.total_obligations.max(1);
+    let seg = |count: usize, color: &str| -> String {
+        if count == 0 {
+            String::new()
+        } else {
+            format!(
+                "<i style=\"width:{:.3}%;background:{}\"></i>",
+                count as f64 / total as f64 * 100.0,
+                color
+            )
+        }
+    };
+    let bar = format!(
+        "{}{}{}{}{}",
+        seg(s.pass, "#1a9457"),
+        seg(s.fail, "#d23b30"),
+        seg(s.needs_review, "#d8a32f"),
+        seg(s.not_applicable, "#aab4c2"),
+        seg(s.not_tested, "#8b5cf6"),
+    );
+    let score = |n: usize, k: &str, zero_good: bool| -> String {
+        let cls = if zero_good && n == 0 {
+            "score zero"
+        } else {
+            "score"
+        };
+        format!(
+            "<div class=\"{cls}\"><div class=\"n\">{n}</div><div class=\"k\">{k}</div></div>",
+            cls = cls,
+            n = n,
+            k = k
+        )
+    };
+
+    let mut html = String::new();
+    html.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Allie · ");
+    html.push_str(&escape_html(&report.app_name));
+    html.push_str(" accessibility evidence</title>\n<style>");
+    html.push_str(REPORT_CSS);
+    html.push_str("</style>\n</head>\n<body>\n<main>\n");
+    html.push_str(&format!(
+        "<p class=\"eyebrow\">Allie · accessibility release evidence</p><h1>{app}</h1><p class=\"sub\">WCAG 2.2 A/AA · generated {generated} · evidence visibility, not a legal compliance guarantee</p>",
+        app = escape_html(&report.app_name),
+        generated = escape_html(&report.generated_at),
+    ));
+    html.push_str(&format!(
+        "<div class=\"banner {bcls}\"><span class=\"dot\" style=\"background:{dot}\"></span><div><h2>Status: {status}</h2><p>{pass} passing · {fail} failing · {review} need review · {na} not applicable · {nt} not tested across {total} success criteria.</p></div></div>",
+        bcls = banner_class,
+        dot = match s.status.as_str() { "fail" | "blocked" => "#d23b30", "pass" | "approved" => "#1a9457", _ => "#d8a32f" },
+        status = escape_html(&cr_status_label(&s.status)),
+        pass = s.pass, fail = s.fail, review = s.needs_review, na = s.not_applicable, nt = s.not_tested,
+        total = s.total_obligations,
+    ));
+    html.push_str("<div class=\"scorecard\">");
+    html.push_str(&score(s.pass, "Pass", false));
+    html.push_str(&score(s.fail, "Fail", false));
+    html.push_str(&score(s.needs_review, "Needs review", false));
+    html.push_str(&score(s.not_applicable, "Not applicable", false));
+    html.push_str(&score(s.not_tested, "Not tested", true));
+    html.push_str(&score(s.total_obligations, "Criteria", false));
+    html.push_str("</div>");
+    html.push_str(&format!("<div class=\"bar\">{bar}</div>"));
+    html.push_str("<div class=\"legend\"><span><b style=\"background:#1a9457\"></b>Pass</span><span><b style=\"background:#d23b30\"></b>Fail</span><span><b style=\"background:#d8a32f\"></b>Needs review</span><span><b style=\"background:#aab4c2\"></b>Not applicable</span><span><b style=\"background:#8b5cf6\"></b>Not tested</span></div>");
+
+    html.push_str(&cr_state_gallery(&report.state_evidence));
+
+    html.push_str("<section><h2 class=\"sh\">WCAG 2.2 success criteria</h2>");
+    html.push_str(&cr_principle_sections(&report.criteria));
+    html.push_str("</section>");
+
+    html.push_str(&cr_supporting_checks(&report.supporting_checks));
+
+    if !report.criterion_coverage.is_empty() {
+        html.push_str(&format!(
+            "<section><details class=\"matrix-wrap\"><summary>Criterion coverage matrix — {} cells (criterion · surface · state drilldown)</summary><table class=\"matrix\"><thead><tr><th>Criterion · surface · state</th><th>Status</th><th>Applicability</th><th>Method</th><th>Confidence</th><th>Residual review</th></tr></thead><tbody>{}</tbody></table></details></section>",
+            report.criterion_coverage.len(),
+            cr_matrix_rows(&report.criterion_coverage),
+        ));
+    }
+
+    let replay = report
+        .criterion_coverage
+        .iter()
+        .find_map(|cell| cell.replay_command.clone())
+        .filter(|command| !command.is_empty());
+    let reproduce = replay
+        .map(|command| {
+            format!(
+                "Reproduce this run: <code>{}</code>. ",
+                escape_html(&command)
+            )
+        })
+        .unwrap_or_default();
+    html.push_str(&format!(
+        "<p class=\"foot\">{reproduce}Source packet <code>{packet}</code> · source map <code>{map}</code>. Allie reports evidence, status, confidence, and residual review needs. It does not claim legal compliance and is not a replacement for expert or lived accessibility review — evidence visibility, not a legal compliance guarantee.</p>",
+        reproduce = reproduce,
         packet = escape_html(&report.source_packet),
         map = escape_html(&report.source_map),
-        status = escape_html(&report.summary.status),
-        pass = report.summary.pass,
-        fail = report.summary.fail,
-        review = report.summary.needs_review,
-        not_tested = report.summary.not_tested,
-        waived = report.summary.waived,
-        risk_accepted = report.summary.risk_accepted,
-        total = report.summary.total_obligations,
-        surfaces = surfaces,
-        criteria = criteria,
-        cells = cells,
-        supporting_checks = supporting_checks
-    )
+    ));
+    html.push_str("</main>\n</body>\n</html>\n");
+    html
 }
 
 fn render_compliance_summary(report: &ComplianceReportPacket) -> String {
@@ -5404,6 +5822,24 @@ struct ComplianceReportPacket {
     supporting_checks: Vec<ComplianceSupportingCheck>,
     obligations: Vec<ComplianceObligation>,
     surfaces: Vec<ComplianceSurfaceReport>,
+    #[serde(default)]
+    state_evidence: Vec<StateEvidence>,
+}
+
+/// Per-state evidence surfaced once at the top of the report (the captured
+/// screenshot and observed focus order), so criteria can reference it without
+/// re-inlining the same image dozens of times.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct StateEvidence {
+    id: String,
+    route: String,
+    url: String,
+    title: String,
+    http_status: Option<u16>,
+    #[serde(default)]
+    keyboard_focus_order: Vec<String>,
+    #[serde(default)]
+    media: Vec<EvidenceMedia>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -5437,6 +5873,43 @@ struct ComplianceObligation {
     evidence_class: String,
     source_url: Option<String>,
     finding_refs: Vec<String>,
+    #[serde(default)]
+    principle: String,
+    #[serde(default)]
+    level: String,
+    #[serde(default)]
+    media: Vec<EvidenceMedia>,
+    #[serde(default)]
+    agentic_review: Option<AgenticAssessment>,
+}
+
+/// A piece of visual evidence (screenshot, element crop, or motion GIF) inlined
+/// into the report as a self-contained data URI so the report travels intact in
+/// a PR diff, a CI artifact, or a committed snapshot without external files.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct EvidenceMedia {
+    kind: String,
+    caption: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data_uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    artifact_ref: Option<String>,
+}
+
+/// Structured output of the agentic (vision-model) review for one criterion:
+/// the model's assessment plus the context a human reviewer needs to confirm it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AgenticAssessment {
+    /// likely_pass | likely_fail | needs_human
+    assessment: String,
+    rationale: String,
+    /// concrete steps the human reviewer should take to confirm or refute.
+    reviewer_guidance: String,
+    confidence: String,
+    provider: String,
+    model: String,
+    #[serde(default)]
+    media: Vec<EvidenceMedia>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -7635,8 +8108,9 @@ mod tests {
             )
         );
         let html = fs::read_to_string(report_dir.join("compliance-report.html")).unwrap();
-        assert!(html.contains("WCAG 2.2 A/AA Success Criteria"));
-        assert!(html.contains("criterion -> surface -> state -> finding -> artifact -> replay"));
+        assert!(html.contains("WCAG 2.2 success criteria"));
+        assert!(html.contains("Criterion coverage matrix"));
+        assert!(html.contains("Reproduce this run"));
         assert!(html.contains("not a legal compliance guarantee"));
     }
 
@@ -7700,9 +8174,9 @@ mod tests {
         }
         validate_criterion_coverage_cells(&report).unwrap();
         let html = fs::read_to_string(report_dir.join("compliance-report.html")).unwrap();
-        assert!(html.contains("Supporting Checks"));
+        assert!(html.contains("Supporting checks"));
         assert!(html.contains("wcag22-aa:deterministic-axe-rules"));
-        assert!(html.contains("replay command"));
+        assert!(html.contains("Reproduce this run"));
         assert!(html.contains("not a legal compliance guarantee"));
     }
 
@@ -8720,6 +9194,10 @@ flow:
             evidence_class: "human".to_string(),
             source_url: criterion_source_url(id),
             finding_refs: Vec::new(),
+            principle: criterion_principle(id),
+            level: criterion_level(id),
+            media: Vec::new(),
+            agentic_review: None,
         }
     }
 

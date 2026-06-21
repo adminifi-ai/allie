@@ -45,9 +45,9 @@ for (const cell of report.criterion_coverage) {
     if (!refs && !cell.replay_command) throw new Error('terminal cell lacks provenance: ' + cell.criterion_id);
   }
 }
-if (!html.includes('WCAG 2.2 A/AA Success Criteria')) throw new Error('html missing criteria section');
-if (!html.includes('Supporting Checks')) throw new Error('html missing support section');
-if (!html.includes('criterion -> surface -> state -> finding -> artifact -> replay command')) throw new Error('html missing drilldown chain');
+if (!html.includes('WCAG 2.2 success criteria')) throw new Error('html missing criteria section');
+if (!html.includes('Supporting checks')) throw new Error('html missing support section');
+if (!html.includes('Criterion coverage matrix')) throw new Error('html missing coverage matrix');
 if (!html.includes('not a legal compliance guarantee')) throw new Error('html missing no-legal-claim text');
 "
 

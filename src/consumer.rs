@@ -612,7 +612,7 @@ fn render_verify_html(summary: &serde_json::Value, out_dir: &Path) -> String {
             format!("../{path}")
         };
         format!(
-            "<li><a href=\"{}\">{}</a> <code>{}</code></li>",
+            "<li><a href=\"{}\">{}<code>{}</code></a></li>",
             escape_html(&href),
             escape_html(label),
             escape_html(path)
@@ -652,43 +652,66 @@ fn render_verify_html(summary: &serde_json::Value, out_dir: &Path) -> String {
     let wcag_not_tested = summary["why"]["compliance_summary"]["not_tested"]
         .as_u64()
         .unwrap_or_default();
+    let (bcls, dot) = match status {
+        "blocked" | "failed" => ("b-fail", "#d23b30"),
+        "approved" | "pass" => ("b-pass", "#1a9457"),
+        _ => ("b-review", "#d8a32f"),
+    };
     format!(
         r#"<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Allie Verification</title>
-  <style>
-    body {{ margin: 0; color: #151719; background: #f5f7fa; font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    main {{ width: min(100% - 40px, 920px); margin: 0 auto; padding: 40px 0; }}
-    h1 {{ margin: 0 0 8px; font-size: 42px; line-height: 1.05; letter-spacing: 0; }}
-    section {{ background: #fff; border: 1px solid #d7dde5; margin-top: 18px; padding: 20px; }}
-    code {{ background: #edf1f6; padding: 0.08em 0.28em; border-radius: 4px; }}
-    .status {{ display: inline-block; padding: 4px 8px; border: 1px solid #aab4c0; background: #fff; }}
+  <title>Allie verification — {status}</title>
+  <style>{css}
+    .statgrid {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 18px 0 6px; }}
+    .stat {{ background: #fff; border: 1px solid #e4e8ef; border-radius: 13px; padding: 13px 15px; }}
+    .stat .n {{ font-size: 23px; font-weight: 700; font-variant-numeric: tabular-nums; }}
+    .stat .k {{ font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: #5a6473; margin-top: 3px; }}
+    ul.links {{ list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }}
+    ul.links a {{ display: block; background: #fff; border: 1px solid #e4e8ef; border-radius: 11px; padding: 12px 14px; font-weight: 600; }}
+    ul.links code {{ display: block; color: #5a6473; font-weight: 400; margin-top: 4px; font-size: 11px; background: none; }}
+    @media (max-width: 720px) {{ .statgrid {{ grid-template-columns: repeat(2, 1fr); }} }}
   </style>
 </head>
 <body>
   <main>
-    <p>Allie host-agnostic verification, not a legal compliance guarantee</p>
-    <h1>Verification <span class="status">{status}</span></h1>
-    <p>{why}</p>
-    <p>Manifest <code>{manifest}</code>. Output root <code>{out}</code>.</p>
+    <p class="eyebrow">Allie · host-agnostic verification</p>
+    <h1>Verification</h1>
+    <p class="sub">Manifest <code>{manifest}</code> · output <code>{out}</code> · evidence visibility, not a legal compliance guarantee</p>
+    <div class="banner {bcls}"><span class="dot" style="background:{dot}"></span><div><h2>Status: {status_label}</h2><p>{why}</p></div></div>
     <section>
-      <h2>Why</h2>
-      <p>Blocking evidence: deterministic failures <strong>{deterministic_failures}</strong>, scripted failures <strong>{scripted_failures}</strong>, infrastructure failures <strong>{infrastructure_failures}</strong>, missing required evidence <strong>{missing_required}</strong>.</p>
-      <p>Review evidence: review-needed obligations <strong>{review_needed}</strong>, not-tested obligations <strong>{not_tested}</strong>.</p>
-      <p>WCAG matrix: pass <strong>{wcag_pass}</strong>, fail <strong>{wcag_fail}</strong>, needs review <strong>{wcag_review}</strong>, not tested <strong>{wcag_not_tested}</strong>.</p>
+      <h2 class="sh">Blocking evidence</h2>
+      <div class="statgrid">
+        <div class="stat"><div class="n">{deterministic_failures}</div><div class="k">Deterministic fails</div></div>
+        <div class="stat"><div class="n">{scripted_failures}</div><div class="k">Scripted fails</div></div>
+        <div class="stat"><div class="n">{infrastructure_failures}</div><div class="k">Infra fails</div></div>
+        <div class="stat"><div class="n">{missing_required}</div><div class="k">Missing evidence</div></div>
+        <div class="stat"><div class="n">{review_needed}</div><div class="k">Review needed</div></div>
+      </div>
+      <h2 class="sh">WCAG 2.2 matrix</h2>
+      <div class="statgrid">
+        <div class="stat"><div class="n">{wcag_pass}</div><div class="k">Pass</div></div>
+        <div class="stat"><div class="n">{wcag_fail}</div><div class="k">Fail</div></div>
+        <div class="stat"><div class="n">{wcag_review}</div><div class="k">Needs review</div></div>
+        <div class="stat"><div class="n">{not_tested}</div><div class="k">Not-tested obligations</div></div>
+        <div class="stat"><div class="n">{wcag_not_tested}</div><div class="k">WCAG not tested</div></div>
+      </div>
     </section>
     <section>
-      <h2>Reporter artifacts</h2>
-      <ul>{links}</ul>
+      <h2 class="sh">Reporter artifacts</h2>
+      <ul class="links">{links}</ul>
     </section>
   </main>
 </body>
 </html>
 "#,
+        css = REPORT_CSS,
         status = escape_html(status),
+        status_label = escape_html(&cr_status_label(status)),
+        bcls = bcls,
+        dot = dot,
         why = escape_html(why),
         manifest = escape_html(summary["policy_source"].as_str().unwrap_or("unknown")),
         out = escape_html(&out_dir.to_string_lossy()),
