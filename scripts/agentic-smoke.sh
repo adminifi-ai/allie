@@ -4,9 +4,9 @@
 # Runs the gateway against the bundled login fixture with NO model API key, so
 # there is no network call: it must still launch the browser, capture the
 # evidence (screenshots), and return a well-formed response that marks the
-# criteria "unavailable" rather than crashing or fabricating a verdict. This
-# locks the gateway's capture + graceful-degradation path; the live model path
-# is exercised by real verify runs, not the offline gate.
+# criteria "inconclusive" (never a fabricated pass/fail) so Rust keeps them at
+# needs_review. This locks the gateway's capture + graceful-degradation path;
+# the live model path is exercised by real verify runs, not the offline gate.
 set -eu
 
 ALLIE_REPO="$(pwd)"
@@ -39,8 +39,11 @@ if (!Array.isArray(response.assessments) || response.assessments.length < 1) {
   throw new Error('gateway returned no assessments');
 }
 const assessment = response.assessments[0];
-if (assessment.assessment !== 'unavailable') {
-  throw new Error(`expected "unavailable" without an API key, got "${assessment.assessment}"`);
+if (assessment.verdict !== 'inconclusive') {
+  throw new Error(`expected verdict "inconclusive" without an API key (never a fabricated pass/fail), got "${assessment.verdict}"`);
+}
+if (assessment.confidence !== 'not_observed') {
+  throw new Error(`expected confidence "not_observed" without an API key, got "${assessment.confidence}"`);
 }
 if (!assessment.media.some((entry) => entry.kind === 'screenshot')) {
   throw new Error('gateway did not capture screenshot evidence');

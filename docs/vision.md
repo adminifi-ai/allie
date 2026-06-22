@@ -22,7 +22,8 @@ turns the result into enforceable release evidence.
 Given a repo, staged app, credential profile, and policy pack, Allie should
 discover the sitemap, product surfaces, and likely user stories; generate and
 replay accessibility tests; map evidence to every relevant WCAG obligation; take
-agentic vision passes on criteria that require judgment; and produce a report
+agentic vision passes that render a committed pass/fail verdict (shown with an
+asterisk) on criteria that require judgment; and produce a report
 where a compliance engineer can drill from standard to finding, test, artifact,
 context, waiver, remediation, and release decision.
 
@@ -42,9 +43,11 @@ commands.
 2. A complete WCAG obligation ledger is the reporting spine. Each criterion
    needs status, scope, method, artifacts, confidence, residual review, and
    remediation context instead of a global score.
-3. Deterministic and scripted failures can block releases. Model-only findings
-   enrich review and should not block until promoted by scripted reproduction or
-   human attestation.
+3. Deterministic and scripted failures can block releases. Agentic vision
+   verdicts render a committed pass/fail (asterisked, with the evidence inlined)
+   so judgment-heavy criteria read as decisions rather than "needs review", but
+   they stay advisory for gating: they do not block a release until promoted by
+   scripted reproduction or human attestation.
 4. Rust should own orchestration, schemas, policy, budgets, hashing, storage,
    promotion state, and release enforcement.
 5. Browser automation belongs behind a narrow Playwright/axe worker boundary;

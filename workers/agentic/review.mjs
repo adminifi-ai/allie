@@ -59,11 +59,12 @@ async function run(request) {
     for (const group of groups) {
       if (group.items.length === 0) continue;
       const groupMedia = mediaForGroup(group.kind, media);
-      // The model sees the full page; the report attaches only criterion-specific
-      // media (focus montage, clips) since the full page already shows once in
-      // the report's "what Allie inspected" gallery — avoids inlining the same
-      // screenshot dozens of times.
-      const reportMedia = groupMedia.filter((entry) => entry !== media.fullpage);
+      // The model sees the full page (and motion frames); the report attaches
+      // only criterion-specific media (focus montage, clips) since the full page
+      // already shows once in the report's "what Allie inspected" gallery and the
+      // motion frames are model-only (the clip is friendlier for a human) —
+      // avoids inlining the same or near-identical screenshots dozens of times.
+      const reportMedia = groupMedia.filter((entry) => entry !== media.fullpage && !entry.modelOnly);
       const verdicts = {};
       for (const batch of chunk(group.items, 8)) {
         if (apiKey && calls < maxCalls) {
@@ -84,12 +85,16 @@ async function run(request) {
       }
       for (const item of group.items) {
         const verdict = verdicts[item.obligation];
+        // Never fabricate a pass/fail: a missing/unparseable verdict stays
+        // "inconclusive" so Rust keeps the criterion at needs_review.
+        const rawVerdict = (verdict?.verdict || '').toLowerCase();
+        const settled = rawVerdict === 'pass' || rawVerdict === 'fail';
         assessments.push({
           obligation: item.obligation,
-          assessment: verdict?.assessment || 'unavailable',
-          rationale: verdict?.rationale || 'Agentic review did not return an assessment for this criterion; the captured evidence is attached for human review.',
+          verdict: settled ? rawVerdict : 'inconclusive',
+          confidence: settled ? (verdict?.confidence || 'low') : 'not_observed',
+          rationale: verdict?.rationale || 'Agentic review did not return a verdict for this criterion; the captured evidence is attached for human review.',
           reviewer_guidance: verdict?.reviewer_guidance || 'Review the attached evidence manually against this criterion.',
-          confidence: verdict ? 'agent_inferred' : 'not_observed',
           media: reportMedia.map((entry) => ({
             kind: entry.kind,
             caption: entry.caption,
@@ -130,7 +135,7 @@ async function captureEvidence(browser, baseUrl, browserSettings, artifactsDir, 
     reducedMotion: browserSettings.reduced_motion,
     locale: browserSettings.locale,
   };
-  const media = { fullpage: null, focus: [], focusClip: null, motionClip: null };
+  const media = { fullpage: null, focus: [], focusClip: null, motionClip: null, motionFrames: [] };
 
   // Full-page screenshot.
   const context = await browser.newContext(contextOptions);
@@ -168,6 +173,31 @@ async function captureEvidence(browser, baseUrl, browserSettings, artifactsDir, 
     await clipPage.waitForTimeout(2600);
   }, 'The page over ~2.5s (motion / auto-updating content)', errors);
 
+  // Motion montage: sample still frames over ~2.4s with motion ENABLED (as a
+  // user with no reduced-motion preference would see it), so the vision model
+  // can compare frames and actually judge motion / animation / auto-updating
+  // content — a single static screenshot cannot show movement. These frames are
+  // model-only; the report keeps the clip (better for a human than four stills).
+  try {
+    const motionContext = await browser.newContext({ ...contextOptions, reducedMotion: 'no-preference' });
+    const motionPage = await motionContext.newPage();
+    await motionPage.goto(baseUrl, { waitUntil: 'networkidle' });
+    for (let i = 0; i < 4; i += 1) {
+      const framePath = path.join(artifactsDir, `review-motion-frame-${i + 1}.png`);
+      await motionPage.screenshot({ path: framePath });
+      media.motionFrames.push({
+        kind: 'screenshot',
+        caption: `Motion frame ${i + 1} (t≈${(i * 0.8).toFixed(1)}s)`,
+        absPath: framePath,
+        modelOnly: true,
+      });
+      if (i < 3) await motionPage.waitForTimeout(800);
+    }
+    await motionContext.close();
+  } catch (error) {
+    errors.push(`motion montage failed: ${error.message}`);
+  }
+
   return media;
 }
 
@@ -199,7 +229,9 @@ function mediaForGroup(kind, media) {
     return [media.fullpage, ...media.focus.slice(0, 3), media.focusClip].filter(Boolean);
   }
   if (kind === 'motion') {
-    return [media.fullpage, media.motionClip].filter(Boolean);
+    // Frames first (the model judges motion from them); the clip rides along for
+    // the report but is filtered out of the model's image set as a non-screenshot.
+    return [...media.motionFrames, media.motionClip].filter(Boolean);
   }
   return [media.fullpage].filter(Boolean);
 }
@@ -219,6 +251,10 @@ async function assessGroup(model, apiKey, group, groupMedia, errors) {
     temperature: 0.2,
     messages: [{ role: 'user', content }],
   };
+  // Thinking-effort hint for models that support it (e.g. Gemini 3.x). Keeping
+  // this explicit (low) avoids the pricier "medium" default while preserving
+  // full coverage and decisive verdicts.
+  if (model.reasoning_effort) body.reasoning = { effort: model.reasoning_effort };
   const base = model.base_url || 'https://openrouter.ai/api/v1';
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
@@ -252,17 +288,20 @@ function buildPrompt(group) {
     .map((item) => `- ${item.obligation} | ${item.num} ${item.handle} (Level ${item.level}, ${item.principle})`)
     .join('\n');
   return [
-    'You are an expert WCAG 2.2 AA accessibility auditor reviewing a single web page.',
+    'You are an expert WCAG 2.2 AA accessibility auditor. You are doing the job a trained human reviewer does: looking at the captured visual evidence and rendering a DEFINITIVE judgment for each success criterion.',
     `Focus area for this batch: ${group.guidance}`,
-    'Using ONLY what is visible in the attached image(s), assess each success criterion below.',
-    'For each, decide an assessment of "likely_pass", "likely_fail", or "needs_human" (use needs_human when the image cannot settle it), give a one-to-two sentence rationale grounded in what you see, and give concrete reviewer_guidance: the exact thing a human should do to confirm or refute.',
+    'For each criterion, make the same call a human expert would make from this evidence:',
+    '- verdict: "pass" or "fail". You MUST commit to one. Use "inconclusive" ONLY when even an expert genuinely cannot judge from any amount of looking (e.g. a precise color-contrast ratio that requires a measurement tool). Do not hide behind "inconclusive" to avoid deciding.',
+    '- confidence: "high" | "medium" | "low" — be honest. Low confidence is fine and is exactly how we mark a judgment call; it does NOT mean refuse to decide.',
+    '- rationale: one to two sentences grounded in what you actually see.',
+    '- reviewer_guidance: the exact thing a human should do to confirm or refute your verdict.',
     'Do not claim legal compliance. Be specific and visual.',
     '',
     'Criteria:',
     list,
     '',
     'Respond with ONLY a JSON object, no prose, of the form:',
-    '{"assessments":[{"obligation":"<id>","assessment":"likely_pass|likely_fail|needs_human","rationale":"...","reviewer_guidance":"..."}]}',
+    '{"assessments":[{"obligation":"<id>","verdict":"pass|fail|inconclusive","confidence":"high|medium|low","rationale":"...","reviewer_guidance":"..."}]}',
   ].join('\n');
 }
 
@@ -307,7 +346,7 @@ function groupCriteria(criteria) {
   return [
     { kind: 'general', guidance: 'General perceivable/operable/understandable/robust review from the page screenshot.', items: general },
     { kind: 'focus', guidance: 'Keyboard focus visibility and order, using the focus montage and focus clip.', items: focus },
-    { kind: 'motion', guidance: 'Motion, animation, timing and auto-updating content, using the motion clip.', items: motion },
+    { kind: 'motion', guidance: 'Motion, animation, timing and auto-updating content. You are shown several still frames captured over ~2.5 seconds — compare them: if they are identical there is no moving/auto-updating/flashing content (these criteria pass); if they differ, judge whether the motion can be paused, stopped, or hidden and whether it flashes more than three times per second.', items: motion },
   ];
 }
 
