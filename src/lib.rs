@@ -4024,6 +4024,8 @@ figcaption{padding:11px 13px;font-size:12.5px;color:#5a6473}
 .chip-nottested{background:#efe6fb;color:#6d28b8}
 .chip-method{background:#eef1f7;color:#42506a}
 .chip-level{background:#eef1f7;color:#5a6473}
+.chip-ai{box-shadow:inset 0 0 0 1px rgba(0,0,0,.16)}
+.chip sup{font-size:.72em;font-weight:800;margin-left:1px}
 .why{margin:11px 0 0;color:#39414f;font-size:14px}
 .crit-foot{margin-top:12px;display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:#5a6473;align-items:center}
 .ai{margin-top:13px;border:1px solid #e3e7f3;border-radius:11px;background:#f7f8fd;padding:13px 15px}
@@ -4083,6 +4085,26 @@ fn cr_status_chip(status: &str) -> String {
         cr_status_suffix(status),
         escape_html(&cr_status_label(status))
     )
+}
+
+/// True when a pass/fail verdict was rendered by the agentic reviewer rather
+/// than a deterministic check — shown with an asterisk so it is never mistaken
+/// for a machine-proven result.
+fn is_agentic_verdict(status: &str, evidence_class: &str) -> bool {
+    evidence_class == "agentic" && (status == "pass" || status == "fail")
+}
+
+/// Status chip that adds an asterisk for agentic pass/fail verdicts.
+fn cr_status_chip_marked(status: &str, evidence_class: &str) -> String {
+    if is_agentic_verdict(status, evidence_class) {
+        format!(
+            "<span class=\"chip chip-{} chip-ai\" title=\"AI reviewer's determination from the visual evidence shown below — not a machine-proven check or a human sign-off\">{}<sup>*</sup></span>",
+            cr_status_suffix(status),
+            escape_html(&cr_status_label(status)),
+        )
+    } else {
+        cr_status_chip(status)
+    }
 }
 
 fn cr_method_label(evidence_class: &str) -> Option<&'static str> {
@@ -4152,7 +4174,7 @@ fn cr_agentic_block(obligation: &ComplianceObligation) -> String {
             )
         };
         format!(
-            "<div class=\"ai\"><div class=\"ai-h\">AI accessibility review <span class=\"v\">{verdict} · {confidence}</span></div><p>{rationale}</p>{guide}{media}<p class=\"sub\" style=\"margin-top:9px\">{provider} · {model}</p></div>",
+            "<div class=\"ai\"><div class=\"ai-h\">AI reviewer verdict <span class=\"v\">{verdict} · {confidence} confidence</span></div><p>{rationale}</p>{guide}{media}<p class=\"sub\" style=\"margin-top:9px\">{provider} · {model}</p></div>",
             verdict = escape_html(&pretty_token(&review.assessment)),
             confidence = escape_html(&pretty_token(&review.confidence)),
             rationale = escape_html(&review.rationale),
@@ -4197,7 +4219,7 @@ fn cr_criterion_card(obligation: &ComplianceObligation) -> String {
         title = escape_html(&title),
         level = level,
         method = cr_method_chip(&obligation.evidence_class),
-        status = cr_status_chip(&obligation.status),
+        status = cr_status_chip_marked(&obligation.status, &obligation.evidence_class),
         why = escape_html(&obligation.why),
         ai = cr_agentic_block(obligation),
         confidence = escape_html(&pretty_token(&obligation.confidence)),
@@ -4349,6 +4371,19 @@ fn render_compliance_report(report: &ComplianceReportPacket) -> String {
         _ => "b-review",
     };
     let total = s.total_obligations.max(1);
+    // How many pass/fail verdicts came from the AI reviewer (asterisked), so the
+    // headline distinguishes them from machine-proven results.
+    let ai_pass = report
+        .criteria
+        .iter()
+        .filter(|o| o.status == "pass" && is_agentic_verdict(&o.status, &o.evidence_class))
+        .count();
+    let ai_fail = report
+        .criteria
+        .iter()
+        .filter(|o| o.status == "fail" && is_agentic_verdict(&o.status, &o.evidence_class))
+        .count();
+    let ai_total = ai_pass + ai_fail;
     let seg = |count: usize, color: &str| -> String {
         if count == 0 {
             String::new()
@@ -4394,12 +4429,17 @@ fn render_compliance_report(report: &ComplianceReportPacket) -> String {
         generated = escape_html(&report.generated_at),
     ));
     html.push_str(&format!(
-        "<div class=\"banner {bcls}\"><span class=\"dot\" style=\"background:{dot}\"></span><div><h2>Status: {status}</h2><p>{pass} passing · {fail} failing · {review} need review · {na} not applicable · {nt} not tested across {total} success criteria.</p></div></div>",
+        "<div class=\"banner {bcls}\"><span class=\"dot\" style=\"background:{dot}\"></span><div><h2>Status: {status}</h2><p>{pass} passing · {fail} failing · {review} need review · {na} not applicable · {nt} not tested across {total} success criteria.</p>{aip}</div></div>",
         bcls = banner_class,
         dot = match s.status.as_str() { "fail" | "blocked" => "#d23b30", "pass" | "approved" => "#1a9457", _ => "#d8a32f" },
         status = escape_html(&cr_status_label(&s.status)),
         pass = s.pass, fail = s.fail, review = s.needs_review, na = s.not_applicable, nt = s.not_tested,
         total = s.total_obligations,
+        aip = if ai_total > 0 {
+            format!("<p class=\"sub\" style=\"margin:6px 0 0\">{ai_total} of these are <b>AI-reviewed verdicts</b> (marked <sup>*</sup>): the agentic reviewer judged the page from screenshots and clips the way a human reviewer would, with the evidence attached under each criterion. {ai_pass} pass<sup>*</sup>, {ai_fail} fail<sup>*</sup>.</p>")
+        } else {
+            String::new()
+        },
     ));
     html.push_str("<div class=\"scorecard\">");
     html.push_str(&score(s.pass, "Pass", false));
@@ -4407,10 +4447,16 @@ fn render_compliance_report(report: &ComplianceReportPacket) -> String {
     html.push_str(&score(s.needs_review, "Needs review", false));
     html.push_str(&score(s.not_applicable, "Not applicable", false));
     html.push_str(&score(s.not_tested, "Not tested", true));
+    if ai_total > 0 {
+        html.push_str(&score(ai_total, "AI-reviewed *", false));
+    }
     html.push_str(&score(s.total_obligations, "Criteria", false));
     html.push_str("</div>");
     html.push_str(&format!("<div class=\"bar\">{bar}</div>"));
     html.push_str("<div class=\"legend\"><span><b style=\"background:#1a9457\"></b>Pass</span><span><b style=\"background:#d23b30\"></b>Fail</span><span><b style=\"background:#d8a32f\"></b>Needs review</span><span><b style=\"background:#aab4c2\"></b>Not applicable</span><span><b style=\"background:#8b5cf6\"></b>Not tested</span></div>");
+    if ai_total > 0 {
+        html.push_str("<p class=\"sub\" style=\"margin:10px 0 0\"><sup>*</sup> <b>AI-reviewed verdict</b>: the agentic vision reviewer's pass/fail call from the attached visual evidence, shown with its confidence — a judgment call, not a machine-proven check or a human sign-off. Screenshots and clips are inlined under each criterion so a human can confirm or override.</p>");
+    }
 
     html.push_str(&cr_state_gallery(&report.state_evidence));
 
@@ -4766,9 +4812,13 @@ fn agentic_model_setting(value: &Option<String>, fallback: &str) -> String {
 }
 
 /// Run the agentic (vision-model) review over the criteria a run left as
-/// needs_review, and fold the model's assessments + captured media into the
-/// evidence packet. Best-effort: returns an error the caller can log, never a
-/// fabricated verdict, and never promotes a model opinion to pass/fail.
+/// needs_review, fold the model's assessments + captured media into the
+/// evidence packet, and promote each committed verdict to the criterion's
+/// pass/fail status — marked with the "agentic" evidence class so the report
+/// renders it with an asterisk (a reviewer judgment, not a machine-proven
+/// result). Best-effort: returns an error the caller can log, and never
+/// fabricates a verdict — an "inconclusive" or unavailable result leaves the
+/// criterion at needs_review.
 fn run_agentic_review(manifest: &FlowManifest, packet_path: &Path) -> Result<AgenticReviewSummary> {
     let mut packet: EvidencePacket = read_json_file(packet_path)?;
 
@@ -4831,10 +4881,11 @@ fn run_agentic_review(manifest: &FlowManifest, packet_path: &Path) -> Result<Age
         },
         "model": {
             "provider": agentic_model_setting(&manifest.model.provider, "openrouter"),
-            "model": agentic_model_setting(&manifest.model.model, "anthropic/claude-sonnet-4.5"),
+            "model": agentic_model_setting(&manifest.model.model, "google/gemini-3.5-flash"),
             "api_key_env": agentic_model_setting(&manifest.model.api_key_env, "OPENROUTER_API_KEY"),
             "base_url": agentic_model_setting(&manifest.model.base_url, "https://openrouter.ai/api/v1"),
             "max_calls": manifest.model.max_model_calls.unwrap_or(4),
+            "reasoning_effort": manifest.model.reasoning_effort.clone(),
         },
         "artifacts_dir": artifacts_dir.to_string_lossy(),
         "criteria": criteria,
@@ -4934,12 +4985,19 @@ fn run_agentic_review(manifest: &FlowManifest, packet_path: &Path) -> Result<Age
                 }
             }
         }
+        let verdict_str = assessment["verdict"]
+            .as_str()
+            .map(|value| value.trim().to_lowercase())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "inconclusive".to_string());
+        let confidence_str = assessment["confidence"]
+            .as_str()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "not_observed".to_string());
         packet.agentic_assessments.push(AgenticAssessmentRecord {
             obligation: obligation.to_string(),
-            assessment: assessment["assessment"]
-                .as_str()
-                .unwrap_or("unavailable")
-                .to_string(),
+            assessment: verdict_str.clone(),
             rationale: assessment["rationale"]
                 .as_str()
                 .unwrap_or_default()
@@ -4948,14 +5006,26 @@ fn run_agentic_review(manifest: &FlowManifest, packet_path: &Path) -> Result<Age
                 .as_str()
                 .unwrap_or_default()
                 .to_string(),
-            confidence: assessment["confidence"]
-                .as_str()
-                .unwrap_or("agent_inferred")
-                .to_string(),
+            confidence: confidence_str.clone(),
             provider: provider.clone(),
             model: model.clone(),
             media,
         });
+
+        // Promote the agentic verdict to the criterion status, marked with an
+        // "agentic" evidence class so the report renders it with an asterisk.
+        // Never fabricate: only an explicit pass/fail promotes; "inconclusive"
+        // or a missing verdict leaves the criterion at needs_review.
+        if let Some(new_status) = agentic_promoted_status(&verdict_str) {
+            for verdict in packet.verdicts.iter_mut().filter(|verdict| {
+                verdict.obligation == obligation && verdict.status == "needs_review"
+            }) {
+                verdict.status = new_status.to_string();
+                verdict.evidence_class = "agentic".to_string();
+                verdict.confidence = format!("agent_{confidence_str}");
+                verdict.source = format!("allie-agentic-review:{model}");
+            }
+        }
     }
 
     write_json_pretty(packet_path, &packet)?;
@@ -4964,6 +5034,18 @@ fn run_agentic_review(manifest: &FlowManifest, packet_path: &Path) -> Result<Age
         calls: response["calls"].as_u64().unwrap_or_default(),
         status: response["status"].as_str().unwrap_or("unknown").to_string(),
     })
+}
+
+/// Map an agentic verdict string to the criterion status it may promote to.
+/// Only an explicit "pass"/"fail" promotes; anything else (notably
+/// "inconclusive" or an empty/unknown value) returns None so the criterion
+/// stays at needs_review — the agentic reviewer never fabricates a verdict.
+fn agentic_promoted_status(verdict: &str) -> Option<&'static str> {
+    match verdict.trim().to_lowercase().as_str() {
+        "pass" => Some("pass"),
+        "fail" => Some("fail"),
+        _ => None,
+    }
 }
 
 fn agentic_artifact_id(path: &str) -> String {
@@ -5815,6 +5897,10 @@ struct ModelPolicy {
     base_url: Option<String>,
     #[serde(default)]
     max_model_calls: Option<u32>,
+    /// Optional thinking-effort hint for models that support it (e.g. Gemini
+    /// 3.x "minimal|low|medium|high"). Forwarded to the gateway verbatim.
+    #[serde(default)]
+    reasoning_effort: Option<String>,
 }
 
 impl Default for ModelPolicy {
@@ -5828,6 +5914,7 @@ impl Default for ModelPolicy {
             api_key_env: None,
             base_url: None,
             max_model_calls: None,
+            reasoning_effort: None,
         }
     }
 }
@@ -6231,7 +6318,7 @@ struct EvidenceMedia {
 /// the model's assessment plus the context a human reviewer needs to confirm it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct AgenticAssessment {
-    /// likely_pass | likely_fail | needs_human
+    /// The committed verdict: pass | fail | inconclusive.
     assessment: String,
     rationale: String,
     /// concrete steps the human reviewer should take to confirm or refute.
@@ -9752,6 +9839,62 @@ flow:
             media: Vec::new(),
             agentic_review: None,
         }
+    }
+
+    #[test]
+    fn agentic_promoted_status_only_promotes_explicit_pass_or_fail() {
+        assert_eq!(agentic_promoted_status("pass"), Some("pass"));
+        assert_eq!(agentic_promoted_status("fail"), Some("fail"));
+        assert_eq!(agentic_promoted_status("FAIL"), Some("fail"));
+        // Inconclusive / empty / unknown never promote — no fabricated verdicts.
+        assert_eq!(agentic_promoted_status("inconclusive"), None);
+        assert_eq!(agentic_promoted_status(""), None);
+        assert_eq!(agentic_promoted_status("needs_human"), None);
+    }
+
+    #[test]
+    fn agentic_pass_fail_render_with_asterisk_but_machine_results_do_not() {
+        // Machine-proven pass: plain chip, no asterisk, no AI block.
+        let mut machine = sample_compliance_obligation("wcag22-aa:1.4.3-contrast-minimum", "pass");
+        machine.evidence_class = "deterministic".to_string();
+        let machine_html = cr_criterion_card(&machine);
+        assert!(
+            !machine_html.contains("chip-ai") && !machine_html.contains("<sup>*</sup>"),
+            "a machine-proven pass must never be asterisked"
+        );
+
+        // Agentic fail verdict: asterisked chip + the AI verdict block + evidence.
+        let mut agentic =
+            sample_compliance_obligation("wcag22-aa:1.4.11-non-text-contrast", "fail");
+        agentic.evidence_class = "agentic".to_string();
+        agentic.confidence = "agent_medium".to_string();
+        agentic.agentic_review = Some(AgenticAssessment {
+            assessment: "fail".to_string(),
+            rationale: "Icons are light gray on a white background.".to_string(),
+            reviewer_guidance: "Measure icon contrast with a tool.".to_string(),
+            confidence: "medium".to_string(),
+            provider: "openrouter".to_string(),
+            model: "google/gemini-3.5-flash".to_string(),
+            media: Vec::new(),
+        });
+        let html = cr_criterion_card(&agentic);
+        assert!(
+            html.contains("chip-ai"),
+            "agentic fail must carry the marker"
+        );
+        assert!(
+            html.contains("<sup>*</sup>"),
+            "agentic fail must be asterisked"
+        );
+        assert!(html.contains("AI reviewer verdict"));
+        assert!(html.contains("Icons are light gray on a white background."));
+
+        assert!(is_agentic_verdict("fail", "agentic"));
+        assert!(is_agentic_verdict("pass", "agentic"));
+        // Inconclusive-derived needs_review is not an asterisked verdict, and a
+        // machine class is never asterisked even when passing.
+        assert!(!is_agentic_verdict("needs_review", "agentic"));
+        assert!(!is_agentic_verdict("pass", "deterministic"));
     }
 
     fn build_vanity_fixture_report() -> ComplianceReportPacket {
