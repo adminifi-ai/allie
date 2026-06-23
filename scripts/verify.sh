@@ -12,6 +12,7 @@ npm run consumer-cwd:smoke
 npm run agentic:smoke
 npm run release:smoke
 npm run autonomous:smoke
+npm run size:smoke
 
 test -f .allie/runs/v0-smoke/evidence.json
 test -f .allie/runs/v0-smoke/report.html
