@@ -178,6 +178,8 @@ async function captureEvidence(browser, baseUrl, browserSettings, artifactsDir, 
   // can compare frames and actually judge motion / animation / auto-updating
   // content — a single static screenshot cannot show movement. These frames are
   // model-only; the report keeps the clip (better for a human than four stills).
+  // Note: this DELIBERATELY overrides the manifest's reduced_motion (which the
+  // motion clip above honors) — judging 2.2.x needs motion present to observe.
   try {
     const motionContext = await browser.newContext({ ...contextOptions, reducedMotion: 'no-preference' });
     const motionPage = await motionContext.newPage();

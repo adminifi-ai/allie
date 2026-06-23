@@ -3852,6 +3852,14 @@ fn compliance_summary(
         .iter()
         .filter(|obligation| obligation.status == "risk_accepted")
         .count();
+    let ai_pass = criteria
+        .iter()
+        .filter(|obligation| obligation.status == "pass" && is_agentic_verdict(obligation))
+        .count();
+    let ai_fail = criteria
+        .iter()
+        .filter(|obligation| obligation.status == "fail" && is_agentic_verdict(obligation))
+        .count();
     let status = if packet.summary.status == "error" {
         "error"
     } else if fail > 0 {
@@ -3871,6 +3879,8 @@ fn compliance_summary(
         not_applicable,
         waived,
         risk_accepted,
+        ai_pass,
+        ai_fail,
         total_success_criteria: criteria.len(),
         total_supporting_checks: supporting_check_count,
         evidence_packet_status: packet.summary.status.clone(),
@@ -4087,23 +4097,31 @@ fn cr_status_chip(status: &str) -> String {
     )
 }
 
-/// True when a pass/fail verdict was rendered by the agentic reviewer rather
-/// than a deterministic check — shown with an asterisk so it is never mistaken
-/// for a machine-proven result.
-fn is_agentic_verdict(status: &str, evidence_class: &str) -> bool {
-    evidence_class == "agentic" && (status == "pass" || status == "fail")
+/// True when a criterion's pass/fail verdict came from the agentic reviewer
+/// rather than a deterministic check — shown with an asterisk so it is never
+/// mistaken for a machine-proven result. Keyed off the same `agentic_review`
+/// value that renders the evidence block, so the asterisk and the evidence can
+/// never diverge: a marked verdict always has its AI evidence, and vice versa.
+fn is_agentic_verdict(obligation: &ComplianceObligation) -> bool {
+    matches!(
+        obligation
+            .agentic_review
+            .as_ref()
+            .map(|r| r.assessment.as_str()),
+        Some("pass" | "fail")
+    ) && (obligation.status == "pass" || obligation.status == "fail")
 }
 
 /// Status chip that adds an asterisk for agentic pass/fail verdicts.
-fn cr_status_chip_marked(status: &str, evidence_class: &str) -> String {
-    if is_agentic_verdict(status, evidence_class) {
+fn cr_status_chip_marked(obligation: &ComplianceObligation) -> String {
+    if is_agentic_verdict(obligation) {
         format!(
             "<span class=\"chip chip-{} chip-ai\" title=\"AI reviewer's determination from the visual evidence shown below — not a machine-proven check or a human sign-off\">{}<sup>*</sup></span>",
-            cr_status_suffix(status),
-            escape_html(&cr_status_label(status)),
+            cr_status_suffix(&obligation.status),
+            escape_html(&cr_status_label(&obligation.status)),
         )
     } else {
-        cr_status_chip(status)
+        cr_status_chip(&obligation.status)
     }
 }
 
@@ -4219,7 +4237,7 @@ fn cr_criterion_card(obligation: &ComplianceObligation) -> String {
         title = escape_html(&title),
         level = level,
         method = cr_method_chip(&obligation.evidence_class),
-        status = cr_status_chip_marked(&obligation.status, &obligation.evidence_class),
+        status = cr_status_chip_marked(obligation),
         why = escape_html(&obligation.why),
         ai = cr_agentic_block(obligation),
         confidence = escape_html(&pretty_token(&obligation.confidence)),
@@ -4371,18 +4389,9 @@ fn render_compliance_report(report: &ComplianceReportPacket) -> String {
         _ => "b-review",
     };
     let total = s.total_obligations.max(1);
-    // How many pass/fail verdicts came from the AI reviewer (asterisked), so the
-    // headline distinguishes them from machine-proven results.
-    let ai_pass = report
-        .criteria
-        .iter()
-        .filter(|o| o.status == "pass" && is_agentic_verdict(&o.status, &o.evidence_class))
-        .count();
-    let ai_fail = report
-        .criteria
-        .iter()
-        .filter(|o| o.status == "fail" && is_agentic_verdict(&o.status, &o.evidence_class))
-        .count();
+    // How many pass/fail verdicts came from the AI reviewer (asterisked); derived
+    // by compliance_summary alongside the other counts, not re-filtered here.
+    let (ai_pass, ai_fail) = (s.ai_pass, s.ai_fail);
     let ai_total = ai_pass + ai_fail;
     let seg = |count: usize, color: &str| -> String {
         if count == 0 {
@@ -5022,7 +5031,10 @@ fn run_agentic_review(manifest: &FlowManifest, packet_path: &Path) -> Result<Age
             }) {
                 verdict.status = new_status.to_string();
                 verdict.evidence_class = "agentic".to_string();
-                verdict.confidence = format!("agent_{confidence_str}");
+                // Store the bare confidence token ("high"/"medium"/"low") so the
+                // criterion footer and the AI verdict block render it identically;
+                // evidence_class = "agentic" already carries the provenance.
+                verdict.confidence = confidence_str.clone();
                 verdict.source = format!("allie-agentic-review:{model}");
             }
         }
@@ -6271,6 +6283,12 @@ struct ComplianceSummary {
     not_applicable: usize,
     waived: usize,
     risk_accepted: usize,
+    /// Of `pass`/`fail` above, how many are agentic (asterisked) verdicts rather
+    /// than machine-proven — surfaced so the headline distinguishes the two.
+    #[serde(default)]
+    ai_pass: usize,
+    #[serde(default)]
+    ai_fail: usize,
     total_success_criteria: usize,
     total_supporting_checks: usize,
     evidence_packet_status: String,
@@ -9867,7 +9885,7 @@ flow:
         let mut agentic =
             sample_compliance_obligation("wcag22-aa:1.4.11-non-text-contrast", "fail");
         agentic.evidence_class = "agentic".to_string();
-        agentic.confidence = "agent_medium".to_string();
+        agentic.confidence = "medium".to_string();
         agentic.agentic_review = Some(AgenticAssessment {
             assessment: "fail".to_string(),
             rationale: "Icons are light gray on a white background.".to_string(),
@@ -9889,12 +9907,36 @@ flow:
         assert!(html.contains("AI reviewer verdict"));
         assert!(html.contains("Icons are light gray on a white background."));
 
-        assert!(is_agentic_verdict("fail", "agentic"));
-        assert!(is_agentic_verdict("pass", "agentic"));
-        // Inconclusive-derived needs_review is not an asterisked verdict, and a
-        // machine class is never asterisked even when passing.
-        assert!(!is_agentic_verdict("needs_review", "agentic"));
-        assert!(!is_agentic_verdict("pass", "deterministic"));
+        // The marker keys off the agentic_review evidence, so the asterisk and the
+        // AI block can never diverge.
+        assert!(is_agentic_verdict(&agentic));
+        assert!(
+            !is_agentic_verdict(&machine),
+            "machine pass is never asterisked"
+        );
+
+        // Inconclusive stays unmarked (its AI block renders, but it is not a verdict).
+        let mut inconclusive =
+            sample_compliance_obligation("wcag22-aa:1.3.2-meaningful-sequence", "needs_review");
+        inconclusive.evidence_class = "agentic".to_string();
+        inconclusive.agentic_review = Some(AgenticAssessment {
+            assessment: "inconclusive".to_string(),
+            rationale: "Cannot settle from the captured evidence.".to_string(),
+            reviewer_guidance: "Review manually.".to_string(),
+            confidence: "low".to_string(),
+            provider: "openrouter".to_string(),
+            model: "google/gemini-3.5-flash".to_string(),
+            media: Vec::new(),
+        });
+        assert!(!is_agentic_verdict(&inconclusive));
+
+        // Regression guard for the split-write trap: an "agentic" evidence_class
+        // with NO AI verdict attached must not be asterisked — no evidence, no mark.
+        let mut agentic_class_no_evidence =
+            sample_compliance_obligation("wcag22-aa:2.4.6-headings-and-labels", "pass");
+        agentic_class_no_evidence.evidence_class = "agentic".to_string();
+        agentic_class_no_evidence.agentic_review = None;
+        assert!(!is_agentic_verdict(&agentic_class_no_evidence));
     }
 
     fn build_vanity_fixture_report() -> ComplianceReportPacket {
