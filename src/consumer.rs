@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::{ArtifactPolicy, BrowserSettings, ManifestTarget, Viewport};
 use std::fs;
 use std::path::{Path, PathBuf};
 

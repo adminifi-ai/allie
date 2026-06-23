@@ -1,12 +1,15 @@
+use crate::model::{
+    AgenticAssessment, ArtifactMetadata, ComplianceObligation, ComplianceReportPacket,
+    ComplianceSummary, ComplianceSupportingCheck, ComplianceSurfaceReport, CriterionCoverageCell,
+    EvidenceMedia, EvidencePacket, Finding, ProductMapPacket, ProductSurface, StateEvidence,
+    Verdict,
+};
 use crate::report;
 use crate::{
-    AgenticAssessment, ArtifactMetadata, COMPLIANCE_REPORT_SCHEMA, ComplianceObligation,
-    ComplianceReportPacket, ComplianceSummary, ComplianceSupportingCheck, ComplianceSurfaceReport,
-    CriterionCoverageCell, EvidenceMedia, EvidencePacket, Finding, ProductMapPacket,
-    ProductSurface, StateEvidence, Verdict, applicability_reason, criterion_level,
-    criterion_principle, criterion_source_url, criterion_title, deterministic_pass_obligation,
-    now_utc, profile_obligation_list, residual_review_need, unique_strings,
-    wcag22_success_criteria, wcag22_success_criterion_ids,
+    COMPLIANCE_REPORT_SCHEMA, applicability_reason, criterion_level, criterion_principle,
+    criterion_source_url, criterion_title, deterministic_pass_obligation, now_utc,
+    profile_obligation_list, residual_review_need, unique_strings, wcag22_success_criteria,
+    wcag22_success_criterion_ids,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

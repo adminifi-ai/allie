@@ -1,6 +1,7 @@
-use crate::{
+use crate::escape_html;
+use crate::model::{
     ComplianceObligation, ComplianceReportPacket, ComplianceSupportingCheck, CriterionCoverageCell,
-    EvidenceMedia, StateEvidence, escape_html,
+    EvidenceMedia, StateEvidence,
 };
 
 pub(crate) const REPORT_CSS: &str = r#"

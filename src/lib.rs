@@ -13,10 +13,14 @@ use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wait_timeout::ChildExt;
 
+mod model;
+
 mod agentic;
 mod compliance;
 mod consumer;
 mod report;
+
+use crate::model::*;
 
 const PRODUCT_LINE: &str = "Allie: accessibility evidence for every release.";
 const NEXT_STEP: &str = "Next implementation target: allie run --manifest <flow.yml>";
@@ -3784,13 +3788,6 @@ impl CredentialConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct ManifestTarget {
-    kind: String,
-    fixture_dir: Option<PathBuf>,
-    base_url: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
 struct ManifestPolicy {
     profile: String,
     blocking_classes: Vec<String>,
@@ -3800,21 +3797,6 @@ struct ManifestPolicy {
 
 fn default_worker_timeout_ms() -> u64 {
     DEFAULT_WORKER_TIMEOUT_MS
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct ArtifactPolicy {
-    redaction_status: String,
-    retention_class: String,
-}
-
-impl Default for ArtifactPolicy {
-    fn default() -> Self {
-        Self {
-            redaction_status: "not_redacted_local_fixture".to_string(),
-            retention_class: "local_ephemeral".to_string(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -3861,21 +3843,6 @@ impl ModelPolicy {
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct BrowserSettings {
-    viewport: Viewport,
-    color_scheme: String,
-    reduced_motion: String,
-    locale: String,
-    zoom: f64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct Viewport {
-    width: u32,
-    height: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -4025,37 +3992,6 @@ struct FlowCandidate {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ProductMapPacket {
-    schema: String,
-    generated_at: String,
-    source_manifest: String,
-    project_root: String,
-    app_name: String,
-    environment: String,
-    policy_profile: String,
-    target: ManifestTarget,
-    agent: AgentRunnerReceiptPacket,
-    standards: StandardsProfileSummary,
-    surfaces: Vec<ProductSurface>,
-    workflows: Vec<ProductWorkflow>,
-    open_questions: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct AgentRunnerReceiptPacket {
-    schema: String,
-    runner: String,
-    mode: String,
-    status: String,
-    capabilities: Vec<String>,
-    command: Vec<String>,
-    prompt_path: Option<String>,
-    transcript_path: Option<String>,
-    warnings: Vec<String>,
-    sources: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 struct WorkbenchJobPacket {
     schema: String,
     id: String,
@@ -4127,198 +4063,6 @@ struct WorkbenchPointers {
 struct WorkbenchArtifactRef {
     kind: String,
     path: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct StandardsProfileSummary {
-    id: String,
-    source_urls: Vec<String>,
-    total_obligations: usize,
-    methods: BTreeMap<String, usize>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ProductSurface {
-    id: String,
-    title: String,
-    routes: Vec<String>,
-    files: Vec<String>,
-    services: Vec<String>,
-    user_stories: Vec<String>,
-    workflow_refs: Vec<String>,
-    evidence_refs: Vec<String>,
-    confidence: String,
-    review_status: String,
-    provenance: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ProductWorkflow {
-    id: String,
-    title: String,
-    surface_refs: Vec<String>,
-    user_story: String,
-    generated_flow_manifest: String,
-    states: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ComplianceReportPacket {
-    schema: String,
-    generated_at: String,
-    source_map: String,
-    source_packet: String,
-    app_name: String,
-    summary: ComplianceSummary,
-    criteria: Vec<ComplianceObligation>,
-    criterion_coverage: Vec<CriterionCoverageCell>,
-    supporting_checks: Vec<ComplianceSupportingCheck>,
-    obligations: Vec<ComplianceObligation>,
-    surfaces: Vec<ComplianceSurfaceReport>,
-    #[serde(default)]
-    state_evidence: Vec<StateEvidence>,
-}
-
-/// Per-state evidence surfaced once at the top of the report (the captured
-/// screenshot and observed focus order), so criteria can reference it without
-/// re-inlining the same image dozens of times.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct StateEvidence {
-    id: String,
-    route: String,
-    url: String,
-    title: String,
-    http_status: Option<u16>,
-    #[serde(default)]
-    keyboard_focus_order: Vec<String>,
-    #[serde(default)]
-    media: Vec<EvidenceMedia>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ComplianceSummary {
-    status: String,
-    total_obligations: usize,
-    pass: usize,
-    fail: usize,
-    needs_review: usize,
-    not_tested: usize,
-    not_applicable: usize,
-    waived: usize,
-    risk_accepted: usize,
-    /// Of `pass`/`fail` above, how many are agentic (asterisked) verdicts rather
-    /// than machine-proven — surfaced so the headline distinguishes the two.
-    #[serde(default)]
-    ai_pass: usize,
-    #[serde(default)]
-    ai_fail: usize,
-    total_success_criteria: usize,
-    total_supporting_checks: usize,
-    evidence_packet_status: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ComplianceObligation {
-    id: String,
-    title: String,
-    status: String,
-    why: String,
-    surfaces: Vec<String>,
-    tests: Vec<String>,
-    artifact_refs: Vec<String>,
-    agentic_context: Vec<String>,
-    human_review: String,
-    confidence: String,
-    evidence_class: String,
-    source_url: Option<String>,
-    finding_refs: Vec<String>,
-    #[serde(default)]
-    principle: String,
-    #[serde(default)]
-    level: String,
-    #[serde(default)]
-    media: Vec<EvidenceMedia>,
-    #[serde(default)]
-    agentic_review: Option<AgenticAssessment>,
-}
-
-/// A piece of visual evidence (screenshot, element crop, or motion GIF) inlined
-/// into the report as a self-contained data URI so the report travels intact in
-/// a PR diff, a CI artifact, or a committed snapshot without external files.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct EvidenceMedia {
-    kind: String,
-    caption: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data_uri: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    artifact_ref: Option<String>,
-}
-
-/// Structured output of the agentic (vision-model) review for one criterion:
-/// the model's assessment plus the context a human reviewer needs to confirm it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct AgenticAssessment {
-    /// The committed verdict: pass | fail | inconclusive.
-    assessment: String,
-    rationale: String,
-    /// concrete steps the human reviewer should take to confirm or refute.
-    reviewer_guidance: String,
-    confidence: String,
-    provider: String,
-    model: String,
-    #[serde(default)]
-    media: Vec<EvidenceMedia>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct CriterionCoverageCell {
-    id: String,
-    criterion_id: String,
-    surface_id: String,
-    state_id: String,
-    policy_profile: String,
-    status: String,
-    applicability: String,
-    method: String,
-    confidence: String,
-    evidence_refs: Vec<String>,
-    agentic_refs: Vec<String>,
-    waiver_refs: Vec<String>,
-    finding_refs: Vec<String>,
-    artifact_refs: Vec<String>,
-    test_refs: Vec<String>,
-    replay_command: Option<String>,
-    residual_review_need: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ComplianceSupportingCheck {
-    id: String,
-    title: String,
-    status: String,
-    why: String,
-    related_criteria: Vec<String>,
-    surfaces: Vec<String>,
-    tests: Vec<String>,
-    artifact_refs: Vec<String>,
-    agentic_context: Vec<String>,
-    human_review: String,
-    confidence: String,
-    evidence_class: String,
-    finding_refs: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ComplianceSurfaceReport {
-    surface_id: String,
-    title: String,
-    routes: Vec<String>,
-    states: Vec<String>,
-    status: String,
-    criteria: Vec<String>,
-    cells: Vec<String>,
-    finding_refs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -4398,39 +4142,6 @@ struct WorkerStateResult {
     features: Option<PageFeatures>,
 }
 
-/// Lightweight inventory of page content + scripted signals the worker reports,
-/// used by Allie's applicability oracle to decide automatically which criteria
-/// do not apply and to run a couple of deterministic/scripted checks.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-struct PageFeatures {
-    #[serde(default)]
-    audio: u32,
-    #[serde(default)]
-    video: u32,
-    #[serde(default)]
-    forms: u32,
-    #[serde(default)]
-    inputs: u32,
-    #[serde(default)]
-    draggable: u32,
-    #[serde(default)]
-    iframes: u32,
-    #[serde(default)]
-    images: u32,
-    #[serde(default)]
-    links: u32,
-    #[serde(default)]
-    headings: u32,
-    #[serde(default)]
-    lang: bool,
-    #[serde(default)]
-    lang_value: String,
-    #[serde(default)]
-    reflow_overflow: bool,
-    #[serde(default)]
-    reflow_checked: bool,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 struct AxeViolation {
     id: String,
@@ -4441,135 +4152,6 @@ struct AxeViolation {
     tags: Vec<String>,
     #[serde(default)]
     nodes: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct EvidencePacket {
-    schema: String,
-    summary: PacketSummary,
-    run: RunMetadata,
-    target: TargetMetadata,
-    policy: PolicyMetadata,
-    coverage: Coverage,
-    artifacts: Vec<ArtifactMetadata>,
-    findings: Vec<Finding>,
-    verdicts: Vec<Verdict>,
-    waivers: Vec<serde_json::Value>,
-    review: Vec<ReviewAttempt>,
-    #[serde(default)]
-    agentic_assessments: Vec<AgenticAssessmentRecord>,
-    replay: Replay,
-}
-
-/// One criterion's agentic (vision-model) assessment, recorded in the evidence
-/// packet. Media paths are relative to the run directory (alongside the run
-/// screenshots) so the report resolves them the same way.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct AgenticAssessmentRecord {
-    obligation: String,
-    assessment: String,
-    rationale: String,
-    reviewer_guidance: String,
-    confidence: String,
-    provider: String,
-    model: String,
-    #[serde(default)]
-    media: Vec<AgenticMediaRef>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct AgenticMediaRef {
-    kind: String,
-    caption: String,
-    path: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PacketSummary {
-    status: String,
-    exit_code: i32,
-    deterministic_failures: usize,
-    scripted_failures: usize,
-    infrastructure_failures: usize,
-    states_captured: usize,
-    failure_class: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct RunMetadata {
-    id: String,
-    started_at: String,
-    finished_at: String,
-    allie_version: String,
-    git_sha: String,
-    git_branch: String,
-    ci_provider: Option<String>,
-    actor: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct TargetMetadata {
-    base_url: Option<String>,
-    environment: String,
-    app_name: String,
-    auth_profile: String,
-    credential_provider: CredentialProviderMetadata,
-    flow_manifest: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct CredentialProviderMetadata {
-    provider: String,
-    env: Option<String>,
-    required: bool,
-    status: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct PolicyMetadata {
-    profile: String,
-    blocking_classes: Vec<String>,
-    worker_timeout_ms: u64,
-    model_provider_allowlist: Vec<String>,
-    model_status: String,
-    zdr_required: bool,
-    redaction_profile: String,
-    budget: PolicyBudget,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct PolicyBudget {
-    model_calls: u32,
-    max_states: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Coverage {
-    routes_visited: Vec<String>,
-    surfaces_discovered: Vec<String>,
-    flows_exercised: Vec<String>,
-    states_captured: Vec<String>,
-    state_metadata: Vec<StateMetadata>,
-    standards_obligations_evaluated: Vec<String>,
-    obligations_not_tested: Vec<String>,
-    obligations_requiring_human_review: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct StateMetadata {
-    id: String,
-    route: String,
-    url: String,
-    title: String,
-    http_status: Option<u16>,
-    keyboard_focus_order: Vec<String>,
-    console_errors: Vec<String>,
-    network_errors: Vec<String>,
-    state_errors: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    features: Option<PageFeatures>,
 }
 
 #[derive(Debug)]
@@ -4596,64 +4178,6 @@ impl RunFailure {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ArtifactMetadata {
-    id: String,
-    #[serde(rename = "type")]
-    artifact_type: String,
-    path: String,
-    hash: String,
-    redaction_status: String,
-    retention_class: String,
-    unavailable_reason: Option<String>,
-    related_flow_state: Option<String>,
-    creation_tool: String,
-    timestamp: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct Finding {
-    id: String,
-    title: String,
-    description: String,
-    evidence_class: String,
-    standard_obligation: String,
-    severity: String,
-    status: String,
-    confidence: String,
-    source: String,
-    affected_route: String,
-    affected_state: String,
-    artifact_refs: Vec<String>,
-    suggested_remediation: String,
-    replay_command: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct Verdict {
-    obligation: String,
-    status: String,
-    confidence: String,
-    evidence_class: String,
-    source: String,
-    affected_states: Vec<String>,
-    finding_refs: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ReviewAttempt {
-    id: String,
-    provider: String,
-    model: String,
-    prompt_artifact: String,
-    response_artifact: String,
-    redaction_receipt: String,
-    status: String,
-    confidence: String,
-    promotion_state: String,
-}
-
 #[derive(Debug, Serialize)]
 struct RemediationQueue {
     schema: String,
@@ -4673,18 +4197,6 @@ struct RemediationItem {
     confidence: String,
     replay_command: String,
     policy_effect: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Replay {
-    command: String,
-    manifest_path: String,
-    environment_requirements: Vec<String>,
-    credential_profile: String,
-    browser: BrowserSettings,
-    seed_data: Vec<String>,
-    known_nondeterminism: Vec<String>,
 }
 
 #[expect(
