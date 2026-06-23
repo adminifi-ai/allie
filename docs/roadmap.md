@@ -69,6 +69,25 @@ criterion-by-surface drilldown over scanner-rule parity.
 4. Add SME review workbench, reviewer attestations, and promotion workflows.
 5. Add browser extension capture companion, multi-repo dashboard, and trends.
 
+## Code Health Backlog
+
+Behavior-preserving refactors logged from code review; sequence as capacity allows.
+
+1. **Decompose `src/lib.rs`** (~10k lines, 271 fns / 82 structs, no internal
+   modules beyond `consumer`). Every feature appends to one god-module; the
+   seams are already cohesive clusters — e.g. `compliance::model`
+   (`build_compliance_report`/`compliance_obligation`/`criterion_coverage_*`/
+   `compliance_summary`), `compliance::report` (the `cr_*` helpers +
+   `render_compliance_report` + the inlined `REPORT_CSS`), `agentic`
+   (`run_agentic_review`/`agentic_promoted_status`), `evidence`, `discovery`.
+2. **Typed `Verdict { Pass, Fail, Inconclusive }`** (with `FromStr`) to retire
+   the "is this verdict settled?" rule currently triplicated across the worker,
+   the Rust ingest, and `agentic_promoted_status`, and to replace stringly-typed
+   status/confidence matching at the boundary.
+3. **Extract `captureFrames`** in `workers/agentic/review.mjs` mirroring
+   `recordClip`, so the motion-montage capture scaffold (open → goto → act →
+   close) lives once instead of a third hand-inlined spelling.
+
 ## First Acceptance Slice
 
 The first slice is complete when this command works against a checked-in fixture:
