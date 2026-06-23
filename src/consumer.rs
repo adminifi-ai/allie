@@ -349,7 +349,7 @@ fn run_verify_pipeline(options: &VerifyOptions) -> Result<VerifyPipelineReceipts
         out_dir: options.out_dir.join("run"),
     })?;
     if manifest.model.enabled {
-        match run_agentic_review(&manifest, &run.evidence_path) {
+        match crate::agentic::run_agentic_review(&manifest, &run.evidence_path) {
             Ok(summary) => eprintln!(
                 "Agentic review: {} criteria, {} model call(s), status {}",
                 summary.criteria, summary.calls, summary.status
