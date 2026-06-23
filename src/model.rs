@@ -1,0 +1,501 @@
+//! Shared pure-data DTOs for Allie's evidence, compliance, and product-map
+//! packets. This is the base (leaf) module: it depends only on std and external
+//! crates, never on other `crate::` items, so every domain module
+//! ({lib, report, agentic, compliance, consumer}) imports its data model from
+//! here instead of reaching up into the crate root.
+
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct ManifestTarget {
+    pub(crate) kind: String,
+    pub(crate) fixture_dir: Option<PathBuf>,
+    pub(crate) base_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct ArtifactPolicy {
+    pub(crate) redaction_status: String,
+    pub(crate) retention_class: String,
+}
+
+impl Default for ArtifactPolicy {
+    fn default() -> Self {
+        Self {
+            redaction_status: "not_redacted_local_fixture".to_string(),
+            retention_class: "local_ephemeral".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct BrowserSettings {
+    pub(crate) viewport: Viewport,
+    pub(crate) color_scheme: String,
+    pub(crate) reduced_motion: String,
+    pub(crate) locale: String,
+    pub(crate) zoom: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct Viewport {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ProductMapPacket {
+    pub(crate) schema: String,
+    pub(crate) generated_at: String,
+    pub(crate) source_manifest: String,
+    pub(crate) project_root: String,
+    pub(crate) app_name: String,
+    pub(crate) environment: String,
+    pub(crate) policy_profile: String,
+    pub(crate) target: ManifestTarget,
+    pub(crate) agent: AgentRunnerReceiptPacket,
+    pub(crate) standards: StandardsProfileSummary,
+    pub(crate) surfaces: Vec<ProductSurface>,
+    pub(crate) workflows: Vec<ProductWorkflow>,
+    pub(crate) open_questions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct AgentRunnerReceiptPacket {
+    pub(crate) schema: String,
+    pub(crate) runner: String,
+    pub(crate) mode: String,
+    pub(crate) status: String,
+    pub(crate) capabilities: Vec<String>,
+    pub(crate) command: Vec<String>,
+    pub(crate) prompt_path: Option<String>,
+    pub(crate) transcript_path: Option<String>,
+    pub(crate) warnings: Vec<String>,
+    pub(crate) sources: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct StandardsProfileSummary {
+    pub(crate) id: String,
+    pub(crate) source_urls: Vec<String>,
+    pub(crate) total_obligations: usize,
+    pub(crate) methods: BTreeMap<String, usize>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ProductSurface {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) routes: Vec<String>,
+    pub(crate) files: Vec<String>,
+    pub(crate) services: Vec<String>,
+    pub(crate) user_stories: Vec<String>,
+    pub(crate) workflow_refs: Vec<String>,
+    pub(crate) evidence_refs: Vec<String>,
+    pub(crate) confidence: String,
+    pub(crate) review_status: String,
+    pub(crate) provenance: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ProductWorkflow {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) surface_refs: Vec<String>,
+    pub(crate) user_story: String,
+    pub(crate) generated_flow_manifest: String,
+    pub(crate) states: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ComplianceReportPacket {
+    pub(crate) schema: String,
+    pub(crate) generated_at: String,
+    pub(crate) source_map: String,
+    pub(crate) source_packet: String,
+    pub(crate) app_name: String,
+    pub(crate) summary: ComplianceSummary,
+    pub(crate) criteria: Vec<ComplianceObligation>,
+    pub(crate) criterion_coverage: Vec<CriterionCoverageCell>,
+    pub(crate) supporting_checks: Vec<ComplianceSupportingCheck>,
+    pub(crate) obligations: Vec<ComplianceObligation>,
+    pub(crate) surfaces: Vec<ComplianceSurfaceReport>,
+    #[serde(default)]
+    pub(crate) state_evidence: Vec<StateEvidence>,
+}
+
+/// Per-state evidence surfaced once at the top of the report (the captured
+/// screenshot and observed focus order), so criteria can reference it without
+/// re-inlining the same image dozens of times.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct StateEvidence {
+    pub(crate) id: String,
+    pub(crate) route: String,
+    pub(crate) url: String,
+    pub(crate) title: String,
+    pub(crate) http_status: Option<u16>,
+    #[serde(default)]
+    pub(crate) keyboard_focus_order: Vec<String>,
+    #[serde(default)]
+    pub(crate) media: Vec<EvidenceMedia>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ComplianceSummary {
+    pub(crate) status: String,
+    pub(crate) total_obligations: usize,
+    pub(crate) pass: usize,
+    pub(crate) fail: usize,
+    pub(crate) needs_review: usize,
+    pub(crate) not_tested: usize,
+    pub(crate) not_applicable: usize,
+    pub(crate) waived: usize,
+    pub(crate) risk_accepted: usize,
+    /// Of `pass`/`fail` above, how many are agentic (asterisked) verdicts rather
+    /// than machine-proven — surfaced so the headline distinguishes the two.
+    #[serde(default)]
+    pub(crate) ai_pass: usize,
+    #[serde(default)]
+    pub(crate) ai_fail: usize,
+    pub(crate) total_success_criteria: usize,
+    pub(crate) total_supporting_checks: usize,
+    pub(crate) evidence_packet_status: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ComplianceObligation {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) status: String,
+    pub(crate) why: String,
+    pub(crate) surfaces: Vec<String>,
+    pub(crate) tests: Vec<String>,
+    pub(crate) artifact_refs: Vec<String>,
+    pub(crate) agentic_context: Vec<String>,
+    pub(crate) human_review: String,
+    pub(crate) confidence: String,
+    pub(crate) evidence_class: String,
+    pub(crate) source_url: Option<String>,
+    pub(crate) finding_refs: Vec<String>,
+    #[serde(default)]
+    pub(crate) principle: String,
+    #[serde(default)]
+    pub(crate) level: String,
+    #[serde(default)]
+    pub(crate) media: Vec<EvidenceMedia>,
+    #[serde(default)]
+    pub(crate) agentic_review: Option<AgenticAssessment>,
+}
+
+/// A piece of visual evidence (screenshot, element crop, or motion GIF) inlined
+/// into the report as a self-contained data URI so the report travels intact in
+/// a PR diff, a CI artifact, or a committed snapshot without external files.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct EvidenceMedia {
+    pub(crate) kind: String,
+    pub(crate) caption: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) data_uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) artifact_ref: Option<String>,
+}
+
+/// Structured output of the agentic (vision-model) review for one criterion:
+/// the model's assessment plus the context a human reviewer needs to confirm it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct AgenticAssessment {
+    /// The committed verdict: pass | fail | inconclusive.
+    pub(crate) assessment: String,
+    pub(crate) rationale: String,
+    /// concrete steps the human reviewer should take to confirm or refute.
+    pub(crate) reviewer_guidance: String,
+    pub(crate) confidence: String,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    #[serde(default)]
+    pub(crate) media: Vec<EvidenceMedia>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct CriterionCoverageCell {
+    pub(crate) id: String,
+    pub(crate) criterion_id: String,
+    pub(crate) surface_id: String,
+    pub(crate) state_id: String,
+    pub(crate) policy_profile: String,
+    pub(crate) status: String,
+    pub(crate) applicability: String,
+    pub(crate) method: String,
+    pub(crate) confidence: String,
+    pub(crate) evidence_refs: Vec<String>,
+    pub(crate) agentic_refs: Vec<String>,
+    pub(crate) waiver_refs: Vec<String>,
+    pub(crate) finding_refs: Vec<String>,
+    pub(crate) artifact_refs: Vec<String>,
+    pub(crate) test_refs: Vec<String>,
+    pub(crate) replay_command: Option<String>,
+    pub(crate) residual_review_need: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ComplianceSupportingCheck {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) status: String,
+    pub(crate) why: String,
+    pub(crate) related_criteria: Vec<String>,
+    pub(crate) surfaces: Vec<String>,
+    pub(crate) tests: Vec<String>,
+    pub(crate) artifact_refs: Vec<String>,
+    pub(crate) agentic_context: Vec<String>,
+    pub(crate) human_review: String,
+    pub(crate) confidence: String,
+    pub(crate) evidence_class: String,
+    pub(crate) finding_refs: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ComplianceSurfaceReport {
+    pub(crate) surface_id: String,
+    pub(crate) title: String,
+    pub(crate) routes: Vec<String>,
+    pub(crate) states: Vec<String>,
+    pub(crate) status: String,
+    pub(crate) criteria: Vec<String>,
+    pub(crate) cells: Vec<String>,
+    pub(crate) finding_refs: Vec<String>,
+}
+
+/// Lightweight inventory of page content + scripted signals the worker reports,
+/// used by Allie's applicability oracle to decide automatically which criteria
+/// do not apply and to run a couple of deterministic/scripted checks.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub(crate) struct PageFeatures {
+    #[serde(default)]
+    pub(crate) audio: u32,
+    #[serde(default)]
+    pub(crate) video: u32,
+    #[serde(default)]
+    pub(crate) forms: u32,
+    #[serde(default)]
+    pub(crate) inputs: u32,
+    #[serde(default)]
+    pub(crate) draggable: u32,
+    #[serde(default)]
+    pub(crate) iframes: u32,
+    #[serde(default)]
+    pub(crate) images: u32,
+    #[serde(default)]
+    pub(crate) links: u32,
+    #[serde(default)]
+    pub(crate) headings: u32,
+    #[serde(default)]
+    pub(crate) lang: bool,
+    #[serde(default)]
+    pub(crate) lang_value: String,
+    #[serde(default)]
+    pub(crate) reflow_overflow: bool,
+    #[serde(default)]
+    pub(crate) reflow_checked: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EvidencePacket {
+    pub(crate) schema: String,
+    pub(crate) summary: PacketSummary,
+    pub(crate) run: RunMetadata,
+    pub(crate) target: TargetMetadata,
+    pub(crate) policy: PolicyMetadata,
+    pub(crate) coverage: Coverage,
+    pub(crate) artifacts: Vec<ArtifactMetadata>,
+    pub(crate) findings: Vec<Finding>,
+    pub(crate) verdicts: Vec<Verdict>,
+    pub(crate) waivers: Vec<serde_json::Value>,
+    pub(crate) review: Vec<ReviewAttempt>,
+    #[serde(default)]
+    pub(crate) agentic_assessments: Vec<AgenticAssessmentRecord>,
+    pub(crate) replay: Replay,
+}
+
+/// One criterion's agentic (vision-model) assessment, recorded in the evidence
+/// packet. Media paths are relative to the run directory (alongside the run
+/// screenshots) so the report resolves them the same way.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct AgenticAssessmentRecord {
+    pub(crate) obligation: String,
+    pub(crate) assessment: String,
+    pub(crate) rationale: String,
+    pub(crate) reviewer_guidance: String,
+    pub(crate) confidence: String,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    #[serde(default)]
+    pub(crate) media: Vec<AgenticMediaRef>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct AgenticMediaRef {
+    pub(crate) kind: String,
+    pub(crate) caption: String,
+    pub(crate) path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PacketSummary {
+    pub(crate) status: String,
+    pub(crate) exit_code: i32,
+    pub(crate) deterministic_failures: usize,
+    pub(crate) scripted_failures: usize,
+    pub(crate) infrastructure_failures: usize,
+    pub(crate) states_captured: usize,
+    pub(crate) failure_class: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct RunMetadata {
+    pub(crate) id: String,
+    pub(crate) started_at: String,
+    pub(crate) finished_at: String,
+    pub(crate) allie_version: String,
+    pub(crate) git_sha: String,
+    pub(crate) git_branch: String,
+    pub(crate) ci_provider: Option<String>,
+    pub(crate) actor: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct TargetMetadata {
+    pub(crate) base_url: Option<String>,
+    pub(crate) environment: String,
+    pub(crate) app_name: String,
+    pub(crate) auth_profile: String,
+    pub(crate) credential_provider: CredentialProviderMetadata,
+    pub(crate) flow_manifest: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct CredentialProviderMetadata {
+    pub(crate) provider: String,
+    pub(crate) env: Option<String>,
+    pub(crate) required: bool,
+    pub(crate) status: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct PolicyMetadata {
+    pub(crate) profile: String,
+    pub(crate) blocking_classes: Vec<String>,
+    pub(crate) worker_timeout_ms: u64,
+    pub(crate) model_provider_allowlist: Vec<String>,
+    pub(crate) model_status: String,
+    pub(crate) zdr_required: bool,
+    pub(crate) redaction_profile: String,
+    pub(crate) budget: PolicyBudget,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct PolicyBudget {
+    pub(crate) model_calls: u32,
+    pub(crate) max_states: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct Coverage {
+    pub(crate) routes_visited: Vec<String>,
+    pub(crate) surfaces_discovered: Vec<String>,
+    pub(crate) flows_exercised: Vec<String>,
+    pub(crate) states_captured: Vec<String>,
+    pub(crate) state_metadata: Vec<StateMetadata>,
+    pub(crate) standards_obligations_evaluated: Vec<String>,
+    pub(crate) obligations_not_tested: Vec<String>,
+    pub(crate) obligations_requiring_human_review: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct StateMetadata {
+    pub(crate) id: String,
+    pub(crate) route: String,
+    pub(crate) url: String,
+    pub(crate) title: String,
+    pub(crate) http_status: Option<u16>,
+    pub(crate) keyboard_focus_order: Vec<String>,
+    pub(crate) console_errors: Vec<String>,
+    pub(crate) network_errors: Vec<String>,
+    pub(crate) state_errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) features: Option<PageFeatures>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ArtifactMetadata {
+    pub(crate) id: String,
+    #[serde(rename = "type")]
+    pub(crate) artifact_type: String,
+    pub(crate) path: String,
+    pub(crate) hash: String,
+    pub(crate) redaction_status: String,
+    pub(crate) retention_class: String,
+    pub(crate) unavailable_reason: Option<String>,
+    pub(crate) related_flow_state: Option<String>,
+    pub(crate) creation_tool: String,
+    pub(crate) timestamp: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct Finding {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) description: String,
+    pub(crate) evidence_class: String,
+    pub(crate) standard_obligation: String,
+    pub(crate) severity: String,
+    pub(crate) status: String,
+    pub(crate) confidence: String,
+    pub(crate) source: String,
+    pub(crate) affected_route: String,
+    pub(crate) affected_state: String,
+    pub(crate) artifact_refs: Vec<String>,
+    pub(crate) suggested_remediation: String,
+    pub(crate) replay_command: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct Verdict {
+    pub(crate) obligation: String,
+    pub(crate) status: String,
+    pub(crate) confidence: String,
+    pub(crate) evidence_class: String,
+    pub(crate) source: String,
+    pub(crate) affected_states: Vec<String>,
+    pub(crate) finding_refs: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct ReviewAttempt {
+    pub(crate) id: String,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) prompt_artifact: String,
+    pub(crate) response_artifact: String,
+    pub(crate) redaction_receipt: String,
+    pub(crate) status: String,
+    pub(crate) confidence: String,
+    pub(crate) promotion_state: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Replay {
+    pub(crate) command: String,
+    pub(crate) manifest_path: String,
+    pub(crate) environment_requirements: Vec<String>,
+    pub(crate) credential_profile: String,
+    pub(crate) browser: BrowserSettings,
+    pub(crate) seed_data: Vec<String>,
+    pub(crate) known_nondeterminism: Vec<String>,
+}

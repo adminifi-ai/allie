@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::{ArtifactPolicy, BrowserSettings, ManifestTarget, Viewport};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -349,7 +350,7 @@ fn run_verify_pipeline(options: &VerifyOptions) -> Result<VerifyPipelineReceipts
         out_dir: options.out_dir.join("run"),
     })?;
     if manifest.model.enabled {
-        match run_agentic_review(&manifest, &run.evidence_path) {
+        match crate::agentic::run_agentic_review(&manifest, &run.evidence_path) {
             Ok(summary) => eprintln!(
                 "Agentic review: {} criteria, {} model call(s), status {}",
                 summary.criteria, summary.calls, summary.status
@@ -716,9 +717,9 @@ fn render_verify_html(summary: &serde_json::Value, out_dir: &Path) -> String {
 </body>
 </html>
 "#,
-        css = REPORT_CSS,
+        css = crate::report::REPORT_CSS,
         status = escape_html(status),
-        status_label = escape_html(&cr_status_label(status)),
+        status_label = escape_html(&crate::report::cr_status_label(status)),
         bcls = bcls,
         dot = dot,
         why = escape_html(why),

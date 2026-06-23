@@ -13,7 +13,14 @@ use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wait_timeout::ChildExt;
 
+mod model;
+
+mod agentic;
+mod compliance;
 mod consumer;
+mod report;
+
+use crate::model::*;
 
 const PRODUCT_LINE: &str = "Allie: accessibility evidence for every release.";
 const NEXT_STEP: &str = "Next implementation target: allie run --manifest <flow.yml>";
@@ -70,7 +77,7 @@ impl Error for AllieError {
     }
 }
 
-type Result<T> = std::result::Result<T, AllieError>;
+pub(crate) type Result<T> = std::result::Result<T, AllieError>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitClass {
@@ -2649,19 +2656,24 @@ fn run_compliance_report(options: ReportOptions) -> Result<ComplianceReportRecei
     }
     let packet: EvidencePacket = read_json_file(&options.packet_path)?;
     validate_release_packet(&packet)?;
-    let report = build_compliance_report(&map, &packet, &options.map_path, &options.packet_path);
+    let report =
+        compliance::build_compliance_report(&map, &packet, &options.map_path, &options.packet_path);
     let report_value = serde_json::to_value(&report).map_err(|source| AllieError::Json {
         context: "serialize compliance report for validation".to_string(),
         source,
     })?;
-    validate_criterion_coverage_cells(&report_value).map_err(AllieError::InvalidManifest)?;
+    compliance::validate_criterion_coverage_cells(&report_value)
+        .map_err(AllieError::InvalidManifest)?;
 
     let report_json_path = options.out_dir.join("compliance-report.json");
     let report_html_path = options.out_dir.join("compliance-report.html");
     let summary_path = options.out_dir.join("summary.md");
     write_json_pretty(&report_json_path, &report)?;
-    write_string(&report_html_path, &render_compliance_report(&report))?;
-    write_string(&summary_path, &render_compliance_summary(&report))?;
+    write_string(
+        &report_html_path,
+        &report::render_compliance_report(&report),
+    )?;
+    write_string(&summary_path, &report::render_compliance_summary(&report))?;
 
     Ok(ComplianceReportReceipt {
         report_json_path,
@@ -2670,919 +2682,29 @@ fn run_compliance_report(options: ReportOptions) -> Result<ComplianceReportRecei
     })
 }
 
-fn build_compliance_report(
-    map: &ProductMapPacket,
-    packet: &EvidencePacket,
-    map_path: &Path,
-    packet_path: &Path,
-) -> ComplianceReportPacket {
-    let base_criteria = compliance_criterion_order(&map.policy_profile, packet)
-        .into_iter()
-        .map(|obligation| compliance_obligation(map, packet, &obligation))
-        .collect::<Vec<_>>();
-    let supporting_checks = supporting_check_order(&map.policy_profile, packet)
-        .into_iter()
-        .map(|obligation| compliance_supporting_check(map, packet, &obligation))
-        .collect::<Vec<_>>();
-    let criterion_coverage = criterion_coverage_matrix(map, packet);
-    let criteria = aggregate_criteria_from_cells(base_criteria, &criterion_coverage);
-    let criteria = attach_agentic_reviews(criteria, packet, packet_path);
-    let summary = compliance_summary(packet, &criteria, supporting_checks.len());
-    let surfaces = map
-        .surfaces
-        .iter()
-        .map(|surface| compliance_surface_report(surface, packet, &criteria, &criterion_coverage))
-        .collect();
-    ComplianceReportPacket {
-        schema: COMPLIANCE_REPORT_SCHEMA.to_string(),
-        generated_at: now_utc().to_rfc3339(),
-        source_map: map_path.to_string_lossy().to_string(),
-        source_packet: packet_path.to_string_lossy().to_string(),
-        app_name: map.app_name.clone(),
-        summary,
-        criteria: criteria.clone(),
-        criterion_coverage,
-        supporting_checks,
-        obligations: criteria,
-        surfaces,
-        state_evidence: build_state_evidence(packet, packet_path),
-    }
-}
-
-/// Resolve each captured state's full-page screenshot (and focus order) once,
-/// inlining the image as a data URI so the report is self-contained.
-fn build_state_evidence(packet: &EvidencePacket, packet_path: &Path) -> Vec<StateEvidence> {
-    let run_dir = packet_path.parent().unwrap_or_else(|| Path::new("."));
-    packet
-        .coverage
-        .state_metadata
-        .iter()
-        .map(|state| {
-            let media = packet
-                .artifacts
-                .iter()
-                .filter(|artifact| {
-                    is_screenshot_artifact(artifact)
-                        && artifact.related_flow_state.as_deref() == Some(state.id.as_str())
-                        && is_safe_run_relative(&artifact.path)
-                })
-                .filter_map(|artifact| {
-                    artifact_data_uri(&run_dir.join(&artifact.path)).map(|uri| EvidenceMedia {
-                        kind: "screenshot".to_string(),
-                        caption: format!("{} — full page as Allie captured it", state.id),
-                        data_uri: Some(uri),
-                        artifact_ref: Some(artifact.id.clone()),
-                    })
-                })
-                .collect();
-            StateEvidence {
-                id: state.id.clone(),
-                route: state.route.clone(),
-                url: state.url.clone(),
-                title: state.title.clone(),
-                http_status: state.http_status,
-                keyboard_focus_order: state.keyboard_focus_order.clone(),
-                media,
-            }
-        })
-        .collect()
-}
-
-/// Attach each criterion's agentic (vision-model) assessment and its captured
-/// media (screenshots, focus montage, focus/motion clips) to the report,
-/// inlining the media as data URIs so the report is self-contained.
-fn attach_agentic_reviews(
-    mut criteria: Vec<ComplianceObligation>,
-    packet: &EvidencePacket,
-    packet_path: &Path,
-) -> Vec<ComplianceObligation> {
-    if packet.agentic_assessments.is_empty() {
-        return criteria;
-    }
-    let run_dir = packet_path.parent().unwrap_or_else(|| Path::new("."));
-    let by_obligation = packet
-        .agentic_assessments
-        .iter()
-        .map(|record| (record.obligation.as_str(), record))
-        .collect::<BTreeMap<_, _>>();
-    for criterion in &mut criteria {
-        let Some(record) = by_obligation.get(criterion.id.as_str()) else {
-            continue;
-        };
-        let media = record
-            .media
-            .iter()
-            .filter(|media_ref| is_safe_run_relative(&media_ref.path))
-            .filter_map(|media_ref| {
-                artifact_data_uri(&run_dir.join(&media_ref.path)).map(|uri| EvidenceMedia {
-                    kind: media_ref.kind.clone(),
-                    caption: media_ref.caption.clone(),
-                    data_uri: Some(uri),
-                    artifact_ref: None,
-                })
-            })
-            .collect::<Vec<_>>();
-        criterion.agentic_review = Some(AgenticAssessment {
-            assessment: record.assessment.clone(),
-            rationale: record.rationale.clone(),
-            reviewer_guidance: record.reviewer_guidance.clone(),
-            confidence: record.confidence.clone(),
-            provider: record.provider.clone(),
-            model: record.model.clone(),
-            media,
-        });
-    }
-    criteria
-}
-
-fn is_screenshot_artifact(artifact: &ArtifactMetadata) -> bool {
-    artifact.artifact_type == "screenshot"
-        || artifact.path.ends_with(".png")
-        || artifact.path.ends_with(".jpg")
-        || artifact.path.ends_with(".jpeg")
-        || artifact.path.ends_with(".webp")
-}
-
-/// Reject run-relative paths that escape the run directory (absolute, or with a
-/// `..` component), so a hand-edited evidence packet cannot make the report
-/// inline an arbitrary file from disk.
-fn is_safe_run_relative(rel: &str) -> bool {
-    !rel.is_empty()
-        && !Path::new(rel).is_absolute()
-        && !Path::new(rel)
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-}
-
-/// Read a binary artifact and encode it as a `data:` URI for inline embedding.
-/// Returns None if the file is missing or too large to inline sensibly.
-fn artifact_data_uri(abs_path: &Path) -> Option<String> {
-    const MAX_INLINE_BYTES: u64 = 6 * 1024 * 1024;
-    let metadata = fs::metadata(abs_path).ok()?;
-    if metadata.len() > MAX_INLINE_BYTES {
-        return None;
-    }
-    let bytes = fs::read(abs_path).ok()?;
-    let mime = match abs_path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("webp") => "image/webp",
-        Some("gif") => "image/gif",
-        Some("svg") => "image/svg+xml",
-        Some("webm") => "video/webm",
-        Some("mp4") => "video/mp4",
-        _ => "application/octet-stream",
-    };
-    Some(format!("data:{};base64,{}", mime, base64_encode(&bytes)))
-}
-
-/// Minimal standard base64 encoder. Kept in-tree to inline evidence images
-/// without adding a dependency to a deliberately small crate graph.
-fn base64_encode(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0];
-        let b1 = chunk.get(1).copied().unwrap_or(0);
-        let b2 = chunk.get(2).copied().unwrap_or(0);
-        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
-        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
-        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
-        out.push(if chunk.len() > 1 {
-            TABLE[((triple >> 6) & 0x3f) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            TABLE[(triple & 0x3f) as usize] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-fn compliance_criterion_order(policy_profile: &str, packet: &EvidencePacket) -> Vec<String> {
-    let mut obligations = Vec::new();
-    let mut seen = BTreeSet::new();
-    if policy_profile == "wcag22-aa" {
-        for criterion in wcag22_success_criteria() {
-            if let Some(obligation) = criterion["obligation"].as_str()
-                && seen.insert(obligation.to_string())
-            {
-                obligations.push(obligation.to_string());
-            }
-        }
-        return obligations;
-    }
-
-    for verdict in &packet.verdicts {
-        if seen.insert(verdict.obligation.clone()) {
-            obligations.push(verdict.obligation.clone());
-        }
-    }
-    for finding in &packet.findings {
-        if seen.insert(finding.standard_obligation.clone()) {
-            obligations.push(finding.standard_obligation.clone());
-        }
-    }
-    obligations
-}
-
-fn supporting_check_order(policy_profile: &str, packet: &EvidencePacket) -> Vec<String> {
-    if policy_profile != "wcag22-aa" {
-        return Vec::new();
-    }
-
-    let criteria = wcag22_success_criterion_ids();
-    let mut support = Vec::new();
-    let mut seen = BTreeSet::new();
-    for obligation in std::iter::once(deterministic_pass_obligation(policy_profile))
-        .chain(profile_obligation_list(
-            policy_profile,
-            "scripted_obligations",
-        ))
-        .chain(profile_obligation_list(
-            policy_profile,
-            "human_review_obligations",
-        ))
-        .chain(
-            packet
-                .verdicts
-                .iter()
-                .map(|verdict| verdict.obligation.clone()),
-        )
-        .chain(
-            packet
-                .findings
-                .iter()
-                .map(|finding| finding.standard_obligation.clone()),
-        )
-    {
-        if !criteria.contains(&obligation) && seen.insert(obligation.clone()) {
-            support.push(obligation);
-        }
-    }
-    support
-}
-
-fn wcag22_success_criterion_ids() -> BTreeSet<String> {
-    wcag22_success_criteria()
-        .into_iter()
-        .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
-        .collect()
-}
-
-fn compliance_obligation(
-    map: &ProductMapPacket,
-    packet: &EvidencePacket,
-    obligation: &str,
-) -> ComplianceObligation {
-    let verdicts = packet
-        .verdicts
-        .iter()
-        .filter(|verdict| verdict.obligation == obligation)
-        .collect::<Vec<_>>();
-    let findings = related_findings(packet, obligation, &verdicts);
-    let status = compliance_status(&verdicts, &findings);
-    let surfaces = obligation_surface_ids(map, &verdicts, &findings);
-    let tests = unique_strings(
-        verdicts
-            .iter()
-            .map(|verdict| verdict.source.clone())
-            .chain(findings.iter().map(|finding| finding.source.clone())),
-    );
-    let artifact_refs = obligation_artifact_refs(packet, &verdicts, &findings);
-    let agentic_context = obligation_agentic_context(map, packet, &findings);
-    let confidence = verdicts
-        .iter()
-        .map(|verdict| verdict.confidence.clone())
-        .chain(findings.iter().map(|finding| finding.confidence.clone()))
-        .next()
-        .unwrap_or_else(|| "not_observed".to_string());
-    let evidence_class = verdicts
-        .iter()
-        .map(|verdict| verdict.evidence_class.clone())
-        .chain(
-            findings
-                .iter()
-                .map(|finding| finding.evidence_class.clone()),
-        )
-        .next()
-        .unwrap_or_else(|| "none".to_string());
-    ComplianceObligation {
-        id: obligation.to_string(),
-        title: criterion_title(obligation),
-        status: status.clone(),
-        why: obligation_why(obligation, &status, &verdicts, &findings),
-        surfaces,
-        tests,
-        artifact_refs,
-        agentic_context,
-        human_review: human_review_status(&status, &evidence_class),
-        confidence,
-        evidence_class,
-        source_url: criterion_source_url(obligation),
-        finding_refs: findings.iter().map(|finding| finding.id.clone()).collect(),
-        principle: criterion_principle(obligation),
-        level: criterion_level(obligation),
-        media: Vec::new(),
-        agentic_review: None,
-    }
-}
-
-fn criterion_principle(obligation: &str) -> String {
+pub(crate) fn criterion_principle(obligation: &str) -> String {
     criterion_field(obligation, "principle").unwrap_or_else(|| "Supporting Checks".to_string())
 }
 
-fn criterion_level(obligation: &str) -> String {
+pub(crate) fn criterion_level(obligation: &str) -> String {
     criterion_field(obligation, "level").unwrap_or_default()
 }
 
-fn criterion_field(obligation: &str, field: &str) -> Option<String> {
+pub(crate) fn criterion_field(obligation: &str, field: &str) -> Option<String> {
     wcag22_success_criteria()
         .into_iter()
         .find(|criterion| criterion["obligation"].as_str() == Some(obligation))
         .and_then(|criterion| criterion[field].as_str().map(ToString::to_string))
 }
 
-fn compliance_supporting_check(
-    map: &ProductMapPacket,
-    packet: &EvidencePacket,
-    obligation: &str,
-) -> ComplianceSupportingCheck {
-    let row = compliance_obligation(map, packet, obligation);
-    ComplianceSupportingCheck {
-        id: row.id.clone(),
-        title: row.title.clone(),
-        status: row.status.clone(),
-        why: row.why.clone(),
-        related_criteria: supporting_check_related_criteria(obligation),
-        surfaces: row.surfaces,
-        tests: row.tests,
-        artifact_refs: row.artifact_refs,
-        agentic_context: row.agentic_context,
-        human_review: row.human_review,
-        confidence: row.confidence,
-        evidence_class: row.evidence_class,
-        finding_refs: row.finding_refs,
-    }
-}
-
-fn supporting_check_related_criteria(obligation: &str) -> Vec<String> {
-    match obligation {
-        "wcag22-aa:deterministic-axe-rules" => wcag22_success_criteria()
-            .into_iter()
-            .filter(|criterion| criterion["method"].as_str() == Some("axe"))
-            .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
-            .collect(),
-        "wcag22-aa:2.1.1-keyboard-traversal" => vec![
-            "wcag22-aa:2.1.1-keyboard".to_string(),
-            "wcag22-aa:2.1.2-no-keyboard-trap".to_string(),
-            "wcag22-aa:2.4.3-focus-order".to_string(),
-            "wcag22-aa:2.4.7-focus-visible".to_string(),
-            "wcag22-aa:2.4.11-focus-not-obscured-minimum".to_string(),
-        ],
-        "wcag22-aa:1.4.10-zoom-reflow" => vec![
-            "wcag22-aa:1.4.4-resize-text".to_string(),
-            "wcag22-aa:1.4.10-reflow".to_string(),
-            "wcag22-aa:1.4.12-text-spacing".to_string(),
-        ],
-        "wcag22-aa:2.2.2-reduced-motion" => vec![
-            "wcag22-aa:2.2.2-pause-stop-hide".to_string(),
-            "wcag22-aa:2.3.1-three-flashes-or-below-threshold".to_string(),
-            "wcag22-aa:2.5.4-motion-actuation".to_string(),
-        ],
-        "wcag22-aa:human-content-meaning" => wcag22_success_criteria()
-            .into_iter()
-            .filter(|criterion| criterion["method"].as_str() == Some("human_review"))
-            .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
-            .collect(),
-        "wcag22-aa:human-assistive-technology-review" => wcag22_success_criteria()
-            .into_iter()
-            .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-fn related_findings<'a>(
-    packet: &'a EvidencePacket,
-    obligation: &str,
-    verdicts: &[&Verdict],
-) -> Vec<&'a Finding> {
-    let finding_refs = verdicts
-        .iter()
-        .flat_map(|verdict| verdict.finding_refs.iter().cloned())
-        .collect::<BTreeSet<_>>();
-    packet
-        .findings
-        .iter()
-        .filter(|finding| {
-            finding.standard_obligation == obligation || finding_refs.contains(&finding.id)
-        })
-        .collect()
-}
-
-fn compliance_status(verdicts: &[&Verdict], findings: &[&Finding]) -> String {
-    if findings.iter().any(|finding| finding.status == "fail")
-        || verdicts.iter().any(|verdict| verdict.status == "fail")
-    {
-        "fail".to_string()
-    } else if findings
-        .iter()
-        .any(|finding| finding.status == "needs_review")
-        || verdicts
-            .iter()
-            .any(|verdict| verdict.status == "needs_review")
-    {
-        "needs_review".to_string()
-    } else if verdicts
-        .iter()
-        .any(|verdict| verdict.status == "not_applicable")
-    {
-        "not_applicable".to_string()
-    } else if verdicts.iter().any(|verdict| verdict.status == "waived") {
-        "waived".to_string()
-    } else if verdicts
-        .iter()
-        .any(|verdict| verdict.status == "risk_accepted")
-    {
-        "risk_accepted".to_string()
-    } else if verdicts.iter().any(|verdict| verdict.status == "pass") {
-        "pass".to_string()
-    } else {
-        "needs_review".to_string()
-    }
-}
-
-fn obligation_surface_ids(
-    map: &ProductMapPacket,
-    verdicts: &[&Verdict],
-    findings: &[&Finding],
-) -> Vec<String> {
-    let state_ids = verdicts
-        .iter()
-        .flat_map(|verdict| verdict.affected_states.iter().cloned())
-        .chain(
-            findings
-                .iter()
-                .map(|finding| finding.affected_state.clone()),
-        )
-        .collect::<BTreeSet<_>>();
-    let routes = findings
-        .iter()
-        .map(|finding| finding.affected_route.clone())
-        .collect::<BTreeSet<_>>();
-    let mut surface_ids = map
-        .surfaces
-        .iter()
-        .filter(|surface| {
-            surface
-                .evidence_refs
-                .iter()
-                .any(|state| state_ids.contains(state))
-                || surface.id.as_str() != "run" && state_ids.contains(&surface.id)
-                || surface.routes.iter().any(|route| routes.contains(route))
-        })
-        .map(|surface| surface.id.clone())
-        .collect::<Vec<_>>();
-    if surface_ids.is_empty() && !state_ids.is_empty() {
-        surface_ids = state_ids.into_iter().collect();
-    }
-    if surface_ids.is_empty() && !map.surfaces.is_empty() {
-        surface_ids = map
-            .surfaces
-            .iter()
-            .map(|surface| surface.id.clone())
-            .collect();
-    }
-    surface_ids.sort();
-    surface_ids.dedup();
-    surface_ids
-}
-
-fn obligation_artifact_refs(
-    packet: &EvidencePacket,
-    verdicts: &[&Verdict],
-    findings: &[&Finding],
-) -> Vec<String> {
-    let state_ids = verdicts
-        .iter()
-        .flat_map(|verdict| verdict.affected_states.iter().cloned())
-        .chain(
-            findings
-                .iter()
-                .map(|finding| finding.affected_state.clone()),
-        )
-        .collect::<BTreeSet<_>>();
-    let mut refs = findings
-        .iter()
-        .flat_map(|finding| finding.artifact_refs.iter().cloned())
-        .collect::<Vec<_>>();
-    refs.extend(
-        packet
-            .artifacts
-            .iter()
-            .filter(|artifact| {
-                artifact
-                    .related_flow_state
-                    .as_ref()
-                    .is_some_and(|state| state_ids.contains(state))
-            })
-            .map(|artifact| artifact.id.clone()),
-    );
-    unique_strings(refs)
-}
-
-fn obligation_agentic_context(
-    map: &ProductMapPacket,
-    packet: &EvidencePacket,
-    findings: &[&Finding],
-) -> Vec<String> {
-    let mut context = findings
-        .iter()
-        .filter(|finding| finding.evidence_class == "agentic")
-        .map(|finding| finding.id.clone())
-        .collect::<Vec<_>>();
-    context.extend(packet.review.iter().map(|review| review.id.clone()));
-    if let Some(transcript) = &map.agent.transcript_path {
-        context.push(format!("map-agent-transcript:{transcript}"));
-    }
-    unique_strings(context)
-}
-
-fn obligation_why(
-    obligation: &str,
-    status: &str,
-    verdicts: &[&Verdict],
-    findings: &[&Finding],
-) -> String {
-    if let Some(finding) = findings.first() {
-        return format!("{}: {}", finding.title, finding.description);
-    }
-    match status {
-        "pass" => format!(
-            "{} is marked pass by {}.",
-            criterion_title(obligation),
-            verdicts
-                .first()
-                .map(|verdict| verdict.source.as_str())
-                .unwrap_or("the evidence packet")
-        ),
-        "needs_review" => format!(
-            "{} requires visual, assistive-technology, workflow, or content judgment beyond deterministic automation.",
-            criterion_title(obligation)
-        ),
-        "not_tested" => format!(
-            "{} has no deterministic, scripted, agentic, or human-attested evidence in this packet.",
-            criterion_title(obligation)
-        ),
-        "not_applicable" => applicability_reason(obligation),
-        _ => format!("{} has status {}.", criterion_title(obligation), status),
-    }
-}
-
-fn human_review_status(status: &str, evidence_class: &str) -> String {
-    match (status, evidence_class) {
-        ("pass", "deterministic") | ("pass", "scripted") => {
-            "not_required_for_machine_evidence".to_string()
-        }
-        ("pass", _) => "attested_or_promoted".to_string(),
-        ("fail", _) => "required_for_remediation_signoff".to_string(),
-        ("needs_review", _) => "required".to_string(),
-        ("not_tested", _) => "required_before_claim".to_string(),
-        ("not_applicable", _) => "not_required".to_string(),
-        _ => "review_status_unknown".to_string(),
-    }
-}
-
-fn criterion_source_url(obligation: &str) -> Option<String> {
+pub(crate) fn criterion_source_url(obligation: &str) -> Option<String> {
     wcag22_success_criteria()
         .into_iter()
         .find(|criterion| criterion["obligation"].as_str() == Some(obligation))
         .and_then(|criterion| criterion["source_url"].as_str().map(ToString::to_string))
 }
 
-fn criterion_coverage_matrix(
-    map: &ProductMapPacket,
-    packet: &EvidencePacket,
-) -> Vec<CriterionCoverageCell> {
-    if map.policy_profile != "wcag22-aa" {
-        return Vec::new();
-    }
-
-    let criteria = wcag22_success_criteria();
-    let mut cells = Vec::new();
-    for surface in &map.surfaces {
-        for state_id in surface_state_ids(surface, packet) {
-            for criterion in &criteria {
-                if let Some(cell) =
-                    criterion_coverage_cell(map, packet, surface, &state_id, criterion)
-                {
-                    cells.push(cell);
-                }
-            }
-        }
-    }
-    cells
-}
-
-fn aggregate_criteria_from_cells(
-    criteria: Vec<ComplianceObligation>,
-    cells: &[CriterionCoverageCell],
-) -> Vec<ComplianceObligation> {
-    criteria
-        .into_iter()
-        .map(|mut criterion| {
-            let criterion_cells = cells
-                .iter()
-                .filter(|cell| cell.criterion_id == criterion.id)
-                .collect::<Vec<_>>();
-            if criterion_cells.is_empty() {
-                return criterion;
-            }
-            criterion.status = aggregate_cell_status(&criterion_cells);
-            criterion.surfaces = unique_strings(
-                criterion_cells
-                    .iter()
-                    .map(|cell| cell.surface_id.clone())
-                    .collect::<Vec<_>>(),
-            );
-            criterion.tests = unique_strings(
-                criterion_cells
-                    .iter()
-                    .flat_map(|cell| cell.test_refs.iter().cloned())
-                    .collect::<Vec<_>>(),
-            );
-            criterion.artifact_refs = unique_strings(
-                criterion_cells
-                    .iter()
-                    .flat_map(|cell| cell.artifact_refs.iter().cloned())
-                    .collect::<Vec<_>>(),
-            );
-            criterion.agentic_context = unique_strings(
-                criterion_cells
-                    .iter()
-                    .flat_map(|cell| cell.agentic_refs.iter().cloned())
-                    .collect::<Vec<_>>(),
-            );
-            criterion.finding_refs = unique_strings(
-                criterion_cells
-                    .iter()
-                    .flat_map(|cell| cell.finding_refs.iter().cloned())
-                    .collect::<Vec<_>>(),
-            );
-            criterion.confidence = aggregate_cell_confidence(
-                &criterion.status,
-                &criterion_cells,
-                &criterion.confidence,
-            );
-            criterion.why = criterion_matrix_why(&criterion, &criterion_cells);
-            criterion
-        })
-        .collect()
-}
-
-fn aggregate_cell_confidence(
-    status: &str,
-    cells: &[&CriterionCoverageCell],
-    fallback: &str,
-) -> String {
-    cells
-        .iter()
-        .copied()
-        .find(|cell| cell.status == status)
-        .or_else(|| cells.first().copied())
-        .map(|cell| cell.confidence.clone())
-        .unwrap_or_else(|| fallback.to_string())
-}
-
-fn aggregate_cell_status(cells: &[&CriterionCoverageCell]) -> String {
-    if cells.iter().any(|cell| cell.status == "fail") {
-        "fail".to_string()
-    } else if cells.iter().any(|cell| cell.status == "needs_review") {
-        "needs_review".to_string()
-    } else if cells.iter().any(|cell| cell.status == "not_tested") {
-        "not_tested".to_string()
-    } else if cells.iter().any(|cell| cell.status == "risk_accepted") {
-        "risk_accepted".to_string()
-    } else if cells.iter().any(|cell| cell.status == "waived") {
-        "waived".to_string()
-    } else if cells.iter().all(|cell| cell.status == "not_applicable") {
-        "not_applicable".to_string()
-    } else {
-        "pass".to_string()
-    }
-}
-
-fn criterion_matrix_why(
-    criterion: &ComplianceObligation,
-    cells: &[&CriterionCoverageCell],
-) -> String {
-    let status = criterion.status.as_str();
-    let total = cells.len();
-    let with_evidence = cells
-        .iter()
-        .filter(|cell| {
-            !cell.evidence_refs.is_empty()
-                || !cell.agentic_refs.is_empty()
-                || !cell.waiver_refs.is_empty()
-        })
-        .count();
-    match status {
-        "fail" => format!(
-            "{} has failing evidence in at least one surface/state cell.",
-            criterion.title
-        ),
-        "needs_review" => format!(
-            "{} has {} of {} cell(s) requiring human or agentic review.",
-            criterion.title,
-            cells
-                .iter()
-                .filter(|cell| cell.status == "needs_review")
-                .count(),
-            total
-        ),
-        "not_tested" => format!(
-            "{} has no completed evidence in {} of {} cell(s).",
-            criterion.title,
-            cells
-                .iter()
-                .filter(|cell| cell.status == "not_tested")
-                .count(),
-            total
-        ),
-        "pass" => format!(
-            "{} has supporting evidence in {} of {} surface/state cell(s).",
-            criterion.title, with_evidence, total
-        ),
-        "not_applicable" => applicability_reason(&criterion.id),
-        _ => format!(
-            "{} has aggregate status {} across {} surface/state cell(s).",
-            criterion.title, status, total
-        ),
-    }
-}
-
-fn criterion_coverage_cell(
-    map: &ProductMapPacket,
-    packet: &EvidencePacket,
-    surface: &ProductSurface,
-    state_id: &str,
-    criterion: &serde_json::Value,
-) -> Option<CriterionCoverageCell> {
-    let criterion_id = criterion["obligation"].as_str()?;
-    let method = criterion["method"].as_str().unwrap_or("human_review");
-    let verdicts = packet
-        .verdicts
-        .iter()
-        .filter(|verdict| {
-            verdict.obligation == criterion_id && verdict_applies_to_state(verdict, state_id)
-        })
-        .collect::<Vec<_>>();
-    let findings = packet
-        .findings
-        .iter()
-        .filter(|finding| {
-            finding.standard_obligation == criterion_id && finding.affected_state == state_id
-        })
-        .collect::<Vec<_>>();
-    let deterministic_support = if method == "axe" {
-        let deterministic_support_id = deterministic_pass_obligation(&map.policy_profile);
-        packet.verdicts.iter().find(|verdict| {
-            verdict.obligation == deterministic_support_id
-                && verdict.status == "pass"
-                && verdict_applies_to_state(verdict, state_id)
-        })
-    } else {
-        None
-    };
-    let waiver_refs = waiver_refs_for_cell(packet, &surface.id, criterion_id);
-    let waiver_status = waiver_status_for_cell(packet, &surface.id, criterion_id);
-    let status = criterion_cell_status(
-        method,
-        &verdicts,
-        &findings,
-        deterministic_support,
-        waiver_status.as_deref(),
-    );
-    let finding_refs = findings
-        .iter()
-        .map(|finding| finding.id.clone())
-        .collect::<Vec<_>>();
-    let mut artifact_refs = obligation_artifact_refs(packet, &verdicts, &findings);
-    if artifact_refs.is_empty() && deterministic_support.is_some() {
-        artifact_refs = state_artifact_refs(packet, state_id);
-    }
-    let test_refs = unique_strings(
-        verdicts
-            .iter()
-            .map(|verdict| verdict.source.clone())
-            .chain(findings.iter().map(|finding| finding.source.clone()))
-            .chain(deterministic_support.map(|verdict| verdict.source.clone())),
-    );
-    let evidence_refs = unique_strings(
-        finding_refs
-            .iter()
-            .cloned()
-            .chain(artifact_refs.iter().cloned())
-            .chain(test_refs.iter().cloned()),
-    );
-    let agentic_refs = obligation_agentic_context(map, packet, &findings);
-    let confidence = if waiver_status.is_some() {
-        "human_attested".to_string()
-    } else {
-        verdicts
-            .iter()
-            .map(|verdict| verdict.confidence.clone())
-            .chain(findings.iter().map(|finding| finding.confidence.clone()))
-            .chain(deterministic_support.map(|verdict| verdict.confidence.clone()))
-            .next()
-            .unwrap_or_else(|| default_criterion_confidence(method).to_string())
-    };
-
-    Some(CriterionCoverageCell {
-        id: format!(
-            "{}|{}|{}|{}",
-            criterion_id, surface.id, state_id, map.policy_profile
-        ),
-        criterion_id: criterion_id.to_string(),
-        surface_id: surface.id.clone(),
-        state_id: state_id.to_string(),
-        policy_profile: map.policy_profile.clone(),
-        status: status.clone(),
-        applicability: if status == "not_applicable" {
-            "not_applicable".to_string()
-        } else {
-            "applicable".to_string()
-        },
-        method: method.to_string(),
-        confidence,
-        evidence_refs,
-        agentic_refs,
-        waiver_refs,
-        finding_refs,
-        artifact_refs,
-        test_refs,
-        replay_command: Some(packet.replay.command.clone()),
-        residual_review_need: residual_review_need(method, &status),
-    })
-}
-
-fn criterion_cell_status(
-    method: &str,
-    verdicts: &[&Verdict],
-    findings: &[&Finding],
-    deterministic_support: Option<&Verdict>,
-    waiver_status: Option<&str>,
-) -> String {
-    if waiver_status == Some("risk_accepted") {
-        "risk_accepted".to_string()
-    } else if waiver_status == Some("waived") {
-        "waived".to_string()
-    } else if findings.iter().any(|finding| finding.status == "fail")
-        || verdicts.iter().any(|verdict| verdict.status == "fail")
-    {
-        "fail".to_string()
-    } else if verdicts
-        .iter()
-        .any(|verdict| verdict.status == "not_applicable")
-    {
-        "not_applicable".to_string()
-    } else if verdicts
-        .iter()
-        .any(|verdict| verdict.status == "needs_review")
-        || findings
-            .iter()
-            .any(|finding| finding.status == "needs_review")
-    {
-        "needs_review".to_string()
-    } else if verdicts.iter().any(|verdict| verdict.status == "pass")
-        || method == "axe" && deterministic_support.is_some()
-    {
-        "pass".to_string()
-    } else if method == "human_review" {
-        "needs_review".to_string()
-    } else {
-        "needs_review".to_string()
-    }
-}
-
-fn default_criterion_confidence(method: &str) -> &'static str {
-    match method {
-        "axe" => "not_observed",
-        "scripted" => "script_observed",
-        _ => "requires_human_or_agent_review",
-    }
-}
-
-fn residual_review_need(method: &str, status: &str) -> String {
+pub(crate) fn residual_review_need(method: &str, status: &str) -> String {
     match status {
         "pass" if method == "axe" => {
             "Deterministic evidence is present; sample with human review if policy requires."
@@ -3601,373 +2723,14 @@ fn residual_review_need(method: &str, status: &str) -> String {
     }
 }
 
-fn verdict_applies_to_state(verdict: &Verdict, state_id: &str) -> bool {
-    verdict.affected_states.is_empty()
-        || verdict
-            .affected_states
-            .iter()
-            .any(|affected| affected == state_id)
-}
-
-fn surface_state_ids(surface: &ProductSurface, packet: &EvidencePacket) -> Vec<String> {
-    let mut states = surface
-        .evidence_refs
-        .iter()
-        .filter(|state| !state.trim().is_empty())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    for state in &packet.coverage.state_metadata {
-        if surface.routes.contains(&state.route) || surface.id == state.id {
-            states.insert(state.id.clone());
-        }
-    }
-    if states.is_empty() && !surface.id.trim().is_empty() {
-        states.insert(surface.id.clone());
-    }
-    if states.is_empty() {
-        states.extend(packet.coverage.states_captured.iter().cloned());
-    }
-    states.into_iter().collect()
-}
-
-fn state_artifact_refs(packet: &EvidencePacket, state_id: &str) -> Vec<String> {
-    packet
-        .artifacts
-        .iter()
-        .filter(|artifact| artifact.related_flow_state.as_deref() == Some(state_id))
-        .map(|artifact| artifact.id.clone())
-        .collect()
-}
-
-fn waiver_refs_for_cell(
-    packet: &EvidencePacket,
-    surface_id: &str,
-    criterion_id: &str,
-) -> Vec<String> {
-    matching_cell_waivers(packet, surface_id, criterion_id)
+pub(crate) fn wcag22_success_criterion_ids() -> BTreeSet<String> {
+    wcag22_success_criteria()
         .into_iter()
-        .filter_map(|waiver| waiver["id"].as_str().map(ToString::to_string))
+        .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
         .collect()
 }
 
-fn waiver_status_for_cell(
-    packet: &EvidencePacket,
-    surface_id: &str,
-    criterion_id: &str,
-) -> Option<String> {
-    let statuses = matching_cell_waivers(packet, surface_id, criterion_id)
-        .into_iter()
-        .filter_map(|waiver| waiver["status"].as_str())
-        .collect::<Vec<_>>();
-    if statuses.contains(&"risk_accepted") {
-        Some("risk_accepted".to_string())
-    } else if statuses.contains(&"waived") {
-        Some("waived".to_string())
-    } else {
-        None
-    }
-}
-
-fn matching_cell_waivers<'a>(
-    packet: &'a EvidencePacket,
-    surface_id: &str,
-    criterion_id: &str,
-) -> Vec<&'a serde_json::Value> {
-    packet
-        .waivers
-        .iter()
-        .filter(|waiver| waiver["surface"].as_str() == Some(surface_id))
-        .filter(|waiver| {
-            let standard = waiver["standard_obligation"]
-                .as_str()
-                .or_else(|| waiver["obligation"].as_str())
-                .or_else(|| waiver["criterion_id"].as_str());
-            standard.is_none() || standard == Some(criterion_id)
-        })
-        .collect()
-}
-
-fn validate_criterion_coverage_cells(
-    report: &serde_json::Value,
-) -> std::result::Result<(), String> {
-    let Some(cells) = report["criterion_coverage"].as_array() else {
-        return Err("criterion_coverage must be an array".to_string());
-    };
-    let mut cell_keys = BTreeSet::new();
-    for cell in cells {
-        for field in [
-            "criterion_id",
-            "surface_id",
-            "state_id",
-            "policy_profile",
-            "status",
-            "applicability",
-            "method",
-            "confidence",
-            "residual_review_need",
-        ] {
-            if cell[field]
-                .as_str()
-                .is_none_or(|value| value.trim().is_empty())
-            {
-                return Err(format!("criterion coverage cell missing {field}"));
-            }
-        }
-        for field in [
-            "evidence_refs",
-            "agentic_refs",
-            "waiver_refs",
-            "finding_refs",
-            "artifact_refs",
-            "test_refs",
-        ] {
-            if !cell[field].is_array() {
-                return Err(format!("criterion coverage cell missing {field}"));
-            }
-        }
-        let status = cell["status"].as_str().unwrap_or_default();
-        if matches!(status, "pass" | "fail" | "waived" | "risk_accepted")
-            && !cell_has_provenance(cell)
-        {
-            return Err(format!(
-                "terminal criterion coverage cell lacks provenance: {}",
-                cell["criterion_id"].as_str().unwrap_or("unknown")
-            ));
-        }
-        let key = coverage_cell_key(cell)?;
-        if !cell_keys.insert(key.clone()) {
-            return Err(format!("duplicate criterion coverage cell: {key}"));
-        }
-    }
-    validate_criterion_coverage_completeness(report, &cell_keys)?;
-    Ok(())
-}
-
-fn coverage_cell_key(cell: &serde_json::Value) -> std::result::Result<String, String> {
-    Ok(format!(
-        "{}|{}|{}|{}",
-        cell["criterion_id"]
-            .as_str()
-            .ok_or_else(|| "criterion coverage cell missing criterion_id".to_string())?,
-        cell["surface_id"]
-            .as_str()
-            .ok_or_else(|| "criterion coverage cell missing surface_id".to_string())?,
-        cell["state_id"]
-            .as_str()
-            .ok_or_else(|| "criterion coverage cell missing state_id".to_string())?,
-        cell["policy_profile"]
-            .as_str()
-            .ok_or_else(|| "criterion coverage cell missing policy_profile".to_string())?
-    ))
-}
-
-fn validate_criterion_coverage_completeness(
-    report: &serde_json::Value,
-    cell_keys: &BTreeSet<String>,
-) -> std::result::Result<(), String> {
-    let Some(criteria) = report["criteria"].as_array() else {
-        return Ok(());
-    };
-    let Some(surfaces) = report["surfaces"].as_array() else {
-        return Ok(());
-    };
-    let criterion_ids = criteria
-        .iter()
-        .filter_map(|criterion| criterion["id"].as_str())
-        .collect::<Vec<_>>();
-    let policy_profile = report["criterion_coverage"]
-        .as_array()
-        .and_then(|cells| cells.first())
-        .and_then(|cell| cell["policy_profile"].as_str())
-        .unwrap_or("wcag22-aa");
-    for surface in surfaces {
-        let Some(surface_id) = surface["surface_id"].as_str() else {
-            continue;
-        };
-        let states = surface["states"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|state| state.as_str())
-            .collect::<Vec<_>>();
-        for criterion_id in &criterion_ids {
-            for state_id in &states {
-                let key = format!("{criterion_id}|{surface_id}|{state_id}|{policy_profile}");
-                if !cell_keys.contains(&key) {
-                    return Err(format!("missing criterion coverage cell: {key}"));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn cell_has_provenance(cell: &serde_json::Value) -> bool {
-    [
-        "evidence_refs",
-        "agentic_refs",
-        "waiver_refs",
-        "finding_refs",
-        "artifact_refs",
-        "test_refs",
-    ]
-    .iter()
-    .any(|field| {
-        cell[*field]
-            .as_array()
-            .is_some_and(|values| !values.is_empty())
-    })
-}
-
-fn compliance_summary(
-    packet: &EvidencePacket,
-    criteria: &[ComplianceObligation],
-    supporting_check_count: usize,
-) -> ComplianceSummary {
-    let pass = criteria
-        .iter()
-        .filter(|obligation| obligation.status == "pass")
-        .count();
-    let fail = criteria
-        .iter()
-        .filter(|obligation| obligation.status == "fail")
-        .count();
-    let needs_review = criteria
-        .iter()
-        .filter(|obligation| obligation.status == "needs_review")
-        .count();
-    let not_tested = criteria
-        .iter()
-        .filter(|obligation| obligation.status == "not_tested")
-        .count();
-    let not_applicable = criteria
-        .iter()
-        .filter(|obligation| obligation.status == "not_applicable")
-        .count();
-    let waived = criteria
-        .iter()
-        .filter(|obligation| obligation.status == "waived")
-        .count();
-    let risk_accepted = criteria
-        .iter()
-        .filter(|obligation| obligation.status == "risk_accepted")
-        .count();
-    let ai_pass = criteria
-        .iter()
-        .filter(|obligation| obligation.status == "pass" && is_agentic_verdict(obligation))
-        .count();
-    let ai_fail = criteria
-        .iter()
-        .filter(|obligation| obligation.status == "fail" && is_agentic_verdict(obligation))
-        .count();
-    let status = if packet.summary.status == "error" {
-        "error"
-    } else if fail > 0 {
-        "fail"
-    } else if needs_review > 0 || not_tested > 0 || waived > 0 || risk_accepted > 0 {
-        "needs_review"
-    } else {
-        "pass"
-    };
-    ComplianceSummary {
-        status: status.to_string(),
-        total_obligations: criteria.len(),
-        pass,
-        fail,
-        needs_review,
-        not_tested,
-        not_applicable,
-        waived,
-        risk_accepted,
-        ai_pass,
-        ai_fail,
-        total_success_criteria: criteria.len(),
-        total_supporting_checks: supporting_check_count,
-        evidence_packet_status: packet.summary.status.clone(),
-    }
-}
-
-fn compliance_surface_report(
-    surface: &ProductSurface,
-    packet: &EvidencePacket,
-    criteria: &[ComplianceObligation],
-    cells: &[CriterionCoverageCell],
-) -> ComplianceSurfaceReport {
-    let surface_cells = cells
-        .iter()
-        .filter(|cell| cell.surface_id == surface.id)
-        .collect::<Vec<_>>();
-    let surface_criteria = criteria
-        .iter()
-        .filter(|obligation| obligation.surfaces.contains(&surface.id))
-        .collect::<Vec<_>>();
-    let criterion_ids = criteria
-        .iter()
-        .filter(|obligation| obligation.surfaces.contains(&surface.id))
-        .map(|obligation| obligation.id.clone())
-        .collect::<Vec<_>>();
-    let cell_ids = surface_cells
-        .iter()
-        .map(|cell| cell.id.clone())
-        .collect::<Vec<_>>();
-    let state_ids = unique_strings(surface_cells.iter().map(|cell| cell.state_id.clone()));
-    let finding_refs = packet
-        .findings
-        .iter()
-        .filter(|finding| {
-            surface.evidence_refs.contains(&finding.affected_state)
-                || surface.routes.contains(&finding.affected_route)
-        })
-        .map(|finding| finding.id.clone())
-        .collect::<Vec<_>>();
-    let status = if surface_cells.is_empty() {
-        surface_status_from_criteria(&surface_criteria)
-    } else {
-        surface_status_from_cells(&surface_cells)
-    };
-    ComplianceSurfaceReport {
-        surface_id: surface.id.clone(),
-        title: surface.title.clone(),
-        routes: surface.routes.clone(),
-        states: state_ids,
-        status: status.to_string(),
-        criteria: criterion_ids,
-        cells: cell_ids,
-        finding_refs,
-    }
-}
-
-fn surface_status_from_cells(cells: &[&CriterionCoverageCell]) -> &'static str {
-    if cells.iter().any(|cell| cell.status == "fail") {
-        "fail"
-    } else if cells.iter().any(|cell| {
-        matches!(
-            cell.status.as_str(),
-            "needs_review" | "not_tested" | "waived" | "risk_accepted"
-        )
-    }) {
-        "needs_review"
-    } else {
-        "pass"
-    }
-}
-
-fn surface_status_from_criteria(criteria: &[&ComplianceObligation]) -> &'static str {
-    if criteria.iter().any(|criterion| criterion.status == "fail") {
-        "fail"
-    } else if criteria.iter().any(|criterion| {
-        matches!(
-            criterion.status.as_str(),
-            "needs_review" | "not_tested" | "waived" | "risk_accepted"
-        )
-    }) {
-        "needs_review"
-    } else {
-        "pass"
-    }
-}
-
-fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
+pub(crate) fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut output = Vec::new();
     for value in values {
@@ -3976,563 +2739,6 @@ fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
         }
     }
     output
-}
-
-const REPORT_CSS: &str = r#"
-*{box-sizing:border-box}
-body{margin:0;color:#1a1d24;background:#eef1f6;font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
-main{width:min(100% - 32px,1080px);margin:0 auto;padding:34px 0 90px}
-a{color:#3450c4;text-decoration:none}
-a:hover{text-decoration:underline}
-:focus-visible{outline:2px solid #3450c4;outline-offset:2px;border-radius:4px}
-code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}
-.eyebrow{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:#5a6473;font-weight:700;margin:0 0 8px}
-h1{margin:0;font-size:34px;line-height:1.08;letter-spacing:-.02em}
-.sub{color:#5a6473;margin:8px 0 0;font-size:13px}
-.banner{margin:24px 0 6px;padding:18px 22px;border-radius:16px;border:1px solid;display:flex;gap:15px;align-items:center}
-.banner .dot{width:13px;height:13px;border-radius:50%;flex:none}
-.banner h2{margin:0;font-size:18px;letter-spacing:-.01em}
-.banner p{margin:3px 0 0;font-size:13.5px;opacity:.88}
-.b-fail{background:#fbe9e7;border-color:#f3c8c2}
-.b-review{background:#fbf3e1;border-color:#efdcb0}
-.b-pass{background:#e6f4ec;border-color:#c2e3d0}
-.scorecard{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:20px 0 6px}
-.score{background:#fff;border:1px solid #e4e8ef;border-radius:13px;padding:14px 16px}
-.score .n{font-size:27px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.score .k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#5a6473;margin-top:3px}
-.score.zero .n{color:#1a9457}
-.bar{height:11px;border-radius:7px;overflow:hidden;display:flex;border:1px solid #e4e8ef;margin:8px 0 4px;background:#fff}
-.bar i{display:block;height:100%}
-.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#5a6473;margin:0 0 6px}
-.legend span{display:inline-flex;align-items:center;gap:6px}
-.legend b{width:10px;height:10px;border-radius:3px;display:inline-block}
-section{margin:38px 0}
-.sh{font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:#5a6473;margin:0 0 16px;font-weight:700}
-.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
-figure{margin:0;background:#fff;border:1px solid #e4e8ef;border-radius:13px;overflow:hidden}
-figure img{display:block;width:100%;height:auto;border-bottom:1px solid #e4e8ef;background:#f4f5f8}
-figure video{display:block;width:100%;height:auto;border-bottom:1px solid #e4e8ef;background:#000}
-figcaption{padding:11px 13px;font-size:12.5px;color:#5a6473}
-.principle{margin:24px 0}
-.principle h3{font-size:19px;margin:0 0 2px;letter-spacing:-.01em}
-.principle .pmeta{color:#5a6473;font-size:12.5px;margin:0 0 14px}
-.crit{background:#fff;border:1px solid #e4e8ef;border-left:4px solid #c7ced9;border-radius:13px;padding:16px 18px;margin:11px 0}
-.crit.s-pass{border-left-color:#1a9457}
-.crit.s-fail{border-left-color:#d23b30}
-.crit.s-review{border-left-color:#d39a2a}
-.crit.s-na{border-left-color:#9aa6b6}
-.crit.s-nottested{border-left-color:#8b5cf6}
-.crit-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}
-.crit-id{font-weight:600;font-size:15.5px;letter-spacing:-.01em}
-.crit-id .num{color:#5a6473;font-variant-numeric:tabular-nums;margin-right:9px}
-.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.chip{font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;letter-spacing:.02em}
-.chip-pass{background:#e6f4ec;color:#0f6b3c}
-.chip-fail{background:#fbe9e7;color:#b3271d}
-.chip-review{background:#fbf0db;color:#875400}
-.chip-na{background:#eceff4;color:#4a5566}
-.chip-nottested{background:#efe6fb;color:#6d28b8}
-.chip-method{background:#eef1f7;color:#42506a}
-.chip-level{background:#eef1f7;color:#5a6473}
-.chip-ai{box-shadow:inset 0 0 0 1px rgba(0,0,0,.16)}
-.chip sup{font-size:.72em;font-weight:800;margin-left:1px}
-.why{margin:11px 0 0;color:#39414f;font-size:14px}
-.crit-foot{margin-top:12px;display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:#5a6473;align-items:center}
-.ai{margin-top:13px;border:1px solid #e3e7f3;border-radius:11px;background:#f7f8fd;padding:13px 15px}
-.ai-h{display:flex;gap:8px;align-items:center;font-size:11.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#3f4b8a}
-.ai-h .v{margin-left:auto;font-weight:700}
-.ai p{margin:8px 0 0;font-size:13.5px;color:#2c3340}
-.ai .guide{margin-top:9px;padding:10px 12px;background:#fff;border:1px solid #e7eaf2;border-radius:9px;font-size:13px}
-.ai .guide b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#5a6473;margin-bottom:3px}
-.ai-media{display:flex;gap:10px;flex-wrap:wrap;margin-top:11px}
-.ai-media figure{max-width:260px}
-.pending{margin-top:13px;border:1px dashed #d7deea;border-radius:11px;background:#fafbfd;padding:11px 14px;color:#6b7280;font-size:13px}
-.matrix-wrap>summary{cursor:pointer;font-weight:700;color:#3450c4;padding:10px 0;font-size:13.5px}
-table.matrix{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
-table.matrix th,table.matrix td{border-bottom:1px solid #e9edf3;padding:8px 10px;text-align:left;vertical-align:top}
-table.matrix th{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#5a6473;position:sticky;top:0;background:#fff}
-.foot{margin-top:46px;color:#5a6473;font-size:12.5px;border-top:1px solid #e1e6ef;padding-top:16px}
-@media(max-width:840px){.scorecard{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:560px){.scorecard{grid-template-columns:repeat(2,1fr)}h1{font-size:27px}}
-"#;
-
-fn cr_status_suffix(status: &str) -> &'static str {
-    match status {
-        "pass" => "pass",
-        "fail" => "fail",
-        "needs_review" => "review",
-        "not_applicable" | "waived" | "risk_accepted" => "na",
-        "not_tested" => "nottested",
-        _ => "na",
-    }
-}
-
-fn cr_status_label(status: &str) -> String {
-    match status {
-        "pass" => "Pass".to_string(),
-        "fail" => "Fail".to_string(),
-        "needs_review" => "Needs review".to_string(),
-        "not_applicable" => "Not applicable".to_string(),
-        "not_tested" => "Not tested".to_string(),
-        "waived" => "Waived".to_string(),
-        "risk_accepted" => "Risk accepted".to_string(),
-        other => pretty_token(other),
-    }
-}
-
-fn pretty_token(value: &str) -> String {
-    let spaced = value.replace(['_', '-'], " ");
-    let mut chars = spaced.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => spaced,
-    }
-}
-
-fn cr_status_chip(status: &str) -> String {
-    format!(
-        "<span class=\"chip chip-{}\">{}</span>",
-        cr_status_suffix(status),
-        escape_html(&cr_status_label(status))
-    )
-}
-
-/// True when a criterion's pass/fail verdict came from the agentic reviewer
-/// rather than a deterministic check — shown with an asterisk so it is never
-/// mistaken for a machine-proven result. Keyed off the same `agentic_review`
-/// value that renders the evidence block, so the asterisk and the evidence can
-/// never diverge: a marked verdict always has its AI evidence, and vice versa.
-fn is_agentic_verdict(obligation: &ComplianceObligation) -> bool {
-    matches!(
-        obligation
-            .agentic_review
-            .as_ref()
-            .map(|r| r.assessment.as_str()),
-        Some("pass" | "fail")
-    ) && (obligation.status == "pass" || obligation.status == "fail")
-}
-
-/// Status chip that adds an asterisk for agentic pass/fail verdicts.
-fn cr_status_chip_marked(obligation: &ComplianceObligation) -> String {
-    if is_agentic_verdict(obligation) {
-        format!(
-            "<span class=\"chip chip-{} chip-ai\" title=\"AI reviewer's determination from the visual evidence shown below — not a machine-proven check or a human sign-off\">{}<sup>*</sup></span>",
-            cr_status_suffix(&obligation.status),
-            escape_html(&cr_status_label(&obligation.status)),
-        )
-    } else {
-        cr_status_chip(&obligation.status)
-    }
-}
-
-fn cr_method_label(evidence_class: &str) -> Option<&'static str> {
-    match evidence_class {
-        "deterministic" => Some("Automated · axe"),
-        "scripted" => Some("Scripted"),
-        "agentic" => Some("AI review"),
-        "human" => Some("Needs human"),
-        "applicability" => Some("Applicability"),
-        _ => None,
-    }
-}
-
-fn cr_method_chip(evidence_class: &str) -> String {
-    match cr_method_label(evidence_class) {
-        Some(label) => format!(
-            "<span class=\"chip chip-method\">{}</span>",
-            escape_html(label)
-        ),
-        None => String::new(),
-    }
-}
-
-fn cr_media(media: &[EvidenceMedia]) -> String {
-    if media.is_empty() {
-        return String::new();
-    }
-    let figures = media
-        .iter()
-        .filter_map(|item| {
-            let uri = item.data_uri.as_ref()?;
-            let inner = if matches!(item.kind.as_str(), "clip" | "video" | "video_clip") {
-                format!(
-                    "<video src=\"{}\" autoplay loop muted playsinline controls></video>",
-                    escape_html(uri)
-                )
-            } else {
-                format!(
-                    "<img loading=\"lazy\" src=\"{}\" alt=\"{}\">",
-                    escape_html(uri),
-                    escape_html(&item.caption)
-                )
-            };
-            Some(format!(
-                "<figure>{}<figcaption>{}</figcaption></figure>",
-                inner,
-                escape_html(&item.caption)
-            ))
-        })
-        .collect::<Vec<_>>()
-        .join("");
-    if figures.is_empty() {
-        String::new()
-    } else {
-        format!("<div class=\"ai-media\">{figures}</div>")
-    }
-}
-
-fn cr_agentic_block(obligation: &ComplianceObligation) -> String {
-    if let Some(review) = &obligation.agentic_review {
-        let guide = if review.reviewer_guidance.trim().is_empty() {
-            String::new()
-        } else {
-            format!(
-                "<div class=\"guide\"><b>For the human reviewer</b>{}</div>",
-                escape_html(&review.reviewer_guidance)
-            )
-        };
-        format!(
-            "<div class=\"ai\"><div class=\"ai-h\">AI reviewer verdict <span class=\"v\">{verdict} · {confidence} confidence</span></div><p>{rationale}</p>{guide}{media}<p class=\"sub\" style=\"margin-top:9px\">{provider} · {model}</p></div>",
-            verdict = escape_html(&pretty_token(&review.assessment)),
-            confidence = escape_html(&pretty_token(&review.confidence)),
-            rationale = escape_html(&review.rationale),
-            guide = guide,
-            media = cr_media(&review.media),
-            provider = escape_html(&review.provider),
-            model = escape_html(&review.model),
-        )
-    } else if matches!(obligation.evidence_class.as_str(), "human" | "agentic")
-        || obligation.status == "needs_review"
-    {
-        "<div class=\"pending\">Agentic review pending — this criterion needs visual or contextual judgment; the AI reviewer will attach a screenshot, assessment, and reviewer guidance here.</div>".to_string()
-    } else {
-        String::new()
-    }
-}
-
-fn cr_criterion_card(obligation: &ComplianceObligation) -> String {
-    let level = if obligation.level.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "<span class=\"chip chip-level\">Level {}</span>",
-            escape_html(&obligation.level)
-        )
-    };
-    let source = obligation
-        .source_url
-        .as_ref()
-        .map(|url| {
-            format!(
-                " · <a href=\"{}\" rel=\"noreferrer\">WCAG reference ↗</a>",
-                escape_html(url)
-            )
-        })
-        .unwrap_or_default();
-    let (num, title) = split_criterion_title(&obligation.title);
-    format!(
-        "<article class=\"crit s-{suffix}\"><div class=\"crit-head\"><div class=\"crit-id\"><span class=\"num\">{num}</span>{title}</div><div class=\"chips\">{level}{method}{status}</div></div><p class=\"why\">{why}</p>{ai}<div class=\"crit-foot\"><span>Confidence: {confidence}</span><span>{review}{source}</span></div></article>",
-        suffix = cr_status_suffix(&obligation.status),
-        num = escape_html(&num),
-        title = escape_html(&title),
-        level = level,
-        method = cr_method_chip(&obligation.evidence_class),
-        status = cr_status_chip_marked(obligation),
-        why = escape_html(&obligation.why),
-        ai = cr_agentic_block(obligation),
-        confidence = escape_html(&pretty_token(&obligation.confidence)),
-        review = escape_html(&pretty_token(&obligation.human_review)),
-        source = source,
-    )
-}
-
-fn split_criterion_title(title: &str) -> (String, String) {
-    match title.split_once(' ') {
-        Some((num, rest)) if num.chars().all(|c| c.is_ascii_digit() || c == '.') => {
-            (num.to_string(), rest.to_string())
-        }
-        _ => (String::new(), title.to_string()),
-    }
-}
-
-fn cr_principle_sections(criteria: &[ComplianceObligation]) -> String {
-    const ORDER: [&str; 4] = ["Perceivable", "Operable", "Understandable", "Robust"];
-    let mut sections = String::new();
-    for principle in ORDER {
-        let rows = criteria
-            .iter()
-            .filter(|criterion| criterion.principle == principle)
-            .collect::<Vec<_>>();
-        if rows.is_empty() {
-            continue;
-        }
-        let pass = rows.iter().filter(|row| row.status == "pass").count();
-        let cards = rows
-            .iter()
-            .map(|row| cr_criterion_card(row))
-            .collect::<Vec<_>>()
-            .join("");
-        sections.push_str(&format!(
-            "<div class=\"principle\"><h3>{principle}</h3><p class=\"pmeta\">{total} criteria · {pass} passing</p>{cards}</div>",
-            principle = escape_html(principle),
-            total = rows.len(),
-            pass = pass,
-            cards = cards,
-        ));
-    }
-    sections
-}
-
-fn cr_state_gallery(states: &[StateEvidence]) -> String {
-    let figures = states
-        .iter()
-        .map(|state| {
-            let img = state
-                .media
-                .iter()
-                .find_map(|item| item.data_uri.as_ref())
-                .map(|uri| {
-                    format!(
-                        "<img loading=\"lazy\" src=\"{}\" alt=\"Screenshot of {} state\">",
-                        escape_html(uri),
-                        escape_html(&state.id)
-                    )
-                })
-                .unwrap_or_default();
-            let focus = if state.keyboard_focus_order.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "<br>Tab order: {}",
-                    escape_html(&state.keyboard_focus_order.join(" → "))
-                )
-            };
-            format!(
-                "<figure>{img}<figcaption><strong>{id}</strong> · <code>{route}</code><br>{title}{focus}</figcaption></figure>",
-                img = img,
-                id = escape_html(&state.id),
-                route = escape_html(&state.route),
-                title = escape_html(&state.title),
-                focus = focus,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
-    if figures.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "<section><h2 class=\"sh\">What Allie inspected</h2><div class=\"gallery\">{figures}</div></section>"
-        )
-    }
-}
-
-fn cr_matrix_rows(cells: &[CriterionCoverageCell]) -> String {
-    cells
-        .iter()
-        .map(|cell| {
-            format!(
-                "<tr><td><code>{criterion}</code><br>{surface} · {state}</td><td>{status}</td><td>{applicability}</td><td>{method}</td><td>{confidence}</td><td>{residual}</td></tr>",
-                criterion = escape_html(&cell.criterion_id),
-                surface = escape_html(&cell.surface_id),
-                state = escape_html(&cell.state_id),
-                status = cr_status_chip(&cell.status),
-                applicability = escape_html(&pretty_token(&cell.applicability)),
-                method = escape_html(&pretty_token(&cell.method)),
-                confidence = escape_html(&pretty_token(&cell.confidence)),
-                residual = escape_html(&cell.residual_review_need),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("")
-}
-
-fn cr_supporting_checks(checks: &[ComplianceSupportingCheck]) -> String {
-    if checks.is_empty() {
-        return String::new();
-    }
-    let cards = checks
-        .iter()
-        .map(|check| {
-            let related = if check.related_criteria.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "<div class=\"crit-foot\"><span>Covers {} criteria: <code>{}</code></span></div>",
-                    check.related_criteria.len(),
-                    escape_html(&check.related_criteria.join(", "))
-                )
-            };
-            format!(
-                "<article class=\"crit s-{suffix}\"><div class=\"crit-head\"><div class=\"crit-id\">{title}<br><code style=\"font-size:11px;color:#5a6473\">{id}</code></div><div class=\"chips\">{method}{status}</div></div><p class=\"why\">{why}</p>{related}</article>",
-                suffix = cr_status_suffix(&check.status),
-                title = escape_html(&check.title),
-                id = escape_html(&check.id),
-                method = cr_method_chip(&check.evidence_class),
-                status = cr_status_chip(&check.status),
-                why = escape_html(&check.why),
-                related = related,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
-    format!(
-        "<section><h2 class=\"sh\">Supporting checks</h2><p class=\"sub\" style=\"margin:0 0 14px\">Cross-cutting evidence passes that back the individual criteria above.</p>{cards}</section>"
-    )
-}
-
-fn render_compliance_report(report: &ComplianceReportPacket) -> String {
-    let s = &report.summary;
-    let banner_class = match s.status.as_str() {
-        "fail" | "blocked" => "b-fail",
-        "pass" | "approved" => "b-pass",
-        _ => "b-review",
-    };
-    let total = s.total_obligations.max(1);
-    // How many pass/fail verdicts came from the AI reviewer (asterisked); derived
-    // by compliance_summary alongside the other counts, not re-filtered here.
-    let (ai_pass, ai_fail) = (s.ai_pass, s.ai_fail);
-    let ai_total = ai_pass + ai_fail;
-    let seg = |count: usize, color: &str| -> String {
-        if count == 0 {
-            String::new()
-        } else {
-            format!(
-                "<i style=\"width:{:.3}%;background:{}\"></i>",
-                count as f64 / total as f64 * 100.0,
-                color
-            )
-        }
-    };
-    let bar = format!(
-        "{}{}{}{}{}",
-        seg(s.pass, "#1a9457"),
-        seg(s.fail, "#d23b30"),
-        seg(s.needs_review, "#d8a32f"),
-        seg(s.not_applicable, "#aab4c2"),
-        seg(s.not_tested, "#8b5cf6"),
-    );
-    let score = |n: usize, k: &str, zero_good: bool| -> String {
-        let cls = if zero_good && n == 0 {
-            "score zero"
-        } else {
-            "score"
-        };
-        format!(
-            "<div class=\"{cls}\"><div class=\"n\">{n}</div><div class=\"k\">{k}</div></div>",
-            cls = cls,
-            n = n,
-            k = k
-        )
-    };
-
-    let mut html = String::new();
-    html.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Allie · ");
-    html.push_str(&escape_html(&report.app_name));
-    html.push_str(" accessibility evidence</title>\n<style>");
-    html.push_str(REPORT_CSS);
-    html.push_str("</style>\n</head>\n<body>\n<main>\n");
-    html.push_str(&format!(
-        "<p class=\"eyebrow\">Allie · accessibility release evidence</p><h1>{app}</h1><p class=\"sub\">WCAG 2.2 A/AA · generated {generated} · evidence visibility, not a legal compliance guarantee</p>",
-        app = escape_html(&report.app_name),
-        generated = escape_html(&report.generated_at),
-    ));
-    html.push_str(&format!(
-        "<div class=\"banner {bcls}\"><span class=\"dot\" style=\"background:{dot}\"></span><div><h2>Status: {status}</h2><p>{pass} passing · {fail} failing · {review} need review · {na} not applicable · {nt} not tested across {total} success criteria.</p>{aip}</div></div>",
-        bcls = banner_class,
-        dot = match s.status.as_str() { "fail" | "blocked" => "#d23b30", "pass" | "approved" => "#1a9457", _ => "#d8a32f" },
-        status = escape_html(&cr_status_label(&s.status)),
-        pass = s.pass, fail = s.fail, review = s.needs_review, na = s.not_applicable, nt = s.not_tested,
-        total = s.total_obligations,
-        aip = if ai_total > 0 {
-            format!("<p class=\"sub\" style=\"margin:6px 0 0\">{ai_total} of these are <b>AI-reviewed verdicts</b> (marked <sup>*</sup>): the agentic reviewer judged the page from screenshots and clips the way a human reviewer would, with the evidence attached under each criterion. {ai_pass} pass<sup>*</sup>, {ai_fail} fail<sup>*</sup>.</p>")
-        } else {
-            String::new()
-        },
-    ));
-    html.push_str("<div class=\"scorecard\">");
-    html.push_str(&score(s.pass, "Pass", false));
-    html.push_str(&score(s.fail, "Fail", false));
-    html.push_str(&score(s.needs_review, "Needs review", false));
-    html.push_str(&score(s.not_applicable, "Not applicable", false));
-    html.push_str(&score(s.not_tested, "Not tested", true));
-    if ai_total > 0 {
-        html.push_str(&score(ai_total, "AI-reviewed *", false));
-    }
-    html.push_str(&score(s.total_obligations, "Criteria", false));
-    html.push_str("</div>");
-    html.push_str(&format!("<div class=\"bar\">{bar}</div>"));
-    html.push_str("<div class=\"legend\"><span><b style=\"background:#1a9457\"></b>Pass</span><span><b style=\"background:#d23b30\"></b>Fail</span><span><b style=\"background:#d8a32f\"></b>Needs review</span><span><b style=\"background:#aab4c2\"></b>Not applicable</span><span><b style=\"background:#8b5cf6\"></b>Not tested</span></div>");
-    if ai_total > 0 {
-        html.push_str("<p class=\"sub\" style=\"margin:10px 0 0\"><sup>*</sup> <b>AI-reviewed verdict</b>: the agentic vision reviewer's pass/fail call from the attached visual evidence, shown with its confidence — a judgment call, not a machine-proven check or a human sign-off. Screenshots and clips are inlined under each criterion so a human can confirm or override.</p>");
-    }
-
-    html.push_str(&cr_state_gallery(&report.state_evidence));
-
-    html.push_str("<section><h2 class=\"sh\">WCAG 2.2 success criteria</h2>");
-    html.push_str(&cr_principle_sections(&report.criteria));
-    html.push_str("</section>");
-
-    html.push_str(&cr_supporting_checks(&report.supporting_checks));
-
-    if !report.criterion_coverage.is_empty() {
-        html.push_str(&format!(
-            "<section><details class=\"matrix-wrap\"><summary>Criterion coverage matrix — {} cells (criterion · surface · state drilldown)</summary><table class=\"matrix\"><thead><tr><th>Criterion · surface · state</th><th>Status</th><th>Applicability</th><th>Method</th><th>Confidence</th><th>Residual review</th></tr></thead><tbody>{}</tbody></table></details></section>",
-            report.criterion_coverage.len(),
-            cr_matrix_rows(&report.criterion_coverage),
-        ));
-    }
-
-    let replay = report
-        .criterion_coverage
-        .iter()
-        .find_map(|cell| cell.replay_command.clone())
-        .filter(|command| !command.is_empty());
-    let reproduce = replay
-        .map(|command| {
-            format!(
-                "Reproduce this run: <code>{}</code>. ",
-                escape_html(&command)
-            )
-        })
-        .unwrap_or_default();
-    html.push_str(&format!(
-        "<p class=\"foot\">{reproduce}Source packet <code>{packet}</code> · source map <code>{map}</code>. Allie reports evidence, status, confidence, and residual review needs. It does not claim legal compliance and is not a replacement for expert or lived accessibility review — evidence visibility, not a legal compliance guarantee.</p>",
-        reproduce = reproduce,
-        packet = escape_html(&report.source_packet),
-        map = escape_html(&report.source_map),
-    ));
-    html.push_str("</main>\n</body>\n</html>\n");
-    html
-}
-
-fn render_compliance_summary(report: &ComplianceReportPacket) -> String {
-    let failing = report
-        .criteria
-        .iter()
-        .filter(|obligation| obligation.status == "fail")
-        .map(|obligation| format!("- {}: {}", obligation.id, obligation.why))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "# Allie WCAG Evidence Summary\n\nStatus: `{}`\n\nPass: {}. Fail: {}. Needs review: {}. Not tested: {}. Waived: {}. Risk accepted: {}. Total WCAG success criteria: {}. Supporting checks: {}.\n\nSource map: `{}`\nSource packet: `{}`\n\nThis report is evidence visibility for accessibility engineering review, not a legal compliance guarantee.\n\n## Failing Criteria\n\n{}\n",
-        report.summary.status,
-        report.summary.pass,
-        report.summary.fail,
-        report.summary.needs_review,
-        report.summary.not_tested,
-        report.summary.waived,
-        report.summary.risk_accepted,
-        report.summary.total_success_criteria,
-        report.summary.total_supporting_checks,
-        report.source_map,
-        report.source_packet,
-        if failing.is_empty() {
-            "None.".to_string()
-        } else {
-            failing
-        }
-    )
 }
 
 fn discover_surfaces(
@@ -4795,285 +3001,6 @@ fn run_review(options: ReviewOptions) -> Result<ReviewReceipt> {
         packet_path,
         report_path,
     })
-}
-
-#[derive(Debug)]
-struct AgenticReviewSummary {
-    criteria: usize,
-    calls: u64,
-    status: String,
-}
-
-fn agentic_worker_script() -> PathBuf {
-    std::env::var_os("ALLIE_AGENTIC_WORKER")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("workers/agentic/review.mjs")
-        })
-}
-
-fn agentic_model_setting(value: &Option<String>, fallback: &str) -> String {
-    value
-        .as_ref()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| fallback.to_string())
-}
-
-/// Run the agentic (vision-model) review over the criteria a run left as
-/// needs_review, fold the model's assessments + captured media into the
-/// evidence packet, and promote each committed verdict to the criterion's
-/// pass/fail status — marked with the "agentic" evidence class so the report
-/// renders it with an asterisk (a reviewer judgment, not a machine-proven
-/// result). Best-effort: returns an error the caller can log, and never
-/// fabricates a verdict — an "inconclusive" or unavailable result leaves the
-/// criterion at needs_review.
-fn run_agentic_review(manifest: &FlowManifest, packet_path: &Path) -> Result<AgenticReviewSummary> {
-    let mut packet: EvidencePacket = read_json_file(packet_path)?;
-
-    let success_ids = wcag22_success_criterion_ids();
-    let obligations = packet
-        .verdicts
-        .iter()
-        .filter(|verdict| verdict.status == "needs_review")
-        .map(|verdict| verdict.obligation.clone())
-        .filter(|obligation| success_ids.contains(obligation))
-        .collect::<BTreeSet<_>>();
-    if obligations.is_empty() {
-        return Ok(AgenticReviewSummary {
-            criteria: 0,
-            calls: 0,
-            status: "skipped".to_string(),
-        });
-    }
-
-    let criteria = obligations
-        .iter()
-        .filter_map(|obligation| {
-            let criterion = wcag22_success_criteria()
-                .into_iter()
-                .find(|criterion| criterion["obligation"].as_str() == Some(obligation))?;
-            Some(serde_json::json!({
-                "obligation": obligation,
-                "num": criterion["num"],
-                "handle": criterion["handle"],
-                "level": criterion["level"],
-                "principle": criterion["principle"],
-            }))
-        })
-        .collect::<Vec<_>>();
-
-    let run_dir = fs::canonicalize(packet_path.parent().unwrap_or_else(|| Path::new(".")))
-        .unwrap_or_else(|_| {
-            packet_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf()
-        });
-    let artifacts_dir = run_dir.join("artifacts");
-    fs::create_dir_all(&artifacts_dir).map_err(|source| AllieError::Io {
-        context: format!("create agentic artifacts dir {}", artifacts_dir.display()),
-        source,
-    })?;
-
-    let request = serde_json::json!({
-        "schema": "allie.agentic.request.v0",
-        "target": {
-            "base_url": packet.target.base_url.clone().or_else(|| manifest.target.base_url.clone()),
-            "fixture_dir": manifest.target.fixture_dir.as_ref().map(|dir| dir.to_string_lossy().to_string()),
-        },
-        "browser": {
-            "viewport": { "width": manifest.browser.viewport.width, "height": manifest.browser.viewport.height },
-            "color_scheme": manifest.browser.color_scheme,
-            "reduced_motion": manifest.browser.reduced_motion,
-            "locale": manifest.browser.locale,
-        },
-        "model": {
-            "provider": agentic_model_setting(&manifest.model.provider, "openrouter"),
-            "model": agentic_model_setting(&manifest.model.model, "google/gemini-3.5-flash"),
-            "api_key_env": agentic_model_setting(&manifest.model.api_key_env, "OPENROUTER_API_KEY"),
-            "base_url": agentic_model_setting(&manifest.model.base_url, "https://openrouter.ai/api/v1"),
-            "max_calls": manifest.model.max_model_calls.unwrap_or(4),
-            "reasoning_effort": manifest.model.reasoning_effort.clone(),
-        },
-        "artifacts_dir": artifacts_dir.to_string_lossy(),
-        "criteria": criteria,
-    });
-
-    let request_path = run_dir.join("agentic-request.json");
-    let response_path = run_dir.join("agentic-response.json");
-    write_json_pretty(&request_path, &request)?;
-
-    let script = agentic_worker_script();
-    if !script.exists() {
-        return Err(AllieError::Worker(format!(
-            "agentic worker script not found at {}",
-            script.display()
-        )));
-    }
-    let mut child = Command::new("node")
-        .arg(&script)
-        .arg("--request")
-        .arg(&request_path)
-        .arg("--response")
-        .arg(&response_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| AllieError::Worker(format!("spawn agentic worker: {source}")))?;
-    let status = child
-        .wait_timeout(Duration::from_millis(300_000))
-        .map_err(|source| AllieError::Worker(format!("wait for agentic worker: {source}")))?;
-    let output = child
-        .wait_with_output()
-        .map_err(|source| AllieError::Worker(format!("collect agentic worker output: {source}")))?;
-    if status.is_none() {
-        return Err(AllieError::Worker(
-            "agentic worker timed out after 300s".to_string(),
-        ));
-    }
-    if !response_path.exists() {
-        return Err(AllieError::Worker(format!(
-            "agentic worker produced no response: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )));
-    }
-
-    let response: serde_json::Value = read_json_file(&response_path)?;
-    let timestamp = now_utc();
-    let policy = ArtifactPolicy {
-        redaction_status: "not_redacted_local".to_string(),
-        retention_class: "local_review".to_string(),
-    };
-    let mut seen_artifacts = packet
-        .artifacts
-        .iter()
-        .map(|artifact| artifact.path.clone())
-        .collect::<BTreeSet<_>>();
-
-    let provider = response["provider"]
-        .as_str()
-        .unwrap_or("openrouter")
-        .to_string();
-    let model = response["model"].as_str().unwrap_or_default().to_string();
-    let empty = Vec::new();
-    for assessment in response["assessments"].as_array().unwrap_or(&empty) {
-        let Some(obligation) = assessment["obligation"].as_str() else {
-            continue;
-        };
-        let media = assessment["media"]
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| {
-                        let rel = item["path"].as_str()?;
-                        Some(AgenticMediaRef {
-                            kind: item["kind"].as_str().unwrap_or("screenshot").to_string(),
-                            caption: item["caption"].as_str().unwrap_or_default().to_string(),
-                            path: format!("artifacts/{rel}"),
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        for media_ref in &media {
-            if seen_artifacts.insert(media_ref.path.clone()) {
-                let absolute = run_dir.join(&media_ref.path);
-                if let Ok(artifact) = artifact_for_path(
-                    &agentic_artifact_id(&media_ref.path),
-                    agentic_artifact_type(&media_ref.kind),
-                    &run_dir,
-                    &absolute,
-                    None,
-                    "allie-agentic-gateway",
-                    &policy,
-                    timestamp,
-                ) {
-                    packet.artifacts.push(artifact);
-                }
-            }
-        }
-        let verdict_str = assessment["verdict"]
-            .as_str()
-            .map(|value| value.trim().to_lowercase())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "inconclusive".to_string());
-        let confidence_str = assessment["confidence"]
-            .as_str()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "not_observed".to_string());
-        packet.agentic_assessments.push(AgenticAssessmentRecord {
-            obligation: obligation.to_string(),
-            assessment: verdict_str.clone(),
-            rationale: assessment["rationale"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-            reviewer_guidance: assessment["reviewer_guidance"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-            confidence: confidence_str.clone(),
-            provider: provider.clone(),
-            model: model.clone(),
-            media,
-        });
-
-        // Promote the agentic verdict to the criterion status, marked with an
-        // "agentic" evidence class so the report renders it with an asterisk.
-        // Never fabricate: only an explicit pass/fail promotes; "inconclusive"
-        // or a missing verdict leaves the criterion at needs_review.
-        if let Some(new_status) = agentic_promoted_status(&verdict_str) {
-            for verdict in packet.verdicts.iter_mut().filter(|verdict| {
-                verdict.obligation == obligation && verdict.status == "needs_review"
-            }) {
-                verdict.status = new_status.to_string();
-                verdict.evidence_class = "agentic".to_string();
-                // Store the bare confidence token ("high"/"medium"/"low") so the
-                // criterion footer and the AI verdict block render it identically;
-                // evidence_class = "agentic" already carries the provenance.
-                verdict.confidence = confidence_str.clone();
-                verdict.source = format!("allie-agentic-review:{model}");
-            }
-        }
-    }
-
-    write_json_pretty(packet_path, &packet)?;
-    Ok(AgenticReviewSummary {
-        criteria: obligations.len(),
-        calls: response["calls"].as_u64().unwrap_or_default(),
-        status: response["status"].as_str().unwrap_or("unknown").to_string(),
-    })
-}
-
-/// Map an agentic verdict string to the criterion status it may promote to.
-/// Only an explicit "pass"/"fail" promotes; anything else (notably
-/// "inconclusive" or an empty/unknown value) returns None so the criterion
-/// stays at needs_review — the agentic reviewer never fabricates a verdict.
-fn agentic_promoted_status(verdict: &str) -> Option<&'static str> {
-    match verdict.trim().to_lowercase().as_str() {
-        "pass" => Some("pass"),
-        "fail" => Some("fail"),
-        _ => None,
-    }
-}
-
-fn agentic_artifact_id(path: &str) -> String {
-    path.rsplit('/')
-        .next()
-        .unwrap_or(path)
-        .rsplit_once('.')
-        .map(|(stem, _)| stem.to_string())
-        .unwrap_or_else(|| path.to_string())
-}
-
-fn agentic_artifact_type(kind: &str) -> &'static str {
-    match kind {
-        "clip" | "video" | "video_clip" => "video_clip",
-        _ => "screenshot",
-    }
 }
 
 fn run_remediate(options: RemediateOptions) -> Result<RemediationReceipt> {
@@ -5541,7 +3468,7 @@ fn read_release_packet(packet_path: &Path) -> Result<serde_json::Value> {
     })
 }
 
-fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
+pub(crate) fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
     let text = fs::read_to_string(path).map_err(|source| AllieError::Io {
         context: format!("read json {}", path.display()),
         source,
@@ -5683,7 +3610,7 @@ fn invoke_worker(
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct FlowManifest {
+pub(crate) struct FlowManifest {
     id: String,
     name: String,
     app_name: String,
@@ -5861,13 +3788,6 @@ impl CredentialConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct ManifestTarget {
-    kind: String,
-    fixture_dir: Option<PathBuf>,
-    base_url: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
 struct ManifestPolicy {
     profile: String,
     blocking_classes: Vec<String>,
@@ -5877,21 +3797,6 @@ struct ManifestPolicy {
 
 fn default_worker_timeout_ms() -> u64 {
     DEFAULT_WORKER_TIMEOUT_MS
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct ArtifactPolicy {
-    redaction_status: String,
-    retention_class: String,
-}
-
-impl Default for ArtifactPolicy {
-    fn default() -> Self {
-        Self {
-            redaction_status: "not_redacted_local_fixture".to_string(),
-            retention_class: "local_ephemeral".to_string(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -5938,21 +3843,6 @@ impl ModelPolicy {
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct BrowserSettings {
-    viewport: Viewport,
-    color_scheme: String,
-    reduced_motion: String,
-    locale: String,
-    zoom: f64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct Viewport {
-    width: u32,
-    height: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -6102,37 +3992,6 @@ struct FlowCandidate {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct ProductMapPacket {
-    schema: String,
-    generated_at: String,
-    source_manifest: String,
-    project_root: String,
-    app_name: String,
-    environment: String,
-    policy_profile: String,
-    target: ManifestTarget,
-    agent: AgentRunnerReceiptPacket,
-    standards: StandardsProfileSummary,
-    surfaces: Vec<ProductSurface>,
-    workflows: Vec<ProductWorkflow>,
-    open_questions: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct AgentRunnerReceiptPacket {
-    schema: String,
-    runner: String,
-    mode: String,
-    status: String,
-    capabilities: Vec<String>,
-    command: Vec<String>,
-    prompt_path: Option<String>,
-    transcript_path: Option<String>,
-    warnings: Vec<String>,
-    sources: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 struct WorkbenchJobPacket {
     schema: String,
     id: String,
@@ -6204,198 +4063,6 @@ struct WorkbenchPointers {
 struct WorkbenchArtifactRef {
     kind: String,
     path: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct StandardsProfileSummary {
-    id: String,
-    source_urls: Vec<String>,
-    total_obligations: usize,
-    methods: BTreeMap<String, usize>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ProductSurface {
-    id: String,
-    title: String,
-    routes: Vec<String>,
-    files: Vec<String>,
-    services: Vec<String>,
-    user_stories: Vec<String>,
-    workflow_refs: Vec<String>,
-    evidence_refs: Vec<String>,
-    confidence: String,
-    review_status: String,
-    provenance: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ProductWorkflow {
-    id: String,
-    title: String,
-    surface_refs: Vec<String>,
-    user_story: String,
-    generated_flow_manifest: String,
-    states: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ComplianceReportPacket {
-    schema: String,
-    generated_at: String,
-    source_map: String,
-    source_packet: String,
-    app_name: String,
-    summary: ComplianceSummary,
-    criteria: Vec<ComplianceObligation>,
-    criterion_coverage: Vec<CriterionCoverageCell>,
-    supporting_checks: Vec<ComplianceSupportingCheck>,
-    obligations: Vec<ComplianceObligation>,
-    surfaces: Vec<ComplianceSurfaceReport>,
-    #[serde(default)]
-    state_evidence: Vec<StateEvidence>,
-}
-
-/// Per-state evidence surfaced once at the top of the report (the captured
-/// screenshot and observed focus order), so criteria can reference it without
-/// re-inlining the same image dozens of times.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct StateEvidence {
-    id: String,
-    route: String,
-    url: String,
-    title: String,
-    http_status: Option<u16>,
-    #[serde(default)]
-    keyboard_focus_order: Vec<String>,
-    #[serde(default)]
-    media: Vec<EvidenceMedia>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ComplianceSummary {
-    status: String,
-    total_obligations: usize,
-    pass: usize,
-    fail: usize,
-    needs_review: usize,
-    not_tested: usize,
-    not_applicable: usize,
-    waived: usize,
-    risk_accepted: usize,
-    /// Of `pass`/`fail` above, how many are agentic (asterisked) verdicts rather
-    /// than machine-proven — surfaced so the headline distinguishes the two.
-    #[serde(default)]
-    ai_pass: usize,
-    #[serde(default)]
-    ai_fail: usize,
-    total_success_criteria: usize,
-    total_supporting_checks: usize,
-    evidence_packet_status: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ComplianceObligation {
-    id: String,
-    title: String,
-    status: String,
-    why: String,
-    surfaces: Vec<String>,
-    tests: Vec<String>,
-    artifact_refs: Vec<String>,
-    agentic_context: Vec<String>,
-    human_review: String,
-    confidence: String,
-    evidence_class: String,
-    source_url: Option<String>,
-    finding_refs: Vec<String>,
-    #[serde(default)]
-    principle: String,
-    #[serde(default)]
-    level: String,
-    #[serde(default)]
-    media: Vec<EvidenceMedia>,
-    #[serde(default)]
-    agentic_review: Option<AgenticAssessment>,
-}
-
-/// A piece of visual evidence (screenshot, element crop, or motion GIF) inlined
-/// into the report as a self-contained data URI so the report travels intact in
-/// a PR diff, a CI artifact, or a committed snapshot without external files.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct EvidenceMedia {
-    kind: String,
-    caption: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data_uri: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    artifact_ref: Option<String>,
-}
-
-/// Structured output of the agentic (vision-model) review for one criterion:
-/// the model's assessment plus the context a human reviewer needs to confirm it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct AgenticAssessment {
-    /// The committed verdict: pass | fail | inconclusive.
-    assessment: String,
-    rationale: String,
-    /// concrete steps the human reviewer should take to confirm or refute.
-    reviewer_guidance: String,
-    confidence: String,
-    provider: String,
-    model: String,
-    #[serde(default)]
-    media: Vec<EvidenceMedia>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct CriterionCoverageCell {
-    id: String,
-    criterion_id: String,
-    surface_id: String,
-    state_id: String,
-    policy_profile: String,
-    status: String,
-    applicability: String,
-    method: String,
-    confidence: String,
-    evidence_refs: Vec<String>,
-    agentic_refs: Vec<String>,
-    waiver_refs: Vec<String>,
-    finding_refs: Vec<String>,
-    artifact_refs: Vec<String>,
-    test_refs: Vec<String>,
-    replay_command: Option<String>,
-    residual_review_need: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ComplianceSupportingCheck {
-    id: String,
-    title: String,
-    status: String,
-    why: String,
-    related_criteria: Vec<String>,
-    surfaces: Vec<String>,
-    tests: Vec<String>,
-    artifact_refs: Vec<String>,
-    agentic_context: Vec<String>,
-    human_review: String,
-    confidence: String,
-    evidence_class: String,
-    finding_refs: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ComplianceSurfaceReport {
-    surface_id: String,
-    title: String,
-    routes: Vec<String>,
-    states: Vec<String>,
-    status: String,
-    criteria: Vec<String>,
-    cells: Vec<String>,
-    finding_refs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -6475,39 +4142,6 @@ struct WorkerStateResult {
     features: Option<PageFeatures>,
 }
 
-/// Lightweight inventory of page content + scripted signals the worker reports,
-/// used by Allie's applicability oracle to decide automatically which criteria
-/// do not apply and to run a couple of deterministic/scripted checks.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-struct PageFeatures {
-    #[serde(default)]
-    audio: u32,
-    #[serde(default)]
-    video: u32,
-    #[serde(default)]
-    forms: u32,
-    #[serde(default)]
-    inputs: u32,
-    #[serde(default)]
-    draggable: u32,
-    #[serde(default)]
-    iframes: u32,
-    #[serde(default)]
-    images: u32,
-    #[serde(default)]
-    links: u32,
-    #[serde(default)]
-    headings: u32,
-    #[serde(default)]
-    lang: bool,
-    #[serde(default)]
-    lang_value: String,
-    #[serde(default)]
-    reflow_overflow: bool,
-    #[serde(default)]
-    reflow_checked: bool,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 struct AxeViolation {
     id: String,
@@ -6518,135 +4152,6 @@ struct AxeViolation {
     tags: Vec<String>,
     #[serde(default)]
     nodes: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EvidencePacket {
-    schema: String,
-    summary: PacketSummary,
-    run: RunMetadata,
-    target: TargetMetadata,
-    policy: PolicyMetadata,
-    coverage: Coverage,
-    artifacts: Vec<ArtifactMetadata>,
-    findings: Vec<Finding>,
-    verdicts: Vec<Verdict>,
-    waivers: Vec<serde_json::Value>,
-    review: Vec<ReviewAttempt>,
-    #[serde(default)]
-    agentic_assessments: Vec<AgenticAssessmentRecord>,
-    replay: Replay,
-}
-
-/// One criterion's agentic (vision-model) assessment, recorded in the evidence
-/// packet. Media paths are relative to the run directory (alongside the run
-/// screenshots) so the report resolves them the same way.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct AgenticAssessmentRecord {
-    obligation: String,
-    assessment: String,
-    rationale: String,
-    reviewer_guidance: String,
-    confidence: String,
-    provider: String,
-    model: String,
-    #[serde(default)]
-    media: Vec<AgenticMediaRef>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct AgenticMediaRef {
-    kind: String,
-    caption: String,
-    path: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PacketSummary {
-    status: String,
-    exit_code: i32,
-    deterministic_failures: usize,
-    scripted_failures: usize,
-    infrastructure_failures: usize,
-    states_captured: usize,
-    failure_class: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct RunMetadata {
-    id: String,
-    started_at: String,
-    finished_at: String,
-    allie_version: String,
-    git_sha: String,
-    git_branch: String,
-    ci_provider: Option<String>,
-    actor: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct TargetMetadata {
-    base_url: Option<String>,
-    environment: String,
-    app_name: String,
-    auth_profile: String,
-    credential_provider: CredentialProviderMetadata,
-    flow_manifest: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct CredentialProviderMetadata {
-    provider: String,
-    env: Option<String>,
-    required: bool,
-    status: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct PolicyMetadata {
-    profile: String,
-    blocking_classes: Vec<String>,
-    worker_timeout_ms: u64,
-    model_provider_allowlist: Vec<String>,
-    model_status: String,
-    zdr_required: bool,
-    redaction_profile: String,
-    budget: PolicyBudget,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct PolicyBudget {
-    model_calls: u32,
-    max_states: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Coverage {
-    routes_visited: Vec<String>,
-    surfaces_discovered: Vec<String>,
-    flows_exercised: Vec<String>,
-    states_captured: Vec<String>,
-    state_metadata: Vec<StateMetadata>,
-    standards_obligations_evaluated: Vec<String>,
-    obligations_not_tested: Vec<String>,
-    obligations_requiring_human_review: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct StateMetadata {
-    id: String,
-    route: String,
-    url: String,
-    title: String,
-    http_status: Option<u16>,
-    keyboard_focus_order: Vec<String>,
-    console_errors: Vec<String>,
-    network_errors: Vec<String>,
-    state_errors: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    features: Option<PageFeatures>,
 }
 
 #[derive(Debug)]
@@ -6673,64 +4178,6 @@ impl RunFailure {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ArtifactMetadata {
-    id: String,
-    #[serde(rename = "type")]
-    artifact_type: String,
-    path: String,
-    hash: String,
-    redaction_status: String,
-    retention_class: String,
-    unavailable_reason: Option<String>,
-    related_flow_state: Option<String>,
-    creation_tool: String,
-    timestamp: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Finding {
-    id: String,
-    title: String,
-    description: String,
-    evidence_class: String,
-    standard_obligation: String,
-    severity: String,
-    status: String,
-    confidence: String,
-    source: String,
-    affected_route: String,
-    affected_state: String,
-    artifact_refs: Vec<String>,
-    suggested_remediation: String,
-    replay_command: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Verdict {
-    obligation: String,
-    status: String,
-    confidence: String,
-    evidence_class: String,
-    source: String,
-    affected_states: Vec<String>,
-    finding_refs: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ReviewAttempt {
-    id: String,
-    provider: String,
-    model: String,
-    prompt_artifact: String,
-    response_artifact: String,
-    redaction_receipt: String,
-    status: String,
-    confidence: String,
-    promotion_state: String,
-}
-
 #[derive(Debug, Serialize)]
 struct RemediationQueue {
     schema: String,
@@ -6750,18 +4197,6 @@ struct RemediationItem {
     confidence: String,
     replay_command: String,
     policy_effect: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Replay {
-    command: String,
-    manifest_path: String,
-    environment_requirements: Vec<String>,
-    credential_profile: String,
-    browser: BrowserSettings,
-    seed_data: Vec<String>,
-    known_nondeterminism: Vec<String>,
 }
 
 #[expect(
@@ -7057,7 +4492,7 @@ fn worker_artifacts(
     clippy::too_many_arguments,
     reason = "artifact metadata hashing keeps path, policy, and provenance explicit at call sites"
 )]
-fn artifact_for_path(
+pub(crate) fn artifact_for_path(
     id: &str,
     artifact_type: &str,
     out_dir: &Path,
@@ -7277,7 +4712,7 @@ fn obligation_from_tags(policy_profile: &str, tags: &[String]) -> String {
     "wcag22-aa:unmapped-axe-rule".to_string()
 }
 
-fn deterministic_pass_obligation(policy_profile: &str) -> String {
+pub(crate) fn deterministic_pass_obligation(policy_profile: &str) -> String {
     if policy_profile != "wcag22-aa" {
         return format!("{policy_profile}:deterministic-machine-checks");
     }
@@ -7306,7 +4741,7 @@ fn human_review_profile_obligations(policy_profile: &str) -> Vec<String> {
     obligations
 }
 
-fn profile_obligation_list(policy_profile: &str, key: &str) -> Vec<String> {
+pub(crate) fn profile_obligation_list(policy_profile: &str, key: &str) -> Vec<String> {
     if policy_profile != "wcag22-aa" {
         return Vec::new();
     }
@@ -7343,7 +4778,7 @@ fn criteria_with_method(policy_profile: &str, method: &str) -> Vec<String> {
         .collect()
 }
 
-fn wcag22_success_criteria() -> Vec<serde_json::Value> {
+pub(crate) fn wcag22_success_criteria() -> Vec<serde_json::Value> {
     wcag22_profile()
         .get("success_criteria")
         .and_then(|value| value.as_array())
@@ -7351,7 +4786,7 @@ fn wcag22_success_criteria() -> Vec<serde_json::Value> {
         .unwrap_or_default()
 }
 
-fn criterion_title(obligation: &str) -> String {
+pub(crate) fn criterion_title(obligation: &str) -> String {
     wcag22_success_criteria()
         .into_iter()
         .find(|criterion| criterion["obligation"].as_str() == Some(obligation))
@@ -7444,7 +4879,7 @@ fn feature_not_applicable(obligation: &str, features: &PageFeatures) -> bool {
 }
 
 /// Human-readable reason an applicable-by-default criterion was ruled out.
-fn applicability_reason(obligation: &str) -> String {
+pub(crate) fn applicability_reason(obligation: &str) -> String {
     match obligation {
         o if o.starts_with("wcag22-aa:1.2.") => {
             "No <audio> or <video> elements were detected on the inspected states, so this time-based media criterion does not apply.".to_string()
@@ -7965,7 +5400,7 @@ fn response_contract_failures(
     failures
 }
 
-fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+pub(crate) fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let json = serde_json::to_string_pretty(value).map_err(|source| AllieError::Json {
         context: format!("serialize json {}", path.display()),
         source,
@@ -8072,7 +5507,7 @@ fn path_relative_to(base: &Path, path: &Path) -> String {
         .to_string()
 }
 
-fn escape_html(value: &str) -> String {
+pub(crate) fn escape_html(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -8081,7 +5516,7 @@ fn escape_html(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-fn now_utc() -> DateTime<Utc> {
+pub(crate) fn now_utc() -> DateTime<Utc> {
     Utc::now()
 }
 
@@ -8829,7 +6264,7 @@ mod tests {
                     .any(|check| check["id"] == support)
             );
         }
-        validate_criterion_coverage_cells(&report).unwrap();
+        compliance::validate_criterion_coverage_cells(&report).unwrap();
         let html = fs::read_to_string(report_dir.join("compliance-report.html")).unwrap();
         assert!(html.contains("Supporting checks"));
         assert!(html.contains("wcag22-aa:deterministic-axe-rules"));
@@ -8862,16 +6297,16 @@ mod tests {
             ]
         });
 
-        let error = validate_criterion_coverage_cells(&report).unwrap_err();
+        let error = compliance::validate_criterion_coverage_cells(&report).unwrap_err();
         assert!(error.contains("terminal criterion coverage cell lacks provenance"));
 
         report["criterion_coverage"][0]["replay_command"] =
             serde_json::json!("cargo run --locked -- run --manifest fixture.yml");
-        let error = validate_criterion_coverage_cells(&report).unwrap_err();
+        let error = compliance::validate_criterion_coverage_cells(&report).unwrap_err();
         assert!(error.contains("terminal criterion coverage cell lacks provenance"));
 
         report["criterion_coverage"][0]["evidence_refs"] = serde_json::json!(["axe-home"]);
-        validate_criterion_coverage_cells(&report).unwrap();
+        compliance::validate_criterion_coverage_cells(&report).unwrap();
     }
 
     #[test]
@@ -8938,7 +6373,7 @@ mod tests {
             replay_command: packet.replay.command.clone(),
         });
 
-        let report = build_compliance_report(
+        let report = compliance::build_compliance_report(
             &map,
             &packet,
             Path::new("fixtures/vanity-dogfood-legacy-61/product-map.json"),
@@ -8990,7 +6425,7 @@ mod tests {
             }),
         ];
 
-        let report = build_compliance_report(
+        let report = compliance::build_compliance_report(
             &map,
             &packet,
             Path::new("fixtures/vanity-dogfood-legacy-61/product-map.json"),
@@ -8998,7 +6433,7 @@ mod tests {
         );
         let report_value = serde_json::to_value(&report).unwrap();
 
-        validate_criterion_coverage_cells(&report_value).unwrap();
+        compliance::validate_criterion_coverage_cells(&report_value).unwrap();
         assert_eq!(report.summary.status, "needs_review");
         assert_eq!(report.summary.waived, 1);
         assert_eq!(report.summary.risk_accepted, 1);
@@ -9050,7 +6485,7 @@ mod tests {
             features: None,
         });
 
-        let report = build_compliance_report(
+        let report = compliance::build_compliance_report(
             &map,
             &packet,
             Path::new("fixtures/vanity-dogfood-legacy-61/product-map.json"),
@@ -9060,7 +6495,7 @@ mod tests {
 
         assert_eq!(report.criteria.len(), 55);
         assert_eq!(report.criterion_coverage.len(), 110);
-        validate_criterion_coverage_cells(&report_value).unwrap();
+        compliance::validate_criterion_coverage_cells(&report_value).unwrap();
 
         let mut duplicate = report_value.clone();
         let first_cell = duplicate["criterion_coverage"][0].clone();
@@ -9068,12 +6503,12 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(first_cell);
-        let error = validate_criterion_coverage_cells(&duplicate).unwrap_err();
+        let error = compliance::validate_criterion_coverage_cells(&duplicate).unwrap_err();
         assert!(error.contains("duplicate criterion coverage cell"));
 
         let mut missing = report_value;
         missing["criterion_coverage"].as_array_mut().unwrap().pop();
-        let error = validate_criterion_coverage_cells(&missing).unwrap_err();
+        let error = compliance::validate_criterion_coverage_cells(&missing).unwrap_err();
         assert!(error.contains("missing criterion coverage cell"));
     }
 
@@ -9086,7 +6521,7 @@ mod tests {
             sample_compliance_obligation("wcag22-aa:1.4.3-contrast-minimum", "risk_accepted"),
         ];
 
-        let summary = compliance_summary(&packet, &criteria, 0);
+        let summary = compliance::compliance_summary(&packet, &criteria, 0);
 
         assert_eq!(summary.status, "needs_review");
         assert_eq!(summary.total_obligations, 2);
@@ -9117,7 +6552,7 @@ mod tests {
             "fail",
         )];
 
-        let report = compliance_surface_report(&surface, &packet, &criteria, &[]);
+        let report = compliance::compliance_surface_report(&surface, &packet, &criteria, &[]);
 
         assert_eq!(report.status, "fail");
         assert_eq!(
@@ -9859,86 +7294,6 @@ flow:
         }
     }
 
-    #[test]
-    fn agentic_promoted_status_only_promotes_explicit_pass_or_fail() {
-        assert_eq!(agentic_promoted_status("pass"), Some("pass"));
-        assert_eq!(agentic_promoted_status("fail"), Some("fail"));
-        assert_eq!(agentic_promoted_status("FAIL"), Some("fail"));
-        // Inconclusive / empty / unknown never promote — no fabricated verdicts.
-        assert_eq!(agentic_promoted_status("inconclusive"), None);
-        assert_eq!(agentic_promoted_status(""), None);
-        assert_eq!(agentic_promoted_status("needs_human"), None);
-    }
-
-    #[test]
-    fn agentic_pass_fail_render_with_asterisk_but_machine_results_do_not() {
-        // Machine-proven pass: plain chip, no asterisk, no AI block.
-        let mut machine = sample_compliance_obligation("wcag22-aa:1.4.3-contrast-minimum", "pass");
-        machine.evidence_class = "deterministic".to_string();
-        let machine_html = cr_criterion_card(&machine);
-        assert!(
-            !machine_html.contains("chip-ai") && !machine_html.contains("<sup>*</sup>"),
-            "a machine-proven pass must never be asterisked"
-        );
-
-        // Agentic fail verdict: asterisked chip + the AI verdict block + evidence.
-        let mut agentic =
-            sample_compliance_obligation("wcag22-aa:1.4.11-non-text-contrast", "fail");
-        agentic.evidence_class = "agentic".to_string();
-        agentic.confidence = "medium".to_string();
-        agentic.agentic_review = Some(AgenticAssessment {
-            assessment: "fail".to_string(),
-            rationale: "Icons are light gray on a white background.".to_string(),
-            reviewer_guidance: "Measure icon contrast with a tool.".to_string(),
-            confidence: "medium".to_string(),
-            provider: "openrouter".to_string(),
-            model: "google/gemini-3.5-flash".to_string(),
-            media: Vec::new(),
-        });
-        let html = cr_criterion_card(&agentic);
-        assert!(
-            html.contains("chip-ai"),
-            "agentic fail must carry the marker"
-        );
-        assert!(
-            html.contains("<sup>*</sup>"),
-            "agentic fail must be asterisked"
-        );
-        assert!(html.contains("AI reviewer verdict"));
-        assert!(html.contains("Icons are light gray on a white background."));
-
-        // The marker keys off the agentic_review evidence, so the asterisk and the
-        // AI block can never diverge.
-        assert!(is_agentic_verdict(&agentic));
-        assert!(
-            !is_agentic_verdict(&machine),
-            "machine pass is never asterisked"
-        );
-
-        // Inconclusive stays unmarked (its AI block renders, but it is not a verdict).
-        let mut inconclusive =
-            sample_compliance_obligation("wcag22-aa:1.3.2-meaningful-sequence", "needs_review");
-        inconclusive.evidence_class = "agentic".to_string();
-        inconclusive.agentic_review = Some(AgenticAssessment {
-            assessment: "inconclusive".to_string(),
-            rationale: "Cannot settle from the captured evidence.".to_string(),
-            reviewer_guidance: "Review manually.".to_string(),
-            confidence: "low".to_string(),
-            provider: "openrouter".to_string(),
-            model: "google/gemini-3.5-flash".to_string(),
-            media: Vec::new(),
-        });
-        assert!(!is_agentic_verdict(&inconclusive));
-
-        // Regression guard for the split-write trap: an "agentic" evidence_class
-        // with NO AI verdict attached must not be asterisked — no evidence, no mark.
-        let mut agentic_class_no_evidence =
-            sample_compliance_obligation("wcag22-aa:2.4.6-headings-and-labels", "pass");
-        agentic_class_no_evidence.evidence_class = "agentic".to_string();
-        agentic_class_no_evidence.agentic_review = None;
-        assert!(!is_agentic_verdict(&agentic_class_no_evidence));
-    }
-
     fn build_vanity_fixture_report() -> ComplianceReportPacket {
         let map: ProductMapPacket = read_json_file(Path::new(
             "fixtures/vanity-dogfood-legacy-61/product-map.json",
@@ -9946,7 +7301,7 @@ flow:
         .unwrap();
         let packet: EvidencePacket =
             read_json_file(Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json")).unwrap();
-        build_compliance_report(
+        compliance::build_compliance_report(
             &map,
             &packet,
             Path::new("fixtures/vanity-dogfood-legacy-61/product-map.json"),
