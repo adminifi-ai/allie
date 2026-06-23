@@ -716,9 +716,9 @@ fn render_verify_html(summary: &serde_json::Value, out_dir: &Path) -> String {
 </body>
 </html>
 "#,
-        css = REPORT_CSS,
+        css = crate::report::REPORT_CSS,
         status = escape_html(status),
-        status_label = escape_html(&cr_status_label(status)),
+        status_label = escape_html(&crate::report::cr_status_label(status)),
         bcls = bcls,
         dot = dot,
         why = escape_html(why),
