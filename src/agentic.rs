@@ -268,7 +268,7 @@ pub(crate) fn run_agentic_review(
 /// Only an explicit "pass"/"fail" promotes; anything else (notably
 /// "inconclusive" or an empty/unknown value) returns None so the criterion
 /// stays at needs_review — the agentic reviewer never fabricates a verdict.
-pub(crate) fn agentic_promoted_status(verdict: &str) -> Option<&'static str> {
+fn agentic_promoted_status(verdict: &str) -> Option<&'static str> {
     match verdict.trim().to_lowercase().as_str() {
         "pass" => Some("pass"),
         "fail" => Some("fail"),
@@ -289,5 +289,21 @@ fn agentic_artifact_type(kind: &str) -> &'static str {
     match kind {
         "clip" | "video" | "video_clip" => "video_clip",
         _ => "screenshot",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agentic_promoted_status_only_promotes_explicit_pass_or_fail() {
+        assert_eq!(agentic_promoted_status("pass"), Some("pass"));
+        assert_eq!(agentic_promoted_status("fail"), Some("fail"));
+        assert_eq!(agentic_promoted_status("FAIL"), Some("fail"));
+        // Inconclusive / empty / unknown never promote — no fabricated verdicts.
+        assert_eq!(agentic_promoted_status("inconclusive"), None);
+        assert_eq!(agentic_promoted_status(""), None);
+        assert_eq!(agentic_promoted_status("needs_human"), None);
     }
 }

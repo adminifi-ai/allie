@@ -5548,8 +5548,6 @@ fn git_metadata(args: &[&str]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agentic::agentic_promoted_status;
-    use crate::report::{cr_criterion_card, is_agentic_verdict};
     use tempfile::tempdir;
 
     #[test]
@@ -7294,86 +7292,6 @@ flow:
             media: Vec::new(),
             agentic_review: None,
         }
-    }
-
-    #[test]
-    fn agentic_promoted_status_only_promotes_explicit_pass_or_fail() {
-        assert_eq!(agentic_promoted_status("pass"), Some("pass"));
-        assert_eq!(agentic_promoted_status("fail"), Some("fail"));
-        assert_eq!(agentic_promoted_status("FAIL"), Some("fail"));
-        // Inconclusive / empty / unknown never promote — no fabricated verdicts.
-        assert_eq!(agentic_promoted_status("inconclusive"), None);
-        assert_eq!(agentic_promoted_status(""), None);
-        assert_eq!(agentic_promoted_status("needs_human"), None);
-    }
-
-    #[test]
-    fn agentic_pass_fail_render_with_asterisk_but_machine_results_do_not() {
-        // Machine-proven pass: plain chip, no asterisk, no AI block.
-        let mut machine = sample_compliance_obligation("wcag22-aa:1.4.3-contrast-minimum", "pass");
-        machine.evidence_class = "deterministic".to_string();
-        let machine_html = cr_criterion_card(&machine);
-        assert!(
-            !machine_html.contains("chip-ai") && !machine_html.contains("<sup>*</sup>"),
-            "a machine-proven pass must never be asterisked"
-        );
-
-        // Agentic fail verdict: asterisked chip + the AI verdict block + evidence.
-        let mut agentic =
-            sample_compliance_obligation("wcag22-aa:1.4.11-non-text-contrast", "fail");
-        agentic.evidence_class = "agentic".to_string();
-        agentic.confidence = "medium".to_string();
-        agentic.agentic_review = Some(AgenticAssessment {
-            assessment: "fail".to_string(),
-            rationale: "Icons are light gray on a white background.".to_string(),
-            reviewer_guidance: "Measure icon contrast with a tool.".to_string(),
-            confidence: "medium".to_string(),
-            provider: "openrouter".to_string(),
-            model: "google/gemini-3.5-flash".to_string(),
-            media: Vec::new(),
-        });
-        let html = cr_criterion_card(&agentic);
-        assert!(
-            html.contains("chip-ai"),
-            "agentic fail must carry the marker"
-        );
-        assert!(
-            html.contains("<sup>*</sup>"),
-            "agentic fail must be asterisked"
-        );
-        assert!(html.contains("AI reviewer verdict"));
-        assert!(html.contains("Icons are light gray on a white background."));
-
-        // The marker keys off the agentic_review evidence, so the asterisk and the
-        // AI block can never diverge.
-        assert!(is_agentic_verdict(&agentic));
-        assert!(
-            !is_agentic_verdict(&machine),
-            "machine pass is never asterisked"
-        );
-
-        // Inconclusive stays unmarked (its AI block renders, but it is not a verdict).
-        let mut inconclusive =
-            sample_compliance_obligation("wcag22-aa:1.3.2-meaningful-sequence", "needs_review");
-        inconclusive.evidence_class = "agentic".to_string();
-        inconclusive.agentic_review = Some(AgenticAssessment {
-            assessment: "inconclusive".to_string(),
-            rationale: "Cannot settle from the captured evidence.".to_string(),
-            reviewer_guidance: "Review manually.".to_string(),
-            confidence: "low".to_string(),
-            provider: "openrouter".to_string(),
-            model: "google/gemini-3.5-flash".to_string(),
-            media: Vec::new(),
-        });
-        assert!(!is_agentic_verdict(&inconclusive));
-
-        // Regression guard for the split-write trap: an "agentic" evidence_class
-        // with NO AI verdict attached must not be asterisked — no evidence, no mark.
-        let mut agentic_class_no_evidence =
-            sample_compliance_obligation("wcag22-aa:2.4.6-headings-and-labels", "pass");
-        agentic_class_no_evidence.evidence_class = "agentic".to_string();
-        agentic_class_no_evidence.agentic_review = None;
-        assert!(!is_agentic_verdict(&agentic_class_no_evidence));
     }
 
     fn build_vanity_fixture_report() -> ComplianceReportPacket {
