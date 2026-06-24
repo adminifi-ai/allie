@@ -23,7 +23,7 @@ The browser worker smoke, V0 evidence smoke, consumer contract smoke, release pr
 
 ## Design Rules
 
-- Treat `SPEC.md` as the product contract.
+- Treat `VISION.md` as the project north star and `SPEC.md` as the product contract.
 - Treat the evidence packet as the core interface.
 - Keep Playwright/axe implementation details behind a worker adapter.
 - Do not spread OpenRouter/provider details outside the model gateway.

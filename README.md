@@ -8,6 +8,8 @@ Positioning:
 
 > Accessibility evidence for every release.
 
+For the full north star — what Allie is, who it's for, the strategic bets, and what excellent looks like — see [`VISION.md`](VISION.md).
+
 ## Why This Exists
 
 Accessibility work is often split across manual expert review, browser extensions, point-in-time axe runs, ad hoc screenshots, and release conversations that are hard to reproduce. Allie turns that into an evidence system:
@@ -78,6 +80,7 @@ exit `2`.
 
 ## Repository Map
 
+- [VISION.md](VISION.md): project north star — intent, invariants, and what excellent looks like.
 - [SPEC.md](SPEC.md): product contract and acceptance model.
 - [docs/architecture.md](docs/architecture.md): proposed system design.
 - [docs/evidence-contract.md](docs/evidence-contract.md): first evidence schema shape.
