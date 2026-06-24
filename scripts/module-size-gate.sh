@@ -2,16 +2,17 @@
 # Module size gate (ratchet).
 #
 # The lib.rs decomposition brought the largest Rust source file from 10055 lines
-# down to ~7980, extracting src/report.rs (rendering), src/agentic.rs (agentic
-# review), and src/compliance.rs (compliance model). This gate locks that win:
-# no file under src/ may exceed CAP lines.
+# down to ~6426, extracting src/report.rs (rendering), src/agentic.rs (agentic
+# review), src/compliance.rs (compliance model), src/model.rs (shared DTO leaf),
+# and src/workbench.rs (job runner). This gate locks that win: no file under
+# src/ may exceed CAP lines.
 #
 # If a file trips this, EXTRACT a cohesive module (see docs/roadmap.md "Code
 # Health Backlog") rather than raising CAP. Lower CAP as the files shrink further
 # — it should ratchet down, never up, absent a deliberate, reviewed decision.
 set -eu
 
-CAP=8200
+CAP=6800
 status=0
 
 for f in src/*.rs; do
