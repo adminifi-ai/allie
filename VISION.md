@@ -13,13 +13,16 @@ run it. Wire it into CI, run it locally before a release, or drive it by hand.
 There is no account to create and nothing sent to a vendor by default. Allie runs
 where your code runs.
 
-Allie's core job is assessment, auditing, and reporting — not remediation. It
-proves what can be proven automatically, packages context for what still needs
-judgment, and renders a defensible picture of accessibility status tied to a
-specific code revision. Acting on that picture is downstream: plumb Allie's
-evidence-linked context into a remediation agent, or fix it by hand. Allie's
-contribution is that the context is already deep, structured, and replayable when
-you get there.
+Allie's job is autonomous accessibility audit, mapping, and reporting. It
+discovers the product surface, writes and runs the tests and agentic QA loops
+itself, analyzes screenshots and video walkthroughs with vision models, proves
+what can be proven automatically, and renders a defensible, replayable picture of
+accessibility status tied to a specific code revision.
+
+Allie does not remediate. Fixing what the audit finds — by hand, by ticket, or by
+a downstream remediation agent — is a separate product that consumes Allie's
+evidence. Allie's contribution is that the report is already deep, structured, and
+replayable when the fix begins, so nothing has to be re-investigated.
 
 This is the project north star. `SPEC.md` is the product contract — acceptance
 model, gate policy, and packet schema. When the two disagree, the vision says
@@ -43,13 +46,13 @@ is written to be trusted and acted on by a machine as readily as by a person.
 ## The Job
 
 Given a repository, a running or staged app, and a policy profile, Allie should
-discover the sitemap, product surfaces, and likely user stories; generate and
-replay deterministic Playwright + axe coverage through a real browser; map every
-result to its relevant WCAG 2.2 A/AA obligation; take agentic vision passes that
-render a committed pass/fail verdict (shown asterisked, with the evidence
-inlined) on criteria that require judgment; and produce a report where you can
-drill from standard to criterion, surface, finding, test, artifact, agentic
-context, waiver, remediation context, and release decision.
+discover the sitemap, product surfaces, and likely user stories; write and replay
+deterministic Playwright + axe coverage through a real browser; map every result
+to its relevant WCAG 2.2 A/AA obligation; run agentic vision passes over
+screenshots and video walkthroughs that render a committed pass/fail verdict
+(shown asterisked, with the evidence inlined) on criteria that require judgment;
+and produce a report where you can drill from standard to criterion, surface,
+finding, test, artifact, agentic context, waiver, and release decision.
 
 The output is the product. It is deep and comprehensive by default, generated
 automatically, and structured so the next agent — or the next human — can trust
@@ -91,9 +94,10 @@ The repo should refuse work that erodes the invariants above, specifically:
 
 - A global accessibility "score" or grade that collapses the obligation ledger
   into one number.
-- Autonomous remediation that edits the consumer's code as the headline feature.
-  Remediation context is in scope; owning the fix is a downstream concern, and
-  any patch attempt stays evidence-linked, branch-scoped, and opt-in.
+- Remediation of any kind — fix suggestions, patch generation, or a remediation
+  queue. Allie audits, maps, and reports; fixing what it finds is a separate
+  product that consumes Allie's evidence. The audit report is where Allie's job
+  ends.
 - Model-only findings that block a release on their own. Agentic verdicts inform
   and prioritize; they gate only after scripted reproduction or human
   attestation promotes them.
@@ -122,9 +126,10 @@ can be revisited if evidence says we bet wrong.
    behind a narrow Playwright/axe worker boundary; model and vision calls live
    behind a typed gateway with redaction receipts, provider allowlists,
    ZDR/no-fallback policy, prompt versions, and audit events.
-5. Context is the handoff. Allie generates the assessment context so completely
-   that remediation — agentic or manual — starts from evidence, not a fresh
-   investigation.
+5. The report is the handoff. Allie generates the audit context so completely and
+   so structured that whatever comes next — a fix, a ticket, an auditor sign-off —
+   starts from evidence, not a fresh investigation. Allie does not take that next
+   step itself.
 
 ## Lifespan
 
@@ -154,9 +159,9 @@ and replays Playwright plus axe coverage; preserves DOM, accessibility tree,
 screenshot, video/GIF, trace, console, network, and model-review artifacts under
 redaction policy; and emits a WCAG drilldown report that shows every criterion as
 pass, fail, not applicable, or a committed agentic verdict — with no silent "not
-tested" gaps. It assembles an evidence-linked remediation queue ready to hand to
-another agent or a human. It explains every release-blocking decision in terms of
-evidence, and never claims legal compliance.
+tested" gaps. The report is complete enough that whatever fixes the findings — an
+agent or a human — can start without re-investigating. It explains every
+release-blocking decision in terms of evidence, and never claims legal compliance.
 
 **Beyond.** Allie is the default way a team brings accessibility evidence to a
 release conversation — the harness whose packets a remediation agent, an auditor,
