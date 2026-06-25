@@ -32,4 +32,10 @@ packet.
 6. Changed-surface inference from git/route diff against discovery (replaces operator-supplied list, src/lib.rs:603).
 
 ## Notes
+**Shaped:** Slice 1 — children 1 (worker action steps), 2 (credential injection),
+and 5 (honest-coverage guardrail) — is `/deliver`-ready as ticket
+[023](023-authenticated-audit-on-real-apps-slice-1.md): log in to a real app and
+audit hand-listed authenticated routes. Children 3 (live crawl), 4 (wire live
+agentic review), and 6 (changed-surface from git) stay deferred to follow-on slices.
+
 **Why:** real-app-proving lane (auth preflight-only `lib.rs:2862`; worker goto-only `run.mjs:128`; no credential serialization `lib.rs:3029`) + autonomy-depth lane (discovery fixture-only `lib.rs:1915`; workbench review offline `workbench.rs:390`). Operator priority #1. Land the worker-adapter extraction (epic 019, child 1) first to give child 1 here a clean seam.
