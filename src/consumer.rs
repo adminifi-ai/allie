@@ -278,6 +278,7 @@ fn scaffold_manifest(options: &InitOptions) -> FlowManifest {
             env: None,
             required: false,
         },
+        auth: None,
         target,
         policy: ManifestPolicy {
             profile: "wcag22-aa".to_string(),

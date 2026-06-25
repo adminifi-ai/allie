@@ -1,0 +1,60 @@
+id: auth-fixture-flow-negative
+name: Local authenticated fixture flow (negative control)
+app_name: Allie auth fixture app
+environment: local-fixture
+auth_profile: local-fixture-auth
+credentials:
+  profile: local-fixture-auth
+  provider: env
+  env: ALLIE_AUTH_FIXTURE_PASSWORD
+  required: true
+target:
+  kind: local_fixture
+  fixture_dir: ../fixtures/auth
+# NEGATIVE CONTROL: the login "recipe" deliberately never establishes a session
+# (it fills a field and waits for an element that already exists on the login
+# page, then never submits with valid creds). No session cookie is set, so when
+# the gated /dashboard.html route runs its synchronous gate it bounces back to
+# the login wall at HTTP 200. The authenticated_marker (#dashboard) is therefore
+# absent -> the worker records an `auth-lost` state_error -> the run BLOCKS.
+# This exercises the no-silent-gaps mechanism: an HTTP-200 login wall must NOT
+# be audited as if it were the app.
+auth:
+  start_path: /login.html
+  steps:
+    - fill: { selector: "#email", value_env: ALLIE_AUTH_FIXTURE_USER }
+    - wait_for: { selector: "#login-form" }
+  authenticated_marker: { selector: "#dashboard" }
+policy:
+  profile: wcag22-aa
+  blocking_classes:
+    - deterministic
+    - scripted_required
+  worker_timeout_ms: 30000
+artifacts:
+  redaction_status: not_redacted_local_fixture
+  retention_class: local_ephemeral
+model:
+  enabled: false
+  provider_allowlist: []
+  zdr_required: true
+known_nondeterminism: []
+browser:
+  viewport:
+    width: 1280
+    height: 900
+  color_scheme: light
+  reduced_motion: reduce
+  locale: en-US
+  zoom: 1.0
+flow:
+  id: auth-critical-path-negative
+  description: Attempt to audit the gated dashboard route without a real session.
+  states:
+    - id: dashboard
+      path: /dashboard.html
+      description: Gated dashboard route — should bounce to the login wall.
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true

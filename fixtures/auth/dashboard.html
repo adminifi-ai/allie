@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script>
+    // Synchronous auth gate: runs before anything renders. Without the session
+    // cookie this bounces to the login wall immediately, so page.url() is settled
+    // by the time the worker reaches networkidle. This is what makes an HTTP-200
+    // login wall fail the per-state authenticated_marker assertion.
+    if (!document.cookie.includes('allie_session=ok')) {
+      location.replace('login.html');
+    }
+  </script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Auth Fixture — Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #101418;
+      --muted: #3a4554;
+      --line: #98a4b3;
+      --surface: #ffffff;
+      --page: #f4f7fa;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background: var(--page);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      padding: 32px;
+    }
+
+    main {
+      width: min(100%, 720px);
+      margin: 0 auto;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      padding: 28px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 32px;
+      line-height: 1.1;
+    }
+
+    h2 {
+      margin: 24px 0 8px;
+      font-size: 20px;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    ul {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav aria-label="Account">
+      <a href="login.html">Sign out</a>
+    </nav>
+  </header>
+  <main id="dashboard" aria-label="Account dashboard">
+    <h1>Welcome back</h1>
+    <p>You are signed in to the Allie authentication fixture.</p>
+    <h2>Recent activity</h2>
+    <ul>
+      <li>Reviewed an accessibility evidence packet.</li>
+      <li>Approved a release for the marketing site.</li>
+    </ul>
+  </main>
+</body>
+</html>
