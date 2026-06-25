@@ -20,8 +20,8 @@ credential values never written to disk or artifacts.
 
 ## Constraints (invariants that must survive)
 - **Secrets never persist.** No credential value in `worker-request.json`, the evidence packet, error messages, or any artifact. Preserve and extend the guarantee in the existing test (`src/lib.rs:4812`).
-- **No silent gaps.** If `auth` is declared but a session is not established, the run BLOCKS (non-zero exit / blocked status) — it must never emit a passing packet that audits the login wall as if it were the app.
-- **Determinism.** The new fixture-backed proof path is byte-stable (no wall-clock / ordering nondeterminism).
+- **No silent gaps.** If `auth` is declared but a session is not established, the run BLOCKS (non-zero exit / blocked status) — it must never emit a passing packet that audits the login wall as if it were the app. **HTTP status is not sufficient:** an SPA login wall returns HTTP 200 then JS-redirects, which today passes every check in `inspectState` (`run.mjs:128-135`). Enforcement requires the post-navigation auth assertion in Design, not status alone.
+- **Determinism.** The new fixture-backed proof path is byte-stable (no wall-clock / ordering nondeterminism); the fixture's login gate redirects **synchronously** on load so `page.url()` is settled after `networkidle`.
 - **Boundary holds.** Playwright specifics stay in the `node` worker; Rust only extends the request schema. No new provider/browser leakage into `lib.rs`.
 - Existing smokes stay green (worker / evidence / consumer / autonomous / size).
 
@@ -53,22 +53,25 @@ auth:
     - fill:     { selector: "#password", value_env: ALLIE_VANITY_PASSWORD }
     - click:    { selector: "button[type=submit]" }
     - wait_for: { selector: "#dashboard" }       # success signal: selector OR url_contains
+  authenticated_marker: { selector: "#dashboard" }  # REQUIRED present on every gated state; its
+                                                    # absence (e.g. bounced to /login) => auth lost => block
   storage_state_env: ALLIE_VANITY_STORAGE_STATE  # optional SSO hatch: env names a storageState path
 ```
 
 - **Step vocabulary stays minimal:** `fill {selector, value_env}`, `click {selector}`, `wait_for {selector | url_contains}`. This is a *deterministic worker-facing* contract — the worker branches on step kind, so a typed step shape earns its place. (Contrast: the model-facing audit report stays unstructured prose. Structure only where code branches.)
 - **Rust:** `WorkerRequest::from_manifest` copies `manifest.auth` → a `WorkerAuth` carrying selectors/paths/env *names* (never values). Extend `preflight_failures` to require each referenced `value_env` (or the `storage_state_env` path) when `auth` is present. Treat a worker auth error as a blocking `RunFailure`.
-- **Worker (`run.mjs`):** in `runWorker`, after `browser.newContext(...)`: if `auth.storage_state_env` resolves to a readable file, create the context with `storageState`; else open a page, `goto(start_path)`, execute steps (reading `process.env[value_env]`), assert the success signal, close the login page (session cookies remain in the context), then inspect states as today. On failure return `status:"error"` / a dedicated `auth-failed` with the failing step but NO secret values.
+- **Worker (`run.mjs`):** in `runWorker`, after `browser.newContext(...)`: if `auth.storage_state_env` resolves to a readable file, create the context with `storageState`; else open a page, `goto(start_path)`, execute steps (reading `process.env[value_env]`), assert the success signal, close the login page (the JS-set session cookie persists in the context). Login-step failure → `status:"error"` / `auth-failed` naming the failing step but NO secret values.
+- **Per-state auth assertion (the no-silent-gaps mechanism — added after critique):** in `inspectState`, when `authenticated_marker` is set, after `goto` assert the marker selector is present AND the final `page.url()` did not bounce to `start_path`; on failure push an `auth-lost` entry to `state_errors`. `state_errors` already flips the run to a blocking exit class (`run.mjs:91-95` → `lib.rs:3446-3455`), so a login wall served at HTTP 200 now blocks instead of being audited as the app. Without this, HTTP-200 status checks pass and the invariant is unenforced.
 - **Entrypoint:** flows through the existing `run` subcommand (`lib.rs:900-940`) → `invoke_worker` → `write_packet_and_report`. `allie verify` inherits it automatically (it composes `run`).
 
 ## Oracle
 - [ ] `fixtures/auth/` static fixture (login form sets a cookie via JS; `/dashboard` JS-redirects to `/login` without it) and `examples/auth-fixture-flow.yml` exist.
-- [ ] `scripts/auth-smoke.sh` + `npm run auth:smoke`: logs into the fixture, reaches gated `/dashboard` authenticated, and the evidence packet captures the dashboard state (not the login redirect).
-- [ ] Negative control (no/bad creds on the gated route) → run BLOCKS (non-zero / blocked status), not a passing audit of the login wall.
-- [ ] Secret-grep clean: the credential values appear in zero of `worker-request.json`, the evidence packet, and artifacts.
+- [ ] `scripts/auth-smoke.sh` + `npm run auth:smoke`: logs into the fixture, reaches gated `/dashboard`, and the worker records the per-state auth assertion as satisfied (final URL is the gated route AND `authenticated_marker` present) — not the login redirect.
+- [ ] Negative control (no/bad creds on the gated route): the auth assertion fails → an `auth-lost` `state_error` is recorded → the run BLOCKS (non-zero / blocked exit class). Assert the exit class actually flips; an HTTP-200 login wall must NOT pass.
+- [ ] Secret-grep clean: a NEW test that actually sets a secret env var, runs the auth flow, then greps the value across `worker-request.json`, the evidence packet, screenshots, DOM snapshots, AND the trace file (`run.mjs:194` serializes URL + console/network errors — a token in a query string would leak there) → zero hits. (`lib.rs:4812` only covers the env-name path; its secret is never set, so this is a new case, not a reuse.)
 - [ ] storageState hatch: a manifest with `auth.storage_state_env` loads the session and audits a gated route.
 - [ ] `cargo fmt --check`, `cargo test --locked`, `cargo clippy --locked -- -D warnings` pass; `npm run worker:smoke evidence:smoke consumer:smoke autonomous:smoke size:smoke` stay green.
-- [ ] Live dogfood: `allie run` (or `verify`) against `phrazzld/vanity` (base_url + form login or storageState) produces an evidence packet for ≥1 authenticated route; receipt committed under `docs/dogfood/vanity/`. If vanity has no gated surface, escalate to `misty-step/misty-step`.
+- [ ] Live dogfood (manual receipt — not CI-falsifiable): `allie run` (or `verify`) against `phrazzld/vanity` (base_url + form login or storageState) produces an evidence packet for ≥1 authenticated route; receipt committed under `docs/dogfood/vanity/`. If vanity has no gated surface, escalate to `misty-step/misty-step`.
 
 ## Verification System
 - **Claim:** Allie logs into a real authenticated web app and audits authenticated surfaces, secrets never persisted.
@@ -91,3 +94,10 @@ auth:
 - **vanity has no gated surface:** escalate up the ladder (misty-step → habitat/chrondle/linejam).
 - **Rollout:** additive (new optional manifest block, new fixture, new smoke); existing fixture flows untouched. Revert = remove auth handling.
 - **Stop conditions (come back, don't improvise):** target needs real SSO/OAuth and no storageState can be captured; the static fixture can't model the target's auth shape; redaction can't keep authed-page artifacts safe; auth would force the 019 worker-adapter refactor to land first.
+
+## Review
+Fresh-context adversarial critique (2026-06-25, repo-grounded, different context) — verdict **fix-then-ship**. Fixes folded in:
+- **Added the no-silent-gaps mechanism.** "Auth failure blocks" had no implementation: `inspectState` only checked HTTP status, so an HTTP-200 SPA login wall would pass. Added the `authenticated_marker` per-state assertion → `auth-lost` `state_error` → blocking exit class.
+- **Hardened the secret-grep oracle.** `lib.rs:4812` only proves the env-*name* path (its secret is never set); the new test must set a real secret and grep all artifacts incl. the trace file (URL/query-string leak vector).
+- **Clarified the fixture.** Gating is client-side JS (the static server can't gate); the redirect must be synchronous so `page.url()` is settled after `networkidle`. Marked the vanity-escalation oracle as a manual receipt.
+- **Confirmed sound (no change):** secrets-via-inherited-env (`Command::new("node")` has no env scrub; `WorkerRequest` has no value field); worker exceptions → exit 2; one shared context carries the session across states.
