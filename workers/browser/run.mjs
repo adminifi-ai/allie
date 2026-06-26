@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import AxeBuilder from '@axe-core/playwright';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,11 +78,27 @@ async function runWorker(request) {
         size: request.browser.viewport,
       };
     }
+
+    // Authenticated audit: load a captured session (storageState hatch) or run
+    // the form-login recipe against a throwaway page. Secret values are read from
+    // this process's inherited env — they are never present in the request JSON.
+    let usedStorageState = false;
+    const auth = request.auth ?? null;
+    const storageStatePath = resolveStorageState(auth);
+    if (storageStatePath) {
+      contextOptions.storageState = storageStatePath;
+      usedStorageState = true;
+    }
+
     const context = await browser.newContext(contextOptions);
+
+    if (auth && !usedStorageState) {
+      await performLogin(context, target.baseUrl, auth);
+    }
 
     const states = [];
     for (const state of request.states) {
-      states.push(await inspectState(context, target.baseUrl, state, artifactsDir, request.browser.zoom));
+      states.push(await inspectState(context, target.baseUrl, state, artifactsDir, request.browser.zoom, auth?.authenticated_marker ?? null));
     }
 
     await context.close();
@@ -109,7 +126,68 @@ async function runWorker(request) {
   }
 }
 
-async function inspectState(context, baseUrl, state, artifactsDir, zoom) {
+// Resolve the storageState hatch: an env var NAMES a path to a Playwright
+// storageState file. Returns the path only when the env var is set and the file
+// exists; otherwise null (the form-login recipe runs instead).
+function resolveStorageState(auth) {
+  const envName = auth?.storage_state_env;
+  if (!envName) {
+    return null;
+  }
+  const candidate = process.env[envName];
+  if (!candidate) {
+    return null;
+  }
+  if (!fsSync.existsSync(candidate) || !fsSync.statSync(candidate).isFile()) {
+    return null;
+  }
+  return candidate;
+}
+
+// Run the form-login recipe once on a throwaway page. The JS-set session cookie
+// persists in the shared context, so subsequent gated states are authenticated.
+// Step values come from process.env[value_env]; no value is ever logged or
+// thrown. On failure we throw `auth-failed at step N (<kind>)` with no secrets.
+async function performLogin(context, baseUrl, auth) {
+  const SHORT_TIMEOUT_MS = 10000;
+  const page = await context.newPage();
+  try {
+    const startPath = auth.start_path ?? '/';
+    await page.goto(new URL(startPath, baseUrl).toString(), { waitUntil: 'networkidle' });
+
+    const steps = auth.steps ?? [];
+    for (let index = 0; index < steps.length; index += 1) {
+      const step = steps[index];
+      try {
+        if (step.fill) {
+          const value = process.env[step.fill.value_env] ?? '';
+          await page.fill(step.fill.selector, value);
+        } else if (step.click) {
+          await page.click(step.click.selector);
+        } else if (step.wait_for) {
+          if (step.wait_for.selector) {
+            await page.waitForSelector(step.wait_for.selector, { timeout: SHORT_TIMEOUT_MS });
+          } else if (step.wait_for.url_contains) {
+            const fragment = step.wait_for.url_contains;
+            await page.waitForURL((url) => url.toString().includes(fragment), { timeout: SHORT_TIMEOUT_MS });
+          } else {
+            throw new Error('wait_for requires selector or url_contains');
+          }
+        } else {
+          throw new Error('unknown auth step');
+        }
+      } catch {
+        // Never include the step value or env contents in the message.
+        const kind = step.fill ? 'fill' : step.click ? 'click' : step.wait_for ? 'wait_for' : 'unknown';
+        throw new Error(`auth-failed at step ${index} (${kind})`);
+      }
+    }
+  } finally {
+    await page.close();
+  }
+}
+
+async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMarker) {
   const page = await context.newPage();
   const pageVideo = page.video();
   const consoleErrors = [];
@@ -132,6 +210,29 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom) {
 
   if (state.required && httpStatus !== null && (httpStatus < 200 || httpStatus >= 400)) {
     stateErrors.push(`required route returned HTTP ${httpStatus}`);
+  }
+
+  // No-silent-gaps: when an authenticated_marker is declared, a gated state must
+  // show it (selector present and/or url_contains matches). An HTTP-200 SPA login
+  // wall that bounced away from the gated route shows neither, so this records an
+  // auth-lost state_error which flips the run to a blocking exit class
+  // (lib.rs exit_class_for_response).
+  if (authMarker) {
+    const finalUrl = page.url();
+    let markerPresent = true;
+    if (authMarker.selector) {
+      markerPresent = await page
+        .waitForSelector(authMarker.selector, { timeout: 5000 })
+        .then(() => true)
+        .catch(() => false);
+    }
+    let urlOk = true;
+    if (authMarker.url_contains) {
+      urlOk = finalUrl.includes(authMarker.url_contains);
+    }
+    if (!markerPresent || !urlOk) {
+      stateErrors.push(`auth-lost: authenticated marker not present (url ${finalUrl})`);
+    }
   }
 
   if (zoom && zoom !== 1) {

@@ -6,6 +6,7 @@
   "scripts": {
     "worker:smoke": "node workers/browser/run.mjs --smoke .allie/worker-smoke",
     "evidence:smoke": "cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/v0-smoke",
+    "auth:smoke": "scripts/auth-smoke.sh",
     "visibility:smoke": "scripts/visibility-smoke.sh",
     "coverage:smoke": "scripts/coverage-matrix-smoke.sh",
     "landscape:smoke": "scripts/landscape-smoke.sh",

@@ -16,11 +16,13 @@ use wait_timeout::ChildExt;
 mod model;
 
 mod agentic;
+mod auth;
 mod compliance;
 mod consumer;
 mod report;
 mod workbench;
 
+use crate::auth::AuthFlow;
 use crate::model::*;
 
 const PRODUCT_LINE: &str = "Allie: accessibility evidence for every release.";
@@ -2769,6 +2771,11 @@ pub(crate) struct FlowManifest {
     auth_profile: Option<String>,
     #[serde(default)]
     credentials: CredentialConfig,
+    /// Optional authenticated-audit recipe. When present, the worker establishes
+    /// a session (form-login steps or a storageState file) before auditing gated
+    /// states, and asserts the `authenticated_marker` on each one.
+    #[serde(default)]
+    auth: Option<AuthFlow>,
     target: ManifestTarget,
     policy: ManifestPolicy,
     #[serde(default)]
@@ -2828,6 +2835,21 @@ impl FlowManifest {
             }
         }
 
+        if let Some(auth) = &self.auth {
+            for assert in auth.assertions() {
+                if assert.is_empty() {
+                    return Err(AllieError::InvalidManifest(
+                        "auth assertion requires a selector or url_contains".to_string(),
+                    ));
+                }
+            }
+            if auth.storage_state_env.is_none() && auth.steps.is_empty() {
+                return Err(AllieError::InvalidManifest(
+                    "auth without storage_state_env must declare at least one step".to_string(),
+                ));
+            }
+        }
+
         Ok(())
     }
 
@@ -2878,6 +2900,41 @@ impl FlowManifest {
                     ));
                 }
                 Some(_) | None => {}
+            }
+        }
+
+        if let Some(auth) = &self.auth {
+            // When the storageState hatch is used, require the named env var set
+            // AND its target path readable; otherwise require every referenced
+            // login `value_env`. Failures name only the env var, never a value.
+            if let Some(storage_env) = auth.storage_state_env.as_deref() {
+                match std::env::var_os(storage_env) {
+                    None => failures.push(RunFailure::new(
+                        "missing-credential",
+                        "auth-storage-state",
+                        format!(
+                            "auth storage_state_env {storage_env} is required but it is not set"
+                        ),
+                    )),
+                    Some(path) if !Path::new(&path).is_file() => failures.push(RunFailure::new(
+                        "missing-credential",
+                        "auth-storage-state",
+                        format!(
+                            "auth storage_state_env {storage_env} is set but its path is not a readable file"
+                        ),
+                    )),
+                    Some(_) => {}
+                }
+            } else {
+                for value_env in auth.referenced_value_envs() {
+                    if std::env::var_os(value_env).is_none() {
+                        failures.push(RunFailure::new(
+                            "missing-credential",
+                            "auth-credential",
+                            format!("auth requires env {value_env} but it is not set"),
+                        ));
+                    }
+                }
             }
         }
 
@@ -3034,6 +3091,10 @@ struct WorkerRequest {
     browser: BrowserSettings,
     states: Vec<ManifestState>,
     artifacts_dir: String,
+    /// Authenticated-audit recipe (selectors, paths, env-var NAMES). Carries no
+    /// credential value; the worker reads secret values from its own env.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auth: Option<AuthFlow>,
 }
 
 impl WorkerRequest {
@@ -3062,6 +3123,7 @@ impl WorkerRequest {
             browser: manifest.browser.clone(),
             states: manifest.flow.states.clone(),
             artifacts_dir: artifacts_dir.to_string_lossy().to_string(),
+            auth: manifest.auth.clone(),
         })
     }
 }
@@ -4625,7 +4687,13 @@ fn git_metadata(args: &[&str]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use tempfile::tempdir;
+
+    // Serializes tests that mutate process-wide auth env vars so parallel test
+    // threads cannot observe each other's set/remove. Poisoning is irrelevant
+    // (we only need exclusion), so an outer panic must not block other tests.
+    static AUTH_ENV_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
     fn placeholder_cli_points_to_v0_command() {
@@ -4851,6 +4919,152 @@ mod tests {
         let report = fs::read_to_string(receipt.report_path).unwrap();
         assert!(report.contains("Run preflight failed"));
         assert!(!report.contains("super-secret-value"));
+    }
+
+    #[test]
+    fn auth_fixture_manifest_validates_and_carries_auth_block() {
+        let manifest = FlowManifest::load(Path::new("examples/auth-fixture-flow.yml")).unwrap();
+        manifest.validate().unwrap();
+
+        let auth = manifest.auth.as_ref().expect("auth block present");
+        assert_eq!(auth.start_path.as_deref(), Some("/login.html"));
+        assert_eq!(auth.steps.len(), 4);
+        let marker = auth.authenticated_marker.as_ref().expect("marker present");
+        assert_eq!(marker.selector.as_deref(), Some("#dashboard"));
+        assert_eq!(
+            auth.referenced_value_envs(),
+            vec!["ALLIE_AUTH_FIXTURE_USER", "ALLIE_AUTH_FIXTURE_PASSWORD"]
+        );
+    }
+
+    #[test]
+    fn worker_request_carries_auth_env_names_not_secret_values() {
+        let _guard = AUTH_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        // Set a sentinel secret in the env; the serialized request must contain
+        // the env NAME (so the worker can read it) but never the VALUE.
+        let sentinel = "sentinel-secret-do-not-serialize-7f3c";
+        // SAFETY: single-threaded test; restored before returning.
+        unsafe {
+            std::env::set_var("ALLIE_AUTH_FIXTURE_PASSWORD", sentinel);
+            std::env::set_var("ALLIE_AUTH_FIXTURE_USER", "qa@example.test");
+        }
+
+        let manifest = FlowManifest::load(Path::new("examples/auth-fixture-flow.yml")).unwrap();
+        assert!(
+            manifest.preflight_failures().is_empty(),
+            "preflight should pass with both auth env vars set"
+        );
+
+        let temp = tempdir().unwrap();
+        let request = WorkerRequest::from_manifest(
+            "run-auth-secret",
+            &manifest,
+            Path::new("examples/auth-fixture-flow.yml"),
+            &temp.path().join("artifacts"),
+        )
+        .unwrap();
+        let json = serde_json::to_string_pretty(&request).unwrap();
+
+        unsafe {
+            std::env::remove_var("ALLIE_AUTH_FIXTURE_PASSWORD");
+            std::env::remove_var("ALLIE_AUTH_FIXTURE_USER");
+        }
+
+        assert!(
+            json.contains("ALLIE_AUTH_FIXTURE_PASSWORD"),
+            "request must carry the env NAME so the worker can read it"
+        );
+        assert!(
+            !json.contains(sentinel),
+            "request must NOT carry the secret VALUE (secrets stay off disk)"
+        );
+    }
+
+    #[test]
+    fn auth_preflight_fails_with_missing_credential_when_value_env_unset() {
+        let _guard = AUTH_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        // Ensure the auth env vars are unset for this assertion.
+        // SAFETY: single-threaded test.
+        unsafe {
+            std::env::remove_var("ALLIE_AUTH_FIXTURE_PASSWORD");
+            std::env::remove_var("ALLIE_AUTH_FIXTURE_USER");
+        }
+
+        let manifest = FlowManifest::load(Path::new("examples/auth-fixture-flow.yml")).unwrap();
+        let failures = manifest.preflight_failures();
+
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.kind == "missing-credential"
+                    && failure.message.contains("ALLIE_AUTH_FIXTURE_PASSWORD")),
+            "expected a missing-credential failure naming the unset auth env var"
+        );
+    }
+
+    #[test]
+    fn auth_storage_state_preflight_requires_a_readable_file() {
+        let _guard = AUTH_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let temp = tempdir().unwrap();
+        let state_file = temp.path().join("storage-state.json");
+        fs::write(&state_file, "{}").unwrap();
+
+        let mut manifest = FlowManifest::load(Path::new("examples/auth-fixture-flow.yml")).unwrap();
+        // Switch the auth flow to the storageState hatch; clear the credential
+        // block so only the hatch drives preflight.
+        manifest.credentials = CredentialConfig::default();
+        let auth = manifest.auth.as_mut().unwrap();
+        auth.storage_state_env = Some("ALLIE_AUTH_FIXTURE_STORAGE_STATE".to_string());
+
+        // SAFETY: single-threaded under AUTH_ENV_GUARD.
+        unsafe {
+            std::env::remove_var("ALLIE_AUTH_FIXTURE_STORAGE_STATE");
+        }
+        assert!(
+            manifest
+                .preflight_failures()
+                .iter()
+                .any(|f| f.kind == "missing-credential"
+                    && f.message.contains("ALLIE_AUTH_FIXTURE_STORAGE_STATE")),
+            "unset storage_state_env must fail preflight"
+        );
+
+        unsafe {
+            std::env::set_var("ALLIE_AUTH_FIXTURE_STORAGE_STATE", state_file.as_os_str());
+        }
+        assert!(
+            manifest.preflight_failures().is_empty(),
+            "storage_state_env pointing at a readable file must pass preflight"
+        );
+
+        unsafe {
+            std::env::remove_var("ALLIE_AUTH_FIXTURE_STORAGE_STATE");
+        }
+    }
+
+    #[test]
+    fn auth_validation_rejects_empty_assertions_and_stepless_flows() {
+        let manifest = FlowManifest::load(Path::new("examples/auth-fixture-flow.yml")).unwrap();
+
+        // An assertion with neither selector nor url_contains is meaningless.
+        let mut empty_marker = manifest.clone();
+        empty_marker.auth.as_mut().unwrap().authenticated_marker = Some(crate::auth::AuthAssert {
+            selector: None,
+            url_contains: None,
+        });
+        assert!(empty_marker.validate().is_err());
+
+        // No steps and no storageState hatch leaves nothing to establish a session.
+        let mut no_steps = manifest.clone();
+        {
+            let auth = no_steps.auth.as_mut().unwrap();
+            auth.steps.clear();
+            auth.storage_state_env = None;
+        }
+        assert!(no_steps.validate().is_err());
+
+        // The shipped example is well-formed.
+        manifest.validate().unwrap();
     }
 
     #[test]
@@ -5940,7 +6154,12 @@ mod tests {
                 .unwrap()
                 .contains("run --manifest")
         );
-        assert!(queue["items"][0]["artifact_refs"].as_array().unwrap().len() >= 1);
+        assert!(
+            !queue["items"][0]["artifact_refs"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Auth Fixture — Sign in</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #101418;
+      --muted: #47515f;
+      --line: #98a4b3;
+      --surface: #ffffff;
+      --page: #f4f7fa;
+      --accent: #185bff;
+      --accent-ink: #ffffff;
+      --error: #8a1f11;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background: var(--page);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+    }
+
+    main {
+      width: min(100%, 440px);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      padding: 28px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 32px;
+      line-height: 1.1;
+    }
+
+    form {
+      margin-top: 24px;
+      display: grid;
+      gap: 16px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      font-weight: 700;
+    }
+
+    input {
+      min-height: 44px;
+      border: 1px solid #6b7685;
+      border-radius: 4px;
+      padding: 8px 10px;
+      font: inherit;
+    }
+
+    input:focus {
+      outline: 3px solid #0b225c;
+      outline-offset: 2px;
+    }
+
+    button {
+      min-height: 44px;
+      border: 0;
+      border-radius: 4px;
+      color: var(--accent-ink);
+      background: var(--accent);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:focus {
+      outline: 3px solid #0b225c;
+      outline-offset: 2px;
+    }
+
+    #login-error {
+      margin: 0;
+      color: var(--error);
+      font-weight: 700;
+    }
+
+    [hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sign in to Allie</h1>
+    <p id="login-error" role="alert" hidden>Incorrect password. Try again.</p>
+    <form id="login-form">
+      <label for="email">
+        Email address
+        <input id="email" name="email" type="email" autocomplete="email" required>
+      </label>
+      <label for="password">
+        Password
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit">Sign in</button>
+    </form>
+  </main>
+  <script>
+    // Client-side auth gate. The static fixture server has no cookies of its own,
+    // so the "session" is a cookie this page sets only on a correct password.
+    document.getElementById('login-form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      var password = document.getElementById('password').value;
+      var errorEl = document.getElementById('login-error');
+      if (password === 'allie-fixture-pass') {
+        document.cookie = 'allie_session=ok;path=/';
+        location.replace('dashboard.html');
+      } else {
+        errorEl.hidden = false;
+      }
+    });
+  </script>
+</body>
+</html>

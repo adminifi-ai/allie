@@ -20,4 +20,5 @@ jobs:
       - run: cargo test --locked
       - run: npm run worker:smoke
       - run: npm run evidence:smoke
+      - run: npm run auth:smoke
       - run: npm run release:smoke

@@ -883,9 +883,8 @@ fn criterion_cell_status(
         || method == "axe" && deterministic_support.is_some()
     {
         "pass".to_string()
-    } else if method == "human_review" {
-        "needs_review".to_string()
     } else {
+        // Default and the explicit human_review case both fall back to review.
         "needs_review".to_string()
     }
 }

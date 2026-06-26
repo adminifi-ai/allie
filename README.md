@@ -107,6 +107,56 @@ plus a local HTML report:
 The packet reports accessibility evidence status, confidence, and residual
 review needs. It is not a legal compliance guarantee.
 
+## Authenticated Audit
+
+To audit routes behind a login wall, add an optional `auth` block to the
+manifest. Allie establishes a session once per run, then audits the gated routes
+listed in `flow.states`.
+
+```yaml
+credentials:
+  profile: my-app-auth
+  provider: env
+  env: ALLIE_APP_PASSWORD      # the credential value is read from the environment
+  required: true
+auth:
+  start_path: /login           # where the login recipe begins
+  steps:
+    - fill:  { selector: "#email",            value_env: ALLIE_APP_USER }
+    - fill:  { selector: "#password",         value_env: ALLIE_APP_PASSWORD }
+    - click: { selector: "button[type=submit]" }
+    - wait_for: { selector: "#dashboard" }     # success signal: selector OR url_contains
+  authenticated_marker: { selector: "#dashboard" }  # asserted on every gated state
+  # storage_state_env: ALLIE_APP_STORAGE_STATE       # optional SSO hatch (see below)
+```
+
+Two invariants make this trustworthy:
+
+- **Secrets never persist.** A `fill` step carries only the env-var *name*
+  (`value_env`), never a value. The browser worker reads the secret value from
+  its own inherited environment at run time. No credential value is written to
+  `worker-request.json`, the evidence packet, or any artifact.
+- **No silent gaps.** `authenticated_marker` is asserted after navigation on
+  every gated state. If the marker is absent (for example a session was lost and
+  the app bounced back to the login wall — even at HTTP 200), the run records an
+  `auth-lost` finding and **blocks** with a non-zero exit. A login wall is never
+  audited as if it were the app.
+
+For SSO/OAuth flows that a recipe cannot drive, use the `storage_state_env`
+escape hatch: capture a Playwright `storageState` JSON out of band, point an env
+var at its path, and Allie loads the session from that file instead of running
+the login steps.
+
+Run the authenticated-audit smoke (no real secret required) with:
+
+```sh
+npm run auth:smoke
+```
+
+It logs into a local fixture, reaches the gated route, verifies the credential
+value never lands in any artifact, and confirms the negative control (no session
+→ HTTP-200 login wall) blocks instead of passing.
+
 ## WCAG Coverage Report
 
 ```sh
@@ -217,6 +267,7 @@ cargo fmt --check
 cargo test --locked
 npm run worker:smoke
 npm run evidence:smoke
+npm run auth:smoke
 npm run consumer:smoke
 npm run release:smoke
 npm run autonomous:smoke
@@ -226,6 +277,9 @@ cargo run --locked -- release --packet .allie/runs/latest/evidence.json --out .a
 
 The worker smoke proves Playwright plus axe can inspect the checked-in fixture.
 The evidence smoke leaves a stable receipt under `.allie/runs/v0-smoke/`. The
+auth smoke logs into the local auth fixture, proves the gated route is reached
+with no credential value on disk, and proves a session-less run blocks instead
+of auditing the login wall (`.allie/runs/auth-smoke{,-neg}/`). The
 consumer smoke proves `allie init` and `allie verify` produce JSON, HTML,
 Markdown, JUnit, and SARIF reporters from the same local manifest contract. The
 release smoke projects that packet into `.allie/releases/v0-smoke/`. The final
