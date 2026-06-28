@@ -16,9 +16,4 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: cargo fmt --check
-      - run: cargo test --locked
-      - run: npm run worker:smoke
-      - run: npm run evidence:smoke
-      - run: npm run auth:smoke
-      - run: npm run release:smoke
+      - run: npm run verify
