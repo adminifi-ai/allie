@@ -30,12 +30,11 @@ Allie should let a compliance engineer point it at an application and receive:
 2. Generated Playwright and axe coverage that replays through real browser
    evidence before it can enforce release policy.
 3. A complete WCAG 2.2 A/AA obligation ledger with drilldown from criterion to
-   state, finding, artifact, agentic context, waiver, and remediation.
+   state, finding, artifact, agentic context, waiver, and replay proof.
 4. Agentic vision review for criteria that require judgment, with redaction
    receipts and neutral findings until promoted by scripted proof or human
    attestation.
-5. Release enforcement and remediation guidance that are packet projections, not
-   a separate status model.
+5. Release enforcement that is a packet projection, not a separate status model.
 
 ## Now
 
@@ -62,12 +61,10 @@ criterion-by-surface drilldown over scanner-rule parity.
 ## Later
 
 1. Enable approved live multimodal provider calls behind the model gateway.
-2. Add richer remediation patch adapters, before/after packet comparison, and
-   reviewer attestations.
-3. Wire GitHub Checks, PR comments, and hosted evidence viewer from the same
+2. Wire GitHub Checks, PR comments, and hosted evidence viewer from the same
    packets.
-4. Add SME review workbench, reviewer attestations, and promotion workflows.
-5. Add browser extension capture companion, multi-repo dashboard, and trends.
+3. Add SME review workbench, reviewer attestations, and promotion workflows.
+4. Add browser extension capture companion, multi-repo dashboard, and trends.
 
 ## Code Health Backlog
 

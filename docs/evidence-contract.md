@@ -102,7 +102,6 @@ Each finding should include:
 - source;
 - affected route/state;
 - artifact refs;
-- suggested remediation;
 - replay command.
 
 ## Verdicts

@@ -40,12 +40,12 @@ A common, demanding deployment target:
    configs render a given page identically, so judge the visually-distinct ones
    once). See the multi-page section of `criteria-assessability-research.md`.
 
-2. **Finding ownership / remediation attribution.** A failure caused by a
+2. **Finding ownership / action attribution.** A failure caused by a
    client's theme or authored content is the client's to fix (often via a
    contractual conversation, not a code change), but the platform is
    accountable. A new classification — attributing each finding to a layer
-   (**platform code vs client theme vs client content**) and a remediation owner
-   — would be high-value and is not modeled today.
+   (**platform code vs client theme vs client content**) and likely action owner
+   — would be high-value audit context and is not modeled today.
 
 3. **Provider allowlist + data-retention must be *enforced*, not just declared.**
    The manifest already carries `provider_allowlist` and `zdr_required`, but as
@@ -65,12 +65,11 @@ A common, demanding deployment target:
    mode of periodic-only jobs: nobody reads them — so PR-time signal on *new*
    code matters.
 
-5. **Auto-fix split.** Findings naturally divide into "low-hanging fruit"
-   (e.g. a missing `alt` attribute) that could be turned into a suggested-fix PR
-   by a worker, and findings that require a product/design decision (theme,
-   contrast, layout). Keeping remediation separate from scanning — and surfacing
-   that split — is consistent with Allie's scanning-not-remediation stance.
-   (`allie remediate` is the existing seam.)
+5. **Actionability split.** Findings naturally divide into "low-hanging fruit"
+   (e.g. a missing `alt` attribute) and findings that require a product/design
+   decision (theme, contrast, layout). Allie should surface that split as audit
+   context only; any fix workflow belongs in a downstream product consuming the
+   evidence packet.
 
 6. **Host bridges beyond GitHub.** An Azure DevOps bridge sits alongside the
    GitHub Actions one — `docs/ci/azure-pipelines-allie-verify.yml` already

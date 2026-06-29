@@ -460,7 +460,6 @@ pub(crate) struct Finding {
     pub(crate) affected_route: String,
     pub(crate) affected_state: String,
     pub(crate) artifact_refs: Vec<String>,
-    pub(crate) suggested_remediation: String,
     pub(crate) replay_command: String,
 }
 

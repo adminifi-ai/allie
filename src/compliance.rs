@@ -577,7 +577,7 @@ fn human_review_status(status: &str, evidence_class: &str) -> String {
             "not_required_for_machine_evidence".to_string()
         }
         ("pass", _) => "attested_or_promoted".to_string(),
-        ("fail", _) => "required_for_remediation_signoff".to_string(),
+        ("fail", _) => "required_for_release_signoff".to_string(),
         ("needs_review", _) => "required".to_string(),
         ("not_tested", _) => "required_before_claim".to_string(),
         ("not_applicable", _) => "not_required".to_string(),

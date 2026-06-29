@@ -137,30 +137,8 @@ Requirements:
 - Redact screenshots, DOM, console logs, network summaries, and prompts where configured.
 - Route real customer-like data only to approved ZDR-capable providers.
 - Never silently fall back from approved providers to unapproved providers.
-- Keep audit logs for model calls, generated findings, PR comments, remediation attempts, and waiver decisions.
+- Keep audit logs for model calls, generated findings, evidence projections, PR comments, and waiver decisions.
 - Bound exploration by route, time, spend, screenshot/video count, model calls, and retry limits.
-
-## Remediation Model
-
-Remediation should arrive after evidence is stable.
-
-Initial remediation output:
-
-- issue summary;
-- affected surface/flow/state;
-- standard obligation;
-- evidence links;
-- likely source files when known;
-- suggested fix;
-- confidence level;
-- replay command.
-
-Later remediation behavior:
-
-- draft branch-only PRs;
-- include tests or flow updates where possible;
-- never auto-merge;
-- never patch without linking to evidence.
 
 ## Acceptance For V0
 

@@ -2,6 +2,10 @@
 
 Priority: P2 - Status: done - Estimate: XL
 
+> Superseded by backlog 017: Allie is audit/map/report only. The remediation
+> CLI, queue, action ledger, and patch plan were removed from the active product
+> surface; release projection remains.
+
 ## PRD Summary
 
 - User: compliance engineers and frontend teams closing accessibility findings.

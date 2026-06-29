@@ -151,12 +151,6 @@ struct ReviewOptions {
 }
 
 #[derive(Debug)]
-struct RemediateOptions {
-    packet_path: PathBuf,
-    out_dir: PathBuf,
-}
-
-#[derive(Debug)]
 struct MapOptions {
     manifest_path: PathBuf,
     out_dir: PathBuf,
@@ -224,14 +218,6 @@ struct PromoteFlowReceipt {
 struct ReviewReceipt {
     packet_path: PathBuf,
     report_path: PathBuf,
-}
-
-#[derive(Debug)]
-struct RemediationReceipt {
-    queue_path: PathBuf,
-    ledger_path: PathBuf,
-    report_path: PathBuf,
-    patch_plan_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -504,30 +490,6 @@ pub fn run_cli_with_io(
                 ExitClass::Usage.code()
             }
         },
-        Some("remediate") => match parse_remediate_options(&args[1..]) {
-            Ok(options) => match run_remediate(options) {
-                Ok(receipt) => {
-                    let _ = writeln!(
-                        stdout,
-                        "Remediation queue: {}",
-                        receipt.queue_path.display()
-                    );
-                    let _ = writeln!(stdout, "Action ledger: {}", receipt.ledger_path.display());
-                    let _ = writeln!(stdout, "Report: {}", receipt.report_path.display());
-                    let _ = writeln!(stdout, "Patch plan: {}", receipt.patch_plan_path.display());
-                    ExitClass::Success.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
         Some("release") => match parse_release_options(&args[1..]) {
             Ok(options) => match run_release(options) {
                 Ok(receipt) => {
@@ -563,7 +525,7 @@ pub fn run_cli_with_io(
 fn print_usage(writer: &mut dyn Write) {
     let _ = writeln!(
         writer,
-        "Usage:\n  allie init [--manifest .allie/manifest.yml] [--app-name <name>] [--base-url <url> | --fixture-dir <dir>] [--force]\n  allie verify [--manifest .allie/manifest.yml] [--out .allie/verify/latest] [--project-root <dir>] [--changed-surface <id>] [--agent local|opencode|omp] [--stale-after-days <days>]\n  allie run --manifest <flow.yml> --out <output-dir>\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie remediate --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
+        "Usage:\n  allie init [--manifest .allie/manifest.yml] [--app-name <name>] [--base-url <url> | --fixture-dir <dir>] [--force]\n  allie verify [--manifest .allie/manifest.yml] [--out .allie/verify/latest] [--project-root <dir>] [--changed-surface <id>] [--agent local|opencode|omp] [--stale-after-days <days>]\n  allie run --manifest <flow.yml> --out <output-dir>\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
     );
 }
 
@@ -842,38 +804,6 @@ fn parse_review_options(args: &[String]) -> std::result::Result<ReviewOptions, S
     }
 
     Ok(ReviewOptions {
-        packet_path: packet_path.ok_or_else(|| "--packet is required".to_string())?,
-        out_dir: out_dir.ok_or_else(|| "--out is required".to_string())?,
-    })
-}
-
-fn parse_remediate_options(args: &[String]) -> std::result::Result<RemediateOptions, String> {
-    let mut packet_path = None;
-    let mut out_dir = None;
-    let mut index = 0;
-
-    while index < args.len() {
-        match args[index].as_str() {
-            "--packet" => {
-                index += 1;
-                let value = args
-                    .get(index)
-                    .ok_or_else(|| "--packet requires a path".to_string())?;
-                packet_path = Some(PathBuf::from(value));
-            }
-            "--out" => {
-                index += 1;
-                let value = args
-                    .get(index)
-                    .ok_or_else(|| "--out requires a directory".to_string())?;
-                out_dir = Some(PathBuf::from(value));
-            }
-            unexpected => return Err(format!("unexpected argument: {unexpected}")),
-        }
-        index += 1;
-    }
-
-    Ok(RemediateOptions {
         packet_path: packet_path.ok_or_else(|| "--packet is required".to_string())?,
         out_dir: out_dir.ok_or_else(|| "--out is required".to_string())?,
     })
@@ -1864,7 +1794,7 @@ pub(crate) fn residual_review_need(method: &str, status: &str) -> String {
                 .to_string()
         }
         "pass" => "Evidence is present; retain replay proof for review.".to_string(),
-        "fail" => "Remediate, rerun, and sign off with updated evidence.".to_string(),
+        "fail" => "Fix outside Allie, rerun, and sign off with updated evidence.".to_string(),
         "waived" | "risk_accepted" => {
             "Review waiver provenance and expiry before release reliance.".to_string()
         }
@@ -2142,7 +2072,6 @@ fn run_review(options: ReviewOptions) -> Result<ReviewReceipt> {
             .cloned()
             .unwrap_or_else(|| "run".to_string()),
         artifact_refs: vec![prompt_artifact.id, response_artifact.id, redaction_artifact.id],
-        suggested_remediation: "Use the linked prompt/response as a review hypothesis; promote only after scripted reproduction or human attestation.".to_string(),
         replay_command: packet.replay.command.clone(),
     });
 
@@ -2156,111 +2085,11 @@ fn run_review(options: ReviewOptions) -> Result<ReviewReceipt> {
     })
 }
 
-fn run_remediate(options: RemediateOptions) -> Result<RemediationReceipt> {
-    fs::create_dir_all(&options.out_dir).map_err(|source| AllieError::Io {
-        context: format!(
-            "create remediation output directory {}",
-            options.out_dir.display()
-        ),
-        source,
-    })?;
-    let packet: EvidencePacket = read_json_file(&options.packet_path)?;
-    validate_release_packet(&packet)?;
-    let items = packet
-        .findings
-        .iter()
-        .filter(|finding| finding.status == "fail" || finding.evidence_class == "agentic")
-        .map(|finding| RemediationItem {
-            id: format!("remediate-{}", finding.id),
-            finding_refs: vec![finding.id.clone()],
-            standard_obligation: finding.standard_obligation.clone(),
-            affected_state: finding.affected_state.clone(),
-            artifact_refs: finding.artifact_refs.clone(),
-            source_hint: format!(
-                "inspect route {} state {}",
-                finding.affected_route, finding.affected_state
-            ),
-            suggested_fix: finding.suggested_remediation.clone(),
-            confidence: finding.confidence.clone(),
-            replay_command: finding.replay_command.clone(),
-            policy_effect: if finding.evidence_class == "agentic" {
-                "needs_review"
-            } else {
-                "blocks_release"
-            }
-            .to_string(),
-        })
-        .collect::<Vec<_>>();
-    let queue = RemediationQueue {
-        schema: "allie.remediation-queue.v0".to_string(),
-        source_packet: options.packet_path.to_string_lossy().to_string(),
-        items,
-    };
-    let ledger = serde_json::json!({
-        "schema": "allie.action-ledger.v0",
-        "source_packet": options.packet_path,
-        "actions": [{
-            "id": "remediation-queue-created",
-            "kind": "queue",
-            "status": "recorded",
-            "requires_replay_before_close": true
-        }]
-    });
-    let queue_path = options.out_dir.join("remediation-queue.json");
-    let ledger_path = options.out_dir.join("action-ledger.json");
-    let report_path = options.out_dir.join("remediation-report.html");
-    let patch_plan_path = options.out_dir.join("patch-plan.md");
-    write_json_pretty(&queue_path, &queue)?;
-    write_json_pretty(&ledger_path, &ledger)?;
-    write_string(&report_path, &render_remediation_report(&queue))?;
-    write_string(&patch_plan_path, &render_patch_plan(&queue))?;
-    Ok(RemediationReceipt {
-        queue_path,
-        ledger_path,
-        report_path,
-        patch_plan_path,
-    })
-}
-
 fn render_review_report(packet: &EvidencePacket) -> String {
     format!(
         r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Allie Agentic Review</title></head><body><main><h1>Agentic review</h1><p>Review attempts: {}</p><p>Model-only findings stay neutral until promoted by scripted proof or human attestation.</p></main></body></html>"#,
         packet.review.len()
     )
-}
-
-fn render_remediation_report(queue: &RemediationQueue) -> String {
-    let items = queue
-        .items
-        .iter()
-        .map(|item| {
-            format!(
-                "<li><strong>{}</strong><br>{}<br><code>{}</code></li>",
-                escape_html(&item.standard_obligation),
-                escape_html(&item.suggested_fix),
-                escape_html(&item.replay_command)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
-    format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Allie Remediation</title></head><body><main><h1>Remediation workbench</h1><ul>{}</ul><p>No patch should be applied without evidence refs and replay proof.</p></main></body></html>"#,
-        items
-    )
-}
-
-fn render_patch_plan(queue: &RemediationQueue) -> String {
-    let mut output = String::from("# Allie Patch Plan\n\n");
-    output.push_str("This is a reviewable remediation draft, not an applied patch. Apply changes only on a branch and rerun the replay command.\n\n");
-    for item in &queue.items {
-        output.push_str(&format!("## {}\n\n", item.id));
-        output.push_str(&format!("- Findings: {}\n", item.finding_refs.join(", ")));
-        output.push_str(&format!("- Obligation: {}\n", item.standard_obligation));
-        output.push_str(&format!("- Source hint: {}\n", item.source_hint));
-        output.push_str(&format!("- Suggested fix: {}\n", item.suggested_fix));
-        output.push_str(&format!("- Replay: `{}`\n\n", item.replay_command));
-    }
-    output
 }
 
 struct ReleaseProjection {
@@ -3317,27 +3146,6 @@ impl RunFailure {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct RemediationQueue {
-    schema: String,
-    source_packet: String,
-    items: Vec<RemediationItem>,
-}
-
-#[derive(Debug, Serialize)]
-struct RemediationItem {
-    id: String,
-    finding_refs: Vec<String>,
-    standard_obligation: String,
-    affected_state: String,
-    artifact_refs: Vec<String>,
-    source_hint: String,
-    suggested_fix: String,
-    confidence: String,
-    replay_command: String,
-    policy_effect: String,
-}
-
 #[expect(
     clippy::too_many_arguments,
     reason = "packet writer is the narrow boundary where each receipt component stays explicit"
@@ -3674,7 +3482,9 @@ fn findings_from_response(
                 .map(move |(index, violation)| {
                     let refs = artifacts
                         .iter()
-                        .filter(|artifact| artifact.related_flow_state.as_deref() == Some(&state.id))
+                        .filter(|artifact| {
+                            artifact.related_flow_state.as_deref() == Some(&state.id)
+                        })
                         .map(|artifact| artifact.id.clone())
                         .collect::<Vec<_>>();
                     Finding {
@@ -3698,10 +3508,6 @@ fn findings_from_response(
                         affected_route: state.route.clone(),
                         affected_state: state.id.clone(),
                         artifact_refs: refs,
-                        suggested_remediation: format!(
-                            "Review axe rule {} in the linked raw axe JSON and rerun the replay command.",
-                            violation.id
-                        ),
                         replay_command: replay_command.to_string(),
                     }
                 })
@@ -3723,8 +3529,6 @@ fn findings_from_response(
                 affected_route: state.route.clone(),
                 affected_state: state.id.clone(),
                 artifact_refs: Vec::new(),
-                suggested_remediation:
-                    "Fix the route or manifest path, then rerun the replay command.".to_string(),
                 replay_command: replay_command.to_string(),
             });
         }
@@ -3744,9 +3548,6 @@ fn findings_from_response(
             affected_route: failure.route.clone(),
             affected_state: failure.state_id.clone(),
             artifact_refs: Vec::new(),
-            suggested_remediation:
-                "Fix the worker response or manifest requirements, then rerun the replay command."
-                    .to_string(),
             replay_command: replay_command.to_string(),
         });
     }
@@ -3765,9 +3566,6 @@ fn findings_from_response(
             affected_route: "run".to_string(),
             affected_state: "run".to_string(),
             artifact_refs: Vec::new(),
-            suggested_remediation:
-                "Fix the run configuration or environment, then rerun the replay command."
-                    .to_string(),
             replay_command: replay_command.to_string(),
         });
     }
@@ -3787,9 +3585,6 @@ fn findings_from_response(
                 affected_route: "run".to_string(),
                 affected_state: "run".to_string(),
                 artifact_refs: Vec::new(),
-                suggested_remediation:
-                    "Inspect worker-request.json and worker stderr, then rerun the replay command."
-                        .to_string(),
                 replay_command: replay_command.to_string(),
             });
         }
@@ -3809,9 +3604,6 @@ fn findings_from_response(
             affected_route: "run".to_string(),
             affected_state: "run".to_string(),
             artifact_refs: Vec::new(),
-            suggested_remediation:
-                "Stabilize the fixture or mark known nondeterminism in the manifest before release use."
-                    .to_string(),
             replay_command: replay_command.to_string(),
         });
     }
@@ -5660,7 +5452,6 @@ mod tests {
             affected_route: "/".to_string(),
             affected_state: "home".to_string(),
             artifact_refs: vec!["screenshot-home".to_string()],
-            suggested_remediation: "Review image alternatives.".to_string(),
             replay_command: packet.replay.command.clone(),
         });
 
@@ -5883,11 +5674,7 @@ mod tests {
         assert!(job_dir.join("steps/run/evidence.json").exists());
         assert!(job_dir.join("steps/report/compliance-report.json").exists());
         assert!(job_dir.join("steps/review/evidence-reviewed.json").exists());
-        assert!(
-            job_dir
-                .join("steps/remediation/remediation-queue.json")
-                .exists()
-        );
+        assert!(!job_dir.join("steps/remediation").exists());
         assert!(job_dir.join("steps/release/release-summary.json").exists());
 
         let job: serde_json::Value =
@@ -5915,6 +5702,7 @@ mod tests {
         assert!(events.contains("\"event\":\"job_started\""));
         assert!(events.contains("\"event\":\"step_completed\""));
         assert!(events.contains("\"step\":\"map\""));
+        assert!(!events.contains("\"step\":\"remediation\""));
         assert!(events.contains("\"event\":\"job_finished\""));
     }
 
@@ -5997,7 +5785,7 @@ mod tests {
         let events = fs::read_to_string(job_dir.join("events.jsonl")).unwrap();
         assert!(events.contains("\"event\":\"job_cancel_requested\""));
         assert!(events.contains("\"event\":\"job_resumed\""));
-        assert!(events.matches("\"event\":\"step_started\"").count() >= 16);
+        assert!(events.matches("\"event\":\"step_started\"").count() >= 12);
     }
 
     #[test]
@@ -6116,50 +5904,14 @@ mod tests {
     }
 
     #[test]
-    fn remediation_cli_writes_evidence_linked_queue() {
-        let temp = tempdir().unwrap();
-        let packet_path = write_failing_evidence_packet(&temp.path().join("run"));
-        let out_dir = temp.path().join("remediation");
+    fn remediation_cli_is_not_part_of_allie() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
 
-        let code = run_cli_with_io(
-            vec![
-                "remediate".to_string(),
-                "--packet".to_string(),
-                packet_path.to_string_lossy().to_string(),
-                "--out".to_string(),
-                out_dir.to_string_lossy().to_string(),
-            ],
-            &mut stdout,
-            &mut stderr,
-        );
+        let code = run_cli_with_io(vec!["remediate".to_string()], &mut stdout, &mut stderr);
 
-        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
-        let queue_path = out_dir.join("remediation-queue.json");
-        assert!(queue_path.exists());
-        assert!(out_dir.join("action-ledger.json").exists());
-        assert!(out_dir.join("remediation-report.html").exists());
-        assert!(out_dir.join("patch-plan.md").exists());
-        let queue: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(queue_path).unwrap()).unwrap();
-        assert_eq!(queue["schema"], "allie.remediation-queue.v0");
-        assert_eq!(
-            queue["items"][0]["finding_refs"][0],
-            "login-form-axe-color-contrast-1"
-        );
-        assert!(
-            queue["items"][0]["replay_command"]
-                .as_str()
-                .unwrap()
-                .contains("run --manifest")
-        );
-        assert!(
-            !queue["items"][0]["artifact_refs"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        assert_eq!(code, ExitClass::Usage.code());
+        assert!(String::from_utf8_lossy(&stderr).contains("unknown command"));
     }
 
     #[test]
@@ -6598,7 +6350,7 @@ flow:
             Vec::new(),
             Utc::now(),
             Utc::now(),
-            "run-remediation-cli".to_string(),
+            "run-failing-evidence".to_string(),
         )
         .unwrap()
         .evidence_path

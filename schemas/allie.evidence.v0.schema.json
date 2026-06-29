@@ -128,7 +128,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "title", "description", "evidence_class", "standard_obligation", "severity", "status", "confidence", "source", "affected_route", "affected_state", "artifact_refs", "suggested_remediation", "replay_command"],
+        "required": ["id", "title", "description", "evidence_class", "standard_obligation", "severity", "status", "confidence", "source", "affected_route", "affected_state", "artifact_refs", "replay_command"],
         "properties": {
           "id": { "type": "string" },
           "title": { "type": "string" },

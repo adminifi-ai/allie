@@ -279,8 +279,8 @@ agent review of vendor claims.
   local CLI contract.
 - **Evidence artifacts and replay:** Dashboards, reports, scores, and tracked
   issues; replayable local packets are not the primary artifact.
-- **Manual review workflow:** Enterprise accessibility workflow and remediation
-  guidance, not a code-repo-first manual review packet.
+- **Manual review workflow:** Enterprise accessibility workflow and issue
+  guidance, not a code-repo-first audit packet.
 - **AI/agentic claims:** AI-supported rules to expand WCAG coverage and improve
   detection accuracy are public in help content.
 - **Privacy/governance posture:** Enterprise platform governance and ACR-facing
@@ -345,7 +345,7 @@ agent review of vendor claims.
 - **CI/PR integration:** ARC Platform describes integrations and continuous
   accessibility data flows; API material references CI/CD use.
 - **Evidence artifacts and replay:** Dashboards, monitoring data, findings, and
-  knowledge-base remediation; replay semantics belong to ARC workflows.
+  knowledge-base guidance; replay semantics belong to ARC workflows.
 - **Manual review workflow:** ARC consolidates automated and manual audit data in
   one central location.
 - **AI/agentic claims:** Not the cited public differentiator.
@@ -381,7 +381,7 @@ agent review of vendor claims.
 ## Differentiation Bets
 
 1. **Evidence packet as the product interface.** Every scanner, agent, browser
-   run, manual review, waiver, and remediation action should project into the
+   run, manual review, waiver, and release projection should project into the
    same versioned packet graph.
 2. **Replay before enforcement.** Generated or agentic findings remain advisory
    until replayed through deterministic/scripted evidence or promoted by human

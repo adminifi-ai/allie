@@ -19,7 +19,7 @@ npm run autonomous:smoke
 npm run size:smoke
 ```
 
-The browser worker smoke, V0 evidence smoke, consumer contract smoke, release projection smoke, and autonomous workbench smoke are part of the gate; keep them green when worker, fixture, packet, report, release-decision, discovery, review, remediation, verification, or consumer CLI behavior changes.
+The browser worker smoke, V0 evidence smoke, consumer contract smoke, release projection smoke, and autonomous workbench smoke are part of the gate; keep them green when worker, fixture, packet, report, release-decision, discovery, review, verification, or consumer CLI behavior changes.
 
 ## Design Rules
 

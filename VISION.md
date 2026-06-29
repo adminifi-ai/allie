@@ -21,8 +21,8 @@ proven automatically; and renders a defensible, replayable picture of
 accessibility status tied to a specific code revision.
 
 Allie does not remediate. Fixing what the audit finds — by hand, by ticket, or by
-a downstream remediation agent — is a separate product that consumes Allie's
-evidence. Allie's contribution is that the report is already deep, structured, and
+a downstream fixing agent — is a separate product that consumes Allie's evidence.
+Allie's contribution is that the report is already deep, structured, and
 replayable when the fix begins, so nothing has to be re-investigated.
 
 This is the project north star. `SPEC.md` is the product contract — acceptance
@@ -92,7 +92,7 @@ breaks one of them, it is the wrong change regardless of how convenient it is.
 Allie is not a scanner, a single score, a generic agent platform, or a legal
 compliance promise. It is an evidence system whose primary interface is a set of
 versioned packets tied to discovered surfaces, generated flows, policy profiles,
-code revisions, artifact sets, review attempts, remediation context, and replay
+code revisions, artifact sets, review attempts, diagnostic context, and replay
 commands.
 
 The repo should refuse work that erodes the invariants above, specifically:
@@ -123,7 +123,7 @@ can be revisited if evidence says we bet wrong.
    story packet -> flow-plan packet -> generated E2E candidate -> evidence packet
    -> release decision. Each step is an inspectable artifact, not a black box.
 2. A complete WCAG obligation ledger is the reporting spine. Each criterion needs
-   status, scope, method, artifacts, confidence, residual review, and remediation
+   status, scope, method, artifacts, confidence, residual review, and diagnostic
    context instead of a global score.
 3. Committed agentic verdicts beat "needs review." Judgment-heavy criteria should
    read as decisions — a pass/fail rendered from inlined evidence (asterisked) —
@@ -175,8 +175,8 @@ agent or a human — can start without re-investigating. It explains every
 release-blocking decision in terms of evidence, and never claims legal compliance.
 
 **Beyond.** Allie is the default way a team brings accessibility evidence to a
-release conversation — the harness whose packets a remediation agent, an auditor,
-and a release manager all trust without re-litigating the findings. The category
+release conversation — the harness whose packets a fixing agent, an auditor, and
+a release manager all trust without re-litigating the findings. The category
 shifts from "we ran a scanner once" to "every release carries reproducible
 accessibility evidence," and Allie is the reference implementation of what that
 evidence should contain.

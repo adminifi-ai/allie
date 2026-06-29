@@ -241,15 +241,15 @@ cargo run --locked -- discover --manifest examples/autonomous-workbench.yml --ou
 cargo run --locked -- promote-flow --discovery .allie/discovery/autonomous/discovery.json --flow-plan .allie/discovery/autonomous/flow-plan.json --out .allie/discovery/autonomous/generated-flow.yml
 cargo run --locked -- run --manifest .allie/discovery/autonomous/generated-flow.yml --out .allie/runs/autonomous
 cargo run --locked -- review --packet .allie/runs/autonomous/evidence.json --out .allie/reviews/autonomous
-cargo run --locked -- remediate --packet .allie/runs/autonomous/evidence.json --out .allie/remediation/autonomous
+cargo run --locked -- release --packet .allie/reviews/autonomous/evidence-reviewed.json --out .allie/releases/autonomous --changed-surface settings
 ```
 
 The autonomous loop discovers fixture surfaces, promotes generated flow
 candidates into a replayable manifest, captures axe, screenshot, DOM,
 accessibility-tree, keyboard, and trace artifacts, adds offline agentic review
-context with redaction receipts, and writes an evidence-linked remediation
-queue. Generated and agentic claims do not enforce release policy until replayed,
-scripted, or human-attested.
+context with redaction receipts, and projects the release decision. Generated
+and agentic claims do not enforce release policy until replayed, scripted, or
+human-attested.
 
 ## Local Verification
 
@@ -286,8 +286,7 @@ release smoke projects that packet into `.allie/releases/v0-smoke/`. The final
 two commands are the V0 live oracle and release projection, leaving inspectable
 evidence under `.allie/runs/latest/` and `.allie/releases/latest/`.
 The autonomous smoke leaves discovery, generated-flow, richer evidence, review,
-remediation, and blocked-release receipts under `.allie/*/autonomous-smoke/`.
-It also leaves durable workbench lifecycle receipts under
-`.allie/jobs/autonomous-smoke/`.
+and blocked-release receipts under `.allie/*/autonomous-smoke/`. It also leaves
+durable workbench lifecycle receipts under `.allie/jobs/autonomous-smoke/`.
 
 For a cold-start verification path, see [docs/verification.md](docs/verification.md).

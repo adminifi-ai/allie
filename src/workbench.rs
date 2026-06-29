@@ -1,10 +1,9 @@
 use crate::{
     AgentRunnerKind, AllieError, DiscoveryOptions, ExitClass, FlowManifest, FlowPlanPacket,
-    MapOptions, PromoteFlowOptions, ReleaseOptions, RemediateOptions, ReportOptions, Result,
-    ReviewOptions, RunOptions, default_project_root_for_manifest, new_job_id, now_utc,
-    path_relative_to, read_json_file, run_compliance_report, run_discovery, run_map,
-    run_promote_flow, run_release, run_remediate, run_review, run_v0, status_for_exit_class,
-    write_string, write_string_atomic,
+    MapOptions, PromoteFlowOptions, ReleaseOptions, ReportOptions, Result, ReviewOptions,
+    RunOptions, default_project_root_for_manifest, new_job_id, now_utc, path_relative_to,
+    read_json_file, run_compliance_report, run_discovery, run_map, run_promote_flow, run_release,
+    run_review, run_v0, status_for_exit_class, write_string, write_string_atomic,
 };
 use crate::{DEFAULT_WORKBENCH_IDLE_TIMEOUT_MS, DEFAULT_WORKBENCH_MAX_RUNTIME_MS, JOB_SCHEMA};
 use serde::{Deserialize, Serialize};
@@ -212,7 +211,6 @@ fn run_workbench_start_with_job(
     let run_dir = options.out_dir.join("steps/run");
     let report_dir = options.out_dir.join("steps/report");
     let review_dir = options.out_dir.join("steps/review");
-    let remediation_dir = options.out_dir.join("steps/remediation");
     let release_dir = options.out_dir.join("steps/release");
 
     if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "discover")? {
@@ -408,37 +406,6 @@ fn run_workbench_start_with_job(
         Some(&review.packet_path),
         ExitClass::Success,
         "agentic review context written",
-    )?;
-    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
-        return Ok(receipt);
-    }
-
-    if let Some(receipt) =
-        workbench_start_step_or_cancel(&options.out_dir, &mut job, "remediation")?
-    {
-        return Ok(receipt);
-    }
-    let remediation = match run_remediate(RemediateOptions {
-        packet_path: run.evidence_path.clone(),
-        out_dir: remediation_dir,
-    }) {
-        Ok(receipt) => receipt,
-        Err(error) => return workbench_step_error(&options.out_dir, job, "remediation", error),
-    };
-    job.pointers.remediation_queue =
-        Some(path_relative_to(&options.out_dir, &remediation.queue_path));
-    job.artifacts.push(WorkbenchArtifactRef {
-        kind: "remediation_queue".to_string(),
-        path: path_relative_to(&options.out_dir, &remediation.queue_path),
-    });
-    workbench_step_complete(
-        &options.out_dir,
-        &mut job,
-        "remediation",
-        "completed",
-        Some(&remediation.queue_path),
-        ExitClass::Success,
-        "remediation queue written",
     )?;
     if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
         return Ok(receipt);
@@ -928,7 +895,6 @@ struct WorkbenchPointers {
     compliance_html: Option<String>,
     reviewed_packet: Option<String>,
     review_report: Option<String>,
-    remediation_queue: Option<String>,
     release_summary: Option<String>,
     release_report: Option<String>,
 }

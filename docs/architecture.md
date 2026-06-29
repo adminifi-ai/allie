@@ -81,8 +81,7 @@ Build in this order:
 5. Hosted evidence viewer.
 6. Dashboard and trend ledger.
 7. SME review workbench.
-8. Remediation PR drafting.
-9. Browser extension capture companion.
+8. Browser extension capture companion.
 
 ## Design Constraint
 
