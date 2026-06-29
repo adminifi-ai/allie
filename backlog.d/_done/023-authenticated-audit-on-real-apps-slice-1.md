@@ -1,6 +1,6 @@
 # Authenticated audit on a real app (015 slice 1)
 
-Priority: P0 · Status: ready · Estimate: L
+Priority: P0 · Status: done · Estimate: L
 
 > Shaped slice 1 of epic [015](015-prove-allie-on-real-authenticated-apps.md).
 > This is the `/deliver`-ready context packet; later children of 015 (live
@@ -65,13 +65,13 @@ auth:
 - **Entrypoint:** flows through the existing `run` subcommand (`lib.rs:900-940`) → `invoke_worker` → `write_packet_and_report`. `allie verify` inherits it automatically (it composes `run`).
 
 ## Oracle
-- [ ] `fixtures/auth/` static fixture (login form sets a cookie via JS; `/dashboard` JS-redirects to `/login` without it) and `examples/auth-fixture-flow.yml` exist.
-- [ ] `scripts/auth-smoke.sh` + `npm run auth:smoke`: logs into the fixture, reaches gated `/dashboard`, and the worker records the per-state auth assertion as satisfied (final URL is the gated route AND `authenticated_marker` present) — not the login redirect.
-- [ ] Negative control (no/bad creds on the gated route): the auth assertion fails → an `auth-lost` `state_error` is recorded → the run BLOCKS (non-zero / blocked exit class). Assert the exit class actually flips; an HTTP-200 login wall must NOT pass.
-- [ ] Secret-grep clean: a NEW test that actually sets a secret env var, runs the auth flow, then greps the value across `worker-request.json`, the evidence packet, screenshots, DOM snapshots, AND the trace file (`run.mjs:194` serializes URL + console/network errors — a token in a query string would leak there) → zero hits. (`lib.rs:4812` only covers the env-name path; its secret is never set, so this is a new case, not a reuse.)
-- [ ] storageState hatch: a manifest with `auth.storage_state_env` loads the session and audits a gated route.
-- [ ] `cargo fmt --check`, `cargo test --locked`, `cargo clippy --locked -- -D warnings` pass; `npm run worker:smoke evidence:smoke consumer:smoke autonomous:smoke size:smoke` stay green.
-- [ ] Live dogfood (manual receipt — not CI-falsifiable): `allie run` (or `verify`) against `phrazzld/vanity` (base_url + form login or storageState) produces an evidence packet for ≥1 authenticated route; receipt committed under `docs/dogfood/vanity/`. If vanity has no gated surface, escalate to `misty-step/misty-step`.
+- [x] `fixtures/auth/` static fixture (login form sets a cookie via JS; `/dashboard` JS-redirects to `/login` without it) and `examples/auth-fixture-flow.yml` exist.
+- [x] `scripts/auth-smoke.sh` + `npm run auth:smoke`: logs into the fixture, reaches gated `/dashboard`, and the worker records the per-state auth assertion as satisfied (final URL is the gated route AND `authenticated_marker` present) — not the login redirect.
+- [x] Negative control (no/bad creds on the gated route): the auth assertion fails → an `auth-lost` `state_error` is recorded → the run BLOCKS (non-zero / blocked exit class). Assert the exit class actually flips; an HTTP-200 login wall must NOT pass.
+- [x] Secret-grep clean: a NEW test that actually sets a secret env var, runs the auth flow, then greps the value across `worker-request.json`, the evidence packet, screenshots, DOM snapshots, AND the trace file (`run.mjs:194` serializes URL + console/network errors — a token in a query string would leak there) → zero hits. (`lib.rs:4812` only covers the env-name path; its secret is never set, so this is a new case, not a reuse.)
+- [x] storageState hatch: a manifest with `auth.storage_state_env` loads the session and audits a gated route.
+- [x] `cargo fmt --check`, `cargo test --locked`, `cargo clippy --locked -- -D warnings` pass; `npm run worker:smoke evidence:smoke consumer:smoke autonomous:smoke size:smoke` stay green.
+- [x] Live dogfood (manual receipt — not CI-falsifiable): `allie run` (or `verify`) against `phrazzld/vanity` (base_url + form login or storageState) produces an evidence packet for ≥1 authenticated route; receipt committed under `docs/dogfood/vanity/`. If vanity has no gated surface, escalate to `misty-step/misty-step`.
 
 ## Verification System
 - **Claim:** Allie logs into a real authenticated web app and audits authenticated surfaces, secrets never persisted.
@@ -103,3 +103,28 @@ Fresh-context adversarial critique (2026-06-25, repo-grounded, different context
 - **Confirmed sound (no change):** secrets-via-inherited-env (`Command::new("node")` has no env scrub; `WorkerRequest` has no value field); worker exceptions → exit 2; one shared context carries the session across states.
 
 Second fresh-context review (on the built diff, 2026-06-25) — verdict **ship, no blockers**. Nits fixed: stale `run.mjs` marker comment; added `trace: true` to the fixture state so the secret-grep actually covers the trace artifact (the noted leak vector). **Deferred to milestone 2 (the live dogfood):** the per-state marker `waitForSelector` uses a fixed 5s timeout — fine for the fixture, but a genuinely slow real authed page could false-positive as `auth-lost`; revisit deriving it from `policy.worker_timeout_ms` if real-app drift appears.
+
+## Delivery Receipt
+
+Delivered on 2026-06-29 in branch `deliver/023-authenticated-audit-slice1`.
+
+- Added `examples/auth-fixture-storage-state-flow.yml` and extended
+  `scripts/auth-smoke.sh` so `npm run auth:smoke` proves form login,
+  storageState session loading, secret-grep cleanliness, and negative-control
+  blocking.
+- Added plan artifact `docs/plans/023-authenticated-audit-slice1.html`.
+- Added real-app dogfood receipt
+  `docs/dogfood/vanity/023-authenticated-audit-slice1.md`. Vanity had no
+  authenticated route, so the ladder escalated to Linejam; Allie audited
+  Linejam's Clerk-authenticated `/me/profile` route using captured storageState.
+  The Linejam packet captured the authenticated route with HTTP 200 and no auth
+  `state_errors`; it exited nonzero for a deterministic reflow finding in the
+  target app, not for auth loss.
+
+Verification:
+
+```sh
+npm run auth:smoke
+cargo clippy --locked -- -D warnings
+npm run verify
+```

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie 023 Authenticated Audit Slice 1</title>
+  <style>
+    :root { color-scheme: light; --ink:#151719; --muted:#556171; --line:#d8dee8; --wash:#f5f7fa; --panel:#fff; --accent:#265cff; --ok:#12643a; --warn:#8a5b00; }
+    * { box-sizing: border-box; }
+    body { margin:0; color:var(--ink); background:var(--wash); font:16px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width:min(100% - 40px, 1120px); margin:0 auto; padding:40px 0 56px; }
+    h1 { margin:0; font-size:42px; line-height:1.05; letter-spacing:0; }
+    h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+    p { margin:0; }
+    p + p { margin-top:8px; }
+    code { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#eef2f7; padding:.08em .28em; border-radius:4px; }
+    section { margin-top:18px; padding:20px; background:var(--panel); border:1px solid var(--line); }
+    ul { margin:0; padding-left:20px; }
+    li + li { margin-top:6px; }
+    .label { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:.08em; }
+    .cards { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-top:22px; }
+    .cards div { background:var(--panel); padding:16px; min-height:158px; }
+    .grid { display:grid; grid-template-columns:1.1fr .9fr; gap:18px; }
+    .strong { font-weight:700; }
+    .ok { color:var(--ok); font-weight:700; }
+    .warn { color:var(--warn); font-weight:700; }
+    @media (max-width: 860px) { main { width:min(100% - 24px, 1120px); } .grid, .cards { grid-template-columns:1fr; } h1 { font-size:34px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="label">Backlog 023</p>
+    <h1>Prove authenticated audits without persisting credentials.</h1>
+    <p>Finish the first executable slice of epic 015: Allie can establish or load a session, audit hand-listed authenticated routes, and block when a login wall is audited as the app.</p>
+
+    <div class="cards" aria-label="work contract">
+      <div>
+        <h2>Chosen Design</h2>
+        <p>Keep the existing auth implementation. Add the missing storageState smoke and a real-app dogfood receipt rather than widening the manifest schema or touching worker boundaries.</p>
+      </div>
+      <div>
+        <h2>Proof Surface</h2>
+        <p><code>npm run auth:smoke</code> is the focused falsifier. <code>npm run verify</code> is the repository gate. A Linejam Clerk smoke-user run supplies the real-app receipt when available.</p>
+      </div>
+      <div>
+        <h2>Stop Rules</h2>
+        <p>Stop if any credential value appears in artifacts, if storageState does not reach the gated route, if a login wall can pass, or if real-app login requires operator-only interaction.</p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section>
+        <h2>Acceptance</h2>
+        <ul>
+          <li><span class="ok">Keep:</span> existing form-login auth flow, fixture, negative control, and secret-grep path.</li>
+          <li><span class="ok">Add:</span> <code>examples/auth-fixture-storage-state-flow.yml</code> and smoke coverage proving <code>auth.storage_state_env</code> loads a session.</li>
+          <li><span class="ok">Add:</span> dogfood receipt under <code>docs/dogfood/vanity/</code> covering Vanity ladder truth and the Linejam authenticated fallback.</li>
+          <li><span class="ok">Close:</span> move ticket 023 to <code>backlog.d/_done</code> only after focused and full gates are green.</li>
+        </ul>
+      </section>
+      <section>
+        <h2>Verification System</h2>
+        <p><span class="strong">Claim:</span> Allie can audit authenticated routes via form login or storageState without writing credential values.</p>
+        <p><span class="strong">Falsifier:</span> session is absent, login wall passes, storageState is ignored, or secret grep finds a credential in request, packet, DOM, screenshot, or trace artifacts.</p>
+        <p><span class="strong">Driver:</span> <code>npm run auth:smoke</code>, Linejam storageState dogfood, then <code>npm run verify</code>.</p>
+        <p><span class="strong">Grader:</span> gated route URL and marker present, negative control blocks, secret grep clean, and final repo gate green.</p>
+      </section>
+    </div>
+
+    <section>
+      <h2>Sequence</h2>
+      <ul>
+        <li>Add the storageState fixture manifest and extend <code>scripts/auth-smoke.sh</code> to create a temporary Playwright storageState file, run it, and assert the gated dashboard was audited.</li>
+        <li>Run <code>npm run auth:smoke</code> before any broader gate so failures stay local and readable.</li>
+        <li>Use Linejam's existing Clerk test support for a real authenticated route if local test keys and smoke user are available; otherwise document the checked target ladder and stop condition.</li>
+        <li>Run the full Allie gate, move 023 to done with receipts, review the diff, commit, push, and open the PR.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Quality System</h2>
+      <p><span class="strong">Standards:</span> no new provider leakage outside the worker auth boundary; no weaker gates; no credential values committed or printed; deterministic fixture-backed proof first.</p>
+      <p><span class="strong">Proof methods:</span> public CLI smoke, evidence packet inspection, secret grep, real-app receipt, full repo gate.</p>
+      <p><span class="strong">Critic focus:</span> hidden auth gaps, storageState copied into artifacts, misleading dogfood claims, and docs drifting from the implemented escape hatch.</p>
+      <p><span class="strong">Stop rules:</span> two repeated tool failures, three edits to the same file, unavailable Clerk/Supabase auth without storageState, or any secret exposure risk.</p>
+    </section>
+  </main>
+</body>
+</html>

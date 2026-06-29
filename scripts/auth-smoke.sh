@@ -7,6 +7,9 @@
 #               route AND #dashboard present), packet passes.
 #   SECRETS   — the credential VALUE never appears in worker-request.json, the
 #               evidence packet, or any artifact (screenshots / DOM / trace).
+#   STORAGE   — load a captured Playwright storageState session through the
+#               env-named hatch and reach the same gated route without login
+#               steps.
 #   NEGATIVE  — without a real session the gated route bounces to the HTTP-200
 #               login wall; the worker records an `auth-lost` state_error and the
 #               run BLOCKS (non-zero exit / fail status). A login wall must NOT
@@ -14,10 +17,14 @@
 set -eu
 
 POS_DIR=.allie/runs/auth-smoke
+STATE_DIR=.allie/runs/auth-smoke-storage-state
+STATE_FILE=.allie/runs/auth-smoke-storage-state.json
 NEG_DIR=.allie/runs/auth-smoke-neg
 SECRET=allie-fixture-pass
 
-rm -rf "$POS_DIR" "$NEG_DIR"
+rm -rf "$POS_DIR" "$STATE_DIR" "$NEG_DIR"
+rm -f "$STATE_FILE"
+trap 'rm -f "$STATE_FILE"' EXIT
 
 # --- POSITIVE -------------------------------------------------------------
 ALLIE_AUTH_FIXTURE_USER=allie@example.com \
@@ -56,6 +63,55 @@ fi
 # The env NAME must still be present in the request (so the worker can read it).
 grep -q "ALLIE_AUTH_FIXTURE_PASSWORD" "$POS_DIR/worker-request.json"
 
+# --- STORAGESTATE HATCH ---------------------------------------------------
+# The fixture accepts a browser session cookie named allie_session=ok. Scope it
+# to 127.0.0.1 so it applies to the worker's ephemeral fixture server port.
+mkdir -p "$(dirname "$STATE_FILE")"
+cat >"$STATE_FILE" <<'JSON'
+{
+  "cookies": [
+    {
+      "name": "allie_session",
+      "value": "ok",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": []
+}
+JSON
+
+ALLIE_AUTH_FIXTURE_STORAGE_STATE="$STATE_FILE" \
+  cargo run --locked -- run \
+    --manifest examples/auth-fixture-storage-state-flow.yml \
+    --out "$STATE_DIR"
+
+STATE_DIR="$STATE_DIR" node -e "
+const fs = require('fs');
+const p = JSON.parse(fs.readFileSync(process.env.STATE_DIR + '/evidence.json', 'utf8'));
+if (!['pass', 'approved', 'passed'].includes(p.summary.status)) {
+  throw new Error('storageState packet status not approved/passed: ' + p.summary.status);
+}
+const dashboard = p.coverage.state_metadata.find((s) => s.id === 'dashboard');
+if (!dashboard) throw new Error('storageState run missing dashboard state');
+if (!dashboard.url.endsWith('dashboard.html')) {
+  throw new Error('storageState dashboard did not land on dashboard.html: ' + dashboard.url);
+}
+if (dashboard.state_errors.length !== 0) {
+  throw new Error('storageState dashboard state_errors not empty: ' + JSON.stringify(dashboard.state_errors));
+}
+"
+grep -q "ALLIE_AUTH_FIXTURE_STORAGE_STATE" "$STATE_DIR/worker-request.json"
+if grep -rIn "$STATE_FILE" "$STATE_DIR" >/dev/null 2>&1; then
+  echo "FAIL: storageState file path leaked into $STATE_DIR:"
+  grep -rIn "$STATE_FILE" "$STATE_DIR" || true
+  exit 1
+fi
+
 # --- NEGATIVE CONTROL -----------------------------------------------------
 # Use the no-session manifest so the gated route bounces to the HTTP-200 login
 # wall and the per-state auth assertion fails (auth-lost). `run` exits 1 on a
@@ -88,5 +144,6 @@ if (!dashboard.state_errors.some((e) => e.includes('auth'))) {
 "
 
 test -f "$POS_DIR/evidence.json"
+test -f "$STATE_DIR/evidence.json"
 test -f "$NEG_DIR/evidence.json"
-echo "auth smoke passed (positive reached gated route, secrets clean, negative blocked)"
+echo "auth smoke passed (positive reached gated route, storageState reached gated route, secrets clean, negative blocked)"
