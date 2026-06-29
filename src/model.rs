@@ -498,3 +498,55 @@ pub(crate) struct Replay {
     pub(crate) seed_data: Vec<String>,
     pub(crate) known_nondeterminism: Vec<String>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ReleaseDecisionPacket {
+    pub(crate) schema: String,
+    pub(crate) status: String,
+    pub(crate) packet_path: String,
+    pub(crate) packet_run_id: String,
+    pub(crate) changed_surfaces: Vec<String>,
+    pub(crate) blocking: ReleaseBlockingSummary,
+    pub(crate) review: ReleaseReviewSummary,
+    pub(crate) review_needed_obligations: Vec<String>,
+    pub(crate) not_tested_obligations: Vec<String>,
+    pub(crate) model_findings_non_blocking: usize,
+    pub(crate) evidence_artifacts: Vec<String>,
+    pub(crate) policy: ReleasePolicySummary,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ReleaseBlockingSummary {
+    pub(crate) deterministic_failures: usize,
+    pub(crate) scripted_failures: usize,
+    pub(crate) infrastructure_failures: usize,
+    pub(crate) missing_required_evidence: Vec<String>,
+    pub(crate) expired_waivers: Vec<serde_json::Value>,
+    pub(crate) invalid_waivers: Vec<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ReleaseReviewSummary {
+    pub(crate) stale_evidence: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ReleasePolicySummary {
+    pub(crate) model_status: String,
+    pub(crate) model_provider_allowlist: Vec<String>,
+    pub(crate) zdr_required: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct GithubCheckPayload {
+    pub(crate) name: String,
+    pub(crate) conclusion: String,
+    pub(crate) output: GithubCheckOutput,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct GithubCheckOutput {
+    pub(crate) title: String,
+    pub(crate) summary: String,
+    pub(crate) text: String,
+}

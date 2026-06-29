@@ -5,12 +5,12 @@ use crate::model::{
     Verdict,
 };
 use crate::report;
-use crate::{
-    COMPLIANCE_REPORT_SCHEMA, applicability_reason, criterion_level, criterion_principle,
-    criterion_source_url, criterion_title, deterministic_pass_obligation, now_utc,
-    profile_obligation_list, residual_review_need, unique_strings, wcag22_success_criteria,
-    wcag22_success_criterion_ids,
+use crate::standards::{
+    applicability_reason, criterion_level, criterion_principle, criterion_source_url,
+    criterion_title, deterministic_pass_obligation, profile_obligation_list, residual_review_need,
+    supporting_check_related_criteria, wcag22_success_criteria, wcag22_success_criterion_ids,
 };
+use crate::{COMPLIANCE_REPORT_SCHEMA, now_utc, unique_strings};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
@@ -354,43 +354,6 @@ fn compliance_supporting_check(
         confidence: row.confidence,
         evidence_class: row.evidence_class,
         finding_refs: row.finding_refs,
-    }
-}
-
-fn supporting_check_related_criteria(obligation: &str) -> Vec<String> {
-    match obligation {
-        "wcag22-aa:deterministic-axe-rules" => wcag22_success_criteria()
-            .into_iter()
-            .filter(|criterion| criterion["method"].as_str() == Some("axe"))
-            .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
-            .collect(),
-        "wcag22-aa:2.1.1-keyboard-traversal" => vec![
-            "wcag22-aa:2.1.1-keyboard".to_string(),
-            "wcag22-aa:2.1.2-no-keyboard-trap".to_string(),
-            "wcag22-aa:2.4.3-focus-order".to_string(),
-            "wcag22-aa:2.4.7-focus-visible".to_string(),
-            "wcag22-aa:2.4.11-focus-not-obscured-minimum".to_string(),
-        ],
-        "wcag22-aa:1.4.10-zoom-reflow" => vec![
-            "wcag22-aa:1.4.4-resize-text".to_string(),
-            "wcag22-aa:1.4.10-reflow".to_string(),
-            "wcag22-aa:1.4.12-text-spacing".to_string(),
-        ],
-        "wcag22-aa:2.2.2-reduced-motion" => vec![
-            "wcag22-aa:2.2.2-pause-stop-hide".to_string(),
-            "wcag22-aa:2.3.1-three-flashes-or-below-threshold".to_string(),
-            "wcag22-aa:2.5.4-motion-actuation".to_string(),
-        ],
-        "wcag22-aa:human-content-meaning" => wcag22_success_criteria()
-            .into_iter()
-            .filter(|criterion| criterion["method"].as_str() == Some("human_review"))
-            .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
-            .collect(),
-        "wcag22-aa:human-assistive-technology-review" => wcag22_success_criteria()
-            .into_iter()
-            .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
-            .collect(),
-        _ => Vec::new(),
     }
 }
 

@@ -565,7 +565,9 @@ pub(crate) fn render_compliance_summary(report: &ComplianceReportPacket) -> Stri
 mod tests {
     use super::*;
     use crate::model::{AgenticAssessment, ComplianceObligation};
-    use crate::{criterion_level, criterion_principle, criterion_source_url, criterion_title};
+    use crate::standards::{
+        criterion_level, criterion_principle, criterion_source_url, criterion_title,
+    };
 
     fn sample_obligation(id: &str, status: &str) -> ComplianceObligation {
         ComplianceObligation {
