@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie 019 Core Architecture Debt</title>
+  <style>
+    :root { color-scheme: light; --ink:#151719; --muted:#56616f; --line:#d8dee8; --wash:#f5f7fa; --panel:#fff; --accent:#265cff; }
+    * { box-sizing: border-box; }
+    body { margin:0; color:var(--ink); background:var(--wash); font:16px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width:min(100% - 40px, 1120px); margin:0 auto; padding:40px 0 56px; }
+    h1 { margin:0; font-size:42px; line-height:1.05; letter-spacing:0; }
+    h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+    p { margin:0; }
+    p + p { margin-top:8px; }
+    code { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#eef2f7; padding:.08em .28em; border-radius:4px; }
+    section { margin-top:18px; padding:20px; background:var(--panel); border:1px solid var(--line); }
+    .grid { display:grid; grid-template-columns:1.15fr .85fr; gap:18px; }
+    .cards { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-top:22px; }
+    .cards div { background:var(--panel); padding:16px; min-height:150px; }
+    ul { margin:0; padding-left:20px; }
+    li + li { margin-top:6px; }
+    .label { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:.08em; }
+    .strong { font-weight:700; }
+    @media (max-width: 860px) { main { width:min(100% - 24px, 1120px); } .grid, .cards { grid-template-columns:1fr; } h1 { font-size:34px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="label">Backlog 019</p>
+    <h1>Split Allie's god-module without changing product behavior.</h1>
+    <p>Move worker IPC, WCAG profile logic, CLI dispatch, and release projection out of <code>src/lib.rs</code>; keep existing CLI output, packet JSON, worker artifacts, and release decisions stable.</p>
+    <div class="cards" aria-label="work contract">
+      <div>
+        <h2>Chosen Design</h2>
+        <p>Extract canonical modules that own existing concepts: <code>worker</code>, <code>standards</code>, <code>release</code>, and <code>cli</code>. No new runtime behavior, dependency, or public command.</p>
+      </div>
+      <div>
+        <h2>Proof Surface</h2>
+        <p><code>npm run verify</code> is the repo-wide live oracle. Focused checks: worker smoke, release smoke, autonomous smoke, and size gate after each major extraction.</p>
+      </div>
+      <div>
+        <h2>Stop Rules</h2>
+        <p>Stop if a split needs behavior changes, if JSON output drifts unexpectedly, if <code>lib.rs</code> remains above the ratcheted cap, or if a module becomes a shallow pass-through.</p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section>
+        <h2>Acceptance</h2>
+        <ul>
+          <li>No <code>Command::new("node")</code>, <code>playwright-axe-worker</code>, or worker response DTOs in <code>src/lib.rs</code>.</li>
+          <li>WCAG profile, criterion title/source/level/principle, and axe tag mapping live in <code>standards</code>.</li>
+          <li>CLI dispatch is separated from command handlers; command handlers remain tested through the public CLI and focused handler tests where useful.</li>
+          <li>Release decision projection uses typed DTOs instead of ad hoc <code>serde_json::Value</code> as the internal working model.</li>
+          <li>Size gate ratchets downward toward roughly 5200 lines and passes.</li>
+        </ul>
+      </section>
+      <section>
+        <h2>Verification System</h2>
+        <p><span class="strong">Claim:</span> Allie behavior is unchanged while architecture boundaries are cleaner.</p>
+        <p><span class="strong">Falsifier:</span> worker/run/release/autonomous outputs break, CLI usage changes unexpectedly, or lib.rs still owns the extracted boundaries.</p>
+        <p><span class="strong">Driver:</span> <code>npm run verify</code> plus targeted structural greps.</p>
+        <p><span class="strong">Grader:</span> green gate, line-count cap, and absence checks for forbidden ownership strings in <code>lib.rs</code>.</p>
+      </section>
+    </div>
+
+    <section>
+      <h2>Sequence</h2>
+      <ul>
+        <li>Extract worker DTOs, failure type, request builder, process invocation, and response reader into <code>src/worker.rs</code>.</li>
+        <li>Extract WCAG profile helpers into <code>src/standards.rs</code> and update compliance/report callers.</li>
+        <li>Move release projection and report rendering into <code>src/release.rs</code>, using typed release DTOs in <code>model.rs</code>.</li>
+        <li>Move CLI dispatch and per-command output handlers into <code>src/cli.rs</code>; keep existing option parsers and command functions in their canonical owning modules.</li>
+        <li>Ratcheting: update size gate only after the split is real, then close 019 with receipts.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Review Focus</h2>
+      <p>Fresh reviewers should hunt for behavior drift hidden by the refactor, new thin wrappers that do not reduce cognitive load, module boundaries that merely move spaghetti, and gates that no longer exercise the moved runtime path.</p>
+    </section>
+  </main>
+</body>
+</html>

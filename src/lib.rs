@@ -9,7 +9,6 @@ use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wait_timeout::ChildExt;
 
@@ -17,19 +16,29 @@ mod model;
 
 mod agentic;
 mod auth;
+mod cli;
 mod compliance;
 mod consumer;
+mod release;
 mod report;
+mod standards;
 mod workbench;
+mod worker;
 
 use crate::auth::AuthFlow;
 use crate::model::*;
+use crate::standards::{
+    criterion_feature_verdict, criterion_title, deterministic_pass_obligation,
+    human_review_profile_obligations, obligation_from_tags, profile_obligation_list,
+    scripted_profile_obligations, standards_profile_summary, wcag22_success_criteria,
+};
+#[cfg(test)]
+use crate::worker::{AxeViolation, WorkerStateResult};
+use crate::worker::{RunFailure, WorkerResponse, WorkerRunStatus};
 
 const PRODUCT_LINE: &str = "Allie: accessibility evidence for every release.";
 const NEXT_STEP: &str = "Next implementation target: allie run --manifest <flow.yml>";
 const EVIDENCE_SCHEMA: &str = "allie.evidence.v0";
-const WORKER_REQUEST_SCHEMA: &str = "allie.worker.request.v0";
-const WORKER_RESPONSE_SCHEMA: &str = "allie.worker.response.v0";
 const PRODUCT_MAP_SCHEMA: &str = "allie.product-map.v0";
 const COMPLIANCE_REPORT_SCHEMA: &str = "allie.compliance-report.v0";
 const JOB_SCHEMA: &str = "allie.job.v0";
@@ -37,7 +46,6 @@ const DEFAULT_WORKER_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_AGENT_TIMEOUT_MS: u64 = 120_000;
 const DEFAULT_WORKBENCH_MAX_RUNTIME_MS: u64 = 24 * 60 * 60 * 1000;
 const DEFAULT_WORKBENCH_IDLE_TIMEOUT_MS: u64 = 10 * 60 * 1000;
-const WCAG22_AA_PROFILE_JSON: &str = include_str!("../profiles/wcag22-aa.json");
 
 #[derive(Debug)]
 pub enum AllieError {
@@ -236,9 +244,7 @@ struct ComplianceReportReceipt {
 }
 
 pub fn run_cli(args: impl IntoIterator<Item = String>) -> i32 {
-    let mut stdout = io::stdout();
-    let mut stderr = io::stderr();
-    run_cli_with_io(args, &mut stdout, &mut stderr)
+    cli::run_cli(args)
 }
 
 pub fn run_cli_with_io(
@@ -246,287 +252,7 @@ pub fn run_cli_with_io(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> i32 {
-    let args = args.into_iter().collect::<Vec<_>>();
-
-    if args.is_empty() {
-        let _ = writeln!(stdout, "{PRODUCT_LINE}");
-        let _ = writeln!(stdout, "{NEXT_STEP}");
-        let _ = writeln!(
-            stdout,
-            "Run: allie run --manifest examples/login-flow.yml --out .allie/runs/latest"
-        );
-        return ExitClass::Success.code();
-    }
-
-    if matches!(args.first().map(String::as_str), Some("-h" | "--help")) {
-        print_usage(stdout);
-        return ExitClass::Success.code();
-    }
-
-    match args.first().map(String::as_str) {
-        Some("init") => match consumer::parse_init_options(&args[1..]) {
-            Ok(options) => match consumer::run_init(options) {
-                Ok(receipt) => {
-                    let _ = writeln!(
-                        stdout,
-                        "Allie manifest: {}",
-                        receipt.manifest_path.display()
-                    );
-                    let _ = writeln!(stdout, "Next: {}", receipt.next_command);
-                    ExitClass::Success.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
-        Some("verify") => match consumer::parse_verify_options(&args[1..]) {
-            Ok(options) => match consumer::run_verify(options) {
-                Ok(receipt) => {
-                    let _ = writeln!(stdout, "Allie verification status: {}", receipt.status);
-                    let _ = writeln!(
-                        stdout,
-                        "Summary JSON: {}",
-                        receipt.summary_json_path.display()
-                    );
-                    let _ = writeln!(
-                        stdout,
-                        "Summary Markdown: {}",
-                        receipt.summary_markdown_path.display()
-                    );
-                    let _ = writeln!(
-                        stdout,
-                        "Report JSON: {}",
-                        receipt.report_json_path.display()
-                    );
-                    let _ = writeln!(
-                        stdout,
-                        "Report HTML: {}",
-                        receipt.report_html_path.display()
-                    );
-                    let _ = writeln!(stdout, "JUnit: {}", receipt.junit_path.display());
-                    let _ = writeln!(stdout, "SARIF: {}", receipt.sarif_path.display());
-                    let _ = writeln!(
-                        stdout,
-                        "Release summary: {}",
-                        receipt.release_summary_path.display()
-                    );
-                    let _ = writeln!(
-                        stdout,
-                        "Product map: {}",
-                        receipt.product_map_path.display()
-                    );
-                    let _ = writeln!(stdout, "Evidence: {}", receipt.evidence_path.display());
-                    receipt.exit_class.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
-        Some("run") => match parse_run_options(&args[1..]) {
-            Ok(options) => match run_v0(options) {
-                Ok(receipt) => {
-                    let _ = writeln!(stdout, "Allie evidence run: {}", receipt.run_id);
-                    let _ = writeln!(stdout, "Evidence: {}", receipt.evidence_path.display());
-                    let _ = writeln!(stdout, "Report: {}", receipt.report_path.display());
-                    let _ = writeln!(stdout, "Status: {}", receipt.exit_class.packet_status());
-                    receipt.exit_class.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
-        Some("discover") => match parse_discovery_options(&args[1..]) {
-            Ok(options) => match run_discovery(options) {
-                Ok(receipt) => {
-                    let _ = writeln!(stdout, "Discovery: {}", receipt.discovery_path.display());
-                    let _ = writeln!(stdout, "Flow plan: {}", receipt.flow_plan_path.display());
-                    let _ = writeln!(stdout, "Report: {}", receipt.report_path.display());
-                    ExitClass::Success.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
-        Some("promote-flow") => match parse_promote_flow_options(&args[1..]) {
-            Ok(options) => match run_promote_flow(options) {
-                Ok(receipt) => {
-                    let _ = writeln!(
-                        stdout,
-                        "Generated manifest: {}",
-                        receipt.manifest_path.display()
-                    );
-                    ExitClass::Success.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
-        Some("map") => match parse_map_options(&args[1..]) {
-            Ok(options) => match run_map(options) {
-                Ok(receipt) => {
-                    let _ = writeln!(stdout, "Product map: {}", receipt.map_path.display());
-                    let _ = writeln!(stdout, "Surface map: {}", receipt.report_path.display());
-                    let _ = writeln!(
-                        stdout,
-                        "Agent receipt: {}",
-                        receipt.runner_receipt_path.display()
-                    );
-                    let _ = writeln!(
-                        stdout,
-                        "Generated flow: {}",
-                        receipt.flow_manifest_path.display()
-                    );
-                    ExitClass::Success.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
-        Some("report") => match parse_report_options(&args[1..]) {
-            Ok(options) => match run_compliance_report(options) {
-                Ok(receipt) => {
-                    let _ = writeln!(
-                        stdout,
-                        "Compliance JSON: {}",
-                        receipt.report_json_path.display()
-                    );
-                    let _ = writeln!(
-                        stdout,
-                        "Compliance report: {}",
-                        receipt.report_html_path.display()
-                    );
-                    let _ = writeln!(stdout, "Summary: {}", receipt.summary_path.display());
-                    ExitClass::Success.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
-        Some("workbench") => match workbench::parse_workbench_command(&args[1..]) {
-            Ok(command) => match workbench::run_workbench(command) {
-                Ok(receipt) => {
-                    let _ = writeln!(stdout, "Workbench job: {}", receipt.job_path.display());
-                    let _ = writeln!(stdout, "Events: {}", receipt.events_path.display());
-                    let _ = writeln!(stdout, "Status: {}", receipt.status);
-                    let _ = writeln!(stdout, "Current step: {}", receipt.current_step);
-                    let _ = writeln!(stdout, "Resumable: {}", receipt.resumable);
-                    receipt.exit_class.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
-        Some("review") => match parse_review_options(&args[1..]) {
-            Ok(options) => match run_review(options) {
-                Ok(receipt) => {
-                    let _ = writeln!(stdout, "Reviewed packet: {}", receipt.packet_path.display());
-                    let _ = writeln!(stdout, "Review report: {}", receipt.report_path.display());
-                    ExitClass::Success.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
-        Some("release") => match parse_release_options(&args[1..]) {
-            Ok(options) => match run_release(options) {
-                Ok(receipt) => {
-                    let _ = writeln!(
-                        stdout,
-                        "Release summary: {}",
-                        receipt.summary_path.display()
-                    );
-                    let _ = writeln!(stdout, "GitHub check: {}", receipt.check_path.display());
-                    let _ = writeln!(stdout, "Release report: {}", receipt.report_path.display());
-                    let _ = writeln!(stdout, "Status: {}", receipt.status);
-                    receipt.exit_class.code()
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "allie: {error}");
-                    ExitClass::InfrastructureFailure.code()
-                }
-            },
-            Err(error) => {
-                let _ = writeln!(stderr, "allie: {error}");
-                print_usage(stderr);
-                ExitClass::Usage.code()
-            }
-        },
-        _ => {
-            let _ = writeln!(stderr, "allie: unknown command");
-            print_usage(stderr);
-            ExitClass::Usage.code()
-        }
-    }
-}
-
-fn print_usage(writer: &mut dyn Write) {
-    let _ = writeln!(
-        writer,
-        "Usage:\n  allie init [--manifest .allie/manifest.yml] [--app-name <name>] [--base-url <url> | --fixture-dir <dir>] [--force]\n  allie verify [--manifest .allie/manifest.yml] [--out .allie/verify/latest] [--project-root <dir>] [--changed-surface <id>] [--agent local|opencode|omp] [--stale-after-days <days>]\n  allie run --manifest <flow.yml> --out <output-dir>\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
-    );
+    cli::run_cli_with_io(args, stdout, stderr)
 }
 
 fn parse_run_options(args: &[String]) -> std::result::Result<RunOptions, String> {
@@ -827,47 +553,20 @@ fn run_v0(options: RunOptions) -> Result<RunReceipt> {
     // handshake independent of the worker's CWD assumptions.
     let out_dir_abs =
         fs::canonicalize(&options.out_dir).unwrap_or_else(|_| options.out_dir.clone());
-    let request_path = out_dir_abs.join("worker-request.json");
-    let response_path = out_dir_abs.join("worker-response.json");
-    let mut run_failures = manifest.preflight_failures();
-    let response = if run_failures.is_empty() {
-        let request = WorkerRequest::from_manifest(
-            &run_id,
-            &manifest,
-            &options.manifest_path,
-            &out_dir_abs.join("artifacts"),
-        )?;
-        write_json_pretty(&request_path, &request)?;
-
-        match invoke_worker(
-            &request_path,
-            &response_path,
-            manifest.policy.worker_timeout_ms,
-        ) {
-            Ok(()) => read_worker_response(&response_path),
-            Err(failure) => {
-                let message = failure.message.clone();
-                run_failures.push(failure);
-                Ok(WorkerResponse::error(message))
-            }
-        }?
-    } else {
-        WorkerResponse::error(
-            run_failures
-                .iter()
-                .map(|failure| failure.message.as_str())
-                .collect::<Vec<_>>()
-                .join("; "),
-        )
-    };
-    response.validate()?;
+    let worker_execution = worker::execute(
+        &run_id,
+        &manifest,
+        &options.manifest_path,
+        &out_dir_abs,
+        manifest.preflight_failures(),
+    )?;
 
     write_packet_and_report(
         &manifest,
         &options.manifest_path,
         &options.out_dir,
-        response,
-        run_failures,
+        worker_execution.response,
+        worker_execution.run_failures,
         started_at,
         now_utc(),
         run_id,
@@ -883,21 +582,21 @@ fn run_release(options: ReleaseOptions) -> Result<ReleaseReceipt> {
         source,
     })?;
 
-    let packet = read_release_packet(&options.packet_path)?;
+    let packet = release::read_release_packet(&options.packet_path)?;
 
-    let projection = project_release_decision(&packet, &options);
+    let projection = release::project_release_decision(&packet, &options);
     let summary_path = options.out_dir.join("release-summary.json");
     let check_path = options.out_dir.join("github-check.json");
     let report_path = options.out_dir.join("release-report.html");
     write_json_pretty(&summary_path, &projection.summary)?;
     write_json_pretty(&check_path, &projection.github_check)?;
-    write_string(&report_path, &render_release_report(&projection.summary))?;
+    write_string(
+        &report_path,
+        &release::render_release_report(&projection.summary),
+    )?;
 
     Ok(ReleaseReceipt {
-        status: projection.summary["status"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string(),
+        status: projection.summary.status.clone(),
         exit_class: projection.exit_class,
         summary_path,
         check_path,
@@ -1548,35 +1247,6 @@ fn route_for_project_file(root: &Path, path: &Path) -> String {
     format!("/{}", relative.to_string_lossy().replace('\\', "/"))
 }
 
-fn standards_profile_summary(policy_profile: &str) -> StandardsProfileSummary {
-    if policy_profile != "wcag22-aa" {
-        return StandardsProfileSummary {
-            id: policy_profile.to_string(),
-            source_urls: Vec::new(),
-            total_obligations: 0,
-            methods: BTreeMap::new(),
-        };
-    }
-    let mut methods = BTreeMap::new();
-    for criterion in wcag22_success_criteria() {
-        let method = criterion["method"].as_str().unwrap_or("unknown");
-        *methods.entry(method.to_string()).or_insert(0) += 1;
-    }
-    StandardsProfileSummary {
-        id: "wcag22-aa".to_string(),
-        source_urls: vec![
-            wcag22_profile()["source_url"]
-                .as_str()
-                .unwrap_or("https://www.w3.org/WAI/WCAG22/wcag.json")
-                .to_string(),
-            "https://www.w3.org/TR/WCAG22/".to_string(),
-            "https://www.w3.org/WAI/test-evaluate/conformance/wcag-em/".to_string(),
-        ],
-        total_obligations: wcag22_success_criteria().len(),
-        methods,
-    }
-}
-
 fn product_map_open_questions(manifest: &FlowManifest) -> Vec<String> {
     let mut questions = Vec::new();
     if manifest.model.enabled {
@@ -1738,7 +1408,7 @@ fn run_compliance_report(options: ReportOptions) -> Result<ComplianceReportRecei
         )));
     }
     let packet: EvidencePacket = read_json_file(&options.packet_path)?;
-    validate_release_packet(&packet)?;
+    release::validate_release_packet(&packet)?;
     let report =
         compliance::build_compliance_report(&map, &packet, &options.map_path, &options.packet_path);
     let report_value = serde_json::to_value(&report).map_err(|source| AllieError::Json {
@@ -1763,54 +1433,6 @@ fn run_compliance_report(options: ReportOptions) -> Result<ComplianceReportRecei
         report_html_path,
         summary_path,
     })
-}
-
-pub(crate) fn criterion_principle(obligation: &str) -> String {
-    criterion_field(obligation, "principle").unwrap_or_else(|| "Supporting Checks".to_string())
-}
-
-pub(crate) fn criterion_level(obligation: &str) -> String {
-    criterion_field(obligation, "level").unwrap_or_default()
-}
-
-pub(crate) fn criterion_field(obligation: &str, field: &str) -> Option<String> {
-    wcag22_success_criteria()
-        .into_iter()
-        .find(|criterion| criterion["obligation"].as_str() == Some(obligation))
-        .and_then(|criterion| criterion[field].as_str().map(ToString::to_string))
-}
-
-pub(crate) fn criterion_source_url(obligation: &str) -> Option<String> {
-    wcag22_success_criteria()
-        .into_iter()
-        .find(|criterion| criterion["obligation"].as_str() == Some(obligation))
-        .and_then(|criterion| criterion["source_url"].as_str().map(ToString::to_string))
-}
-
-pub(crate) fn residual_review_need(method: &str, status: &str) -> String {
-    match status {
-        "pass" if method == "axe" => {
-            "Deterministic evidence is present; sample with human review if policy requires."
-                .to_string()
-        }
-        "pass" => "Evidence is present; retain replay proof for review.".to_string(),
-        "fail" => "Fix outside Allie, rerun, and sign off with updated evidence.".to_string(),
-        "waived" | "risk_accepted" => {
-            "Review waiver provenance and expiry before release reliance.".to_string()
-        }
-        "not_applicable" => "Confirm applicability rationale with the product owner.".to_string(),
-        "needs_review" => {
-            "Human or agentic review required before making a compliance claim.".to_string()
-        }
-        _ => "No evidence in this packet for this criterion, surface, and state.".to_string(),
-    }
-}
-
-pub(crate) fn wcag22_success_criterion_ids() -> BTreeSet<String> {
-    wcag22_success_criteria()
-        .into_iter()
-        .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
-        .collect()
 }
 
 pub(crate) fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
@@ -1959,7 +1581,7 @@ fn run_review(options: ReviewOptions) -> Result<ReviewReceipt> {
         source,
     })?;
     let mut packet: EvidencePacket = read_json_file(&options.packet_path)?;
-    validate_release_packet(&packet)?;
+    release::validate_release_packet(&packet)?;
 
     let artifacts_dir = options.out_dir.join("artifacts");
     fs::create_dir_all(&artifacts_dir).map_err(|source| AllieError::Io {
@@ -2092,364 +1714,6 @@ fn render_review_report(packet: &EvidencePacket) -> String {
     )
 }
 
-struct ReleaseProjection {
-    summary: serde_json::Value,
-    github_check: serde_json::Value,
-    exit_class: ExitClass,
-}
-
-fn project_release_decision(
-    packet: &serde_json::Value,
-    options: &ReleaseOptions,
-) -> ReleaseProjection {
-    let deterministic_failures = packet["summary"]["deterministic_failures"]
-        .as_u64()
-        .unwrap_or_default();
-    let scripted_failures = packet["summary"]["scripted_failures"]
-        .as_u64()
-        .unwrap_or_default();
-    let infrastructure_failures = packet["summary"]["infrastructure_failures"]
-        .as_u64()
-        .unwrap_or_default();
-    let packet_status = packet["summary"]["status"].as_str().unwrap_or("error");
-    let evidence_artifacts = packet["artifacts"]
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|artifact| artifact["type"].as_str())
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    let verdicts = packet["verdicts"].as_array().cloned().unwrap_or_default();
-    let review_needed = verdicts
-        .iter()
-        .filter(|verdict| verdict["status"].as_str() == Some("needs_review"))
-        .filter_map(|verdict| verdict["obligation"].as_str())
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    let not_tested = verdicts
-        .iter()
-        .filter(|verdict| verdict["status"].as_str() == Some("not_tested"))
-        .filter_map(|verdict| verdict["obligation"].as_str())
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    let model_findings_non_blocking = packet["findings"]
-        .as_array()
-        .map(|findings| {
-            findings
-                .iter()
-                .filter(|finding| finding["evidence_class"].as_str() == Some("agentic"))
-                .count()
-        })
-        .unwrap_or_default();
-
-    let captured_states = string_set_at(&packet["coverage"]["states_captured"]);
-    let discovered_surfaces = string_set_at(&packet["coverage"]["surfaces_discovered"]);
-    let missing_required_evidence = options
-        .changed_surfaces
-        .iter()
-        .filter(|surface| {
-            !captured_states.contains(surface.as_str())
-                && !discovered_surfaces.contains(surface.as_str())
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let stale_evidence = packet_is_stale(packet, options.stale_after_days);
-    let expired_waivers = expired_touched_waivers(packet, &options.changed_surfaces);
-    let invalid_waivers = invalid_touched_waivers(packet, &options.changed_surfaces);
-    let has_blocker = packet_status == "fail"
-        || packet_status == "error"
-        || deterministic_failures > 0
-        || scripted_failures > 0
-        || infrastructure_failures > 0
-        || !missing_required_evidence.is_empty()
-        || !expired_waivers.is_empty()
-        || !invalid_waivers.is_empty();
-    let status = if has_blocker {
-        "blocked"
-    } else if stale_evidence
-        || !review_needed.is_empty()
-        || !not_tested.is_empty()
-        || model_findings_non_blocking > 0
-    {
-        "needs_review"
-    } else {
-        "approved"
-    };
-    let conclusion = if has_blocker {
-        "failure"
-    } else if status == "needs_review" {
-        "neutral"
-    } else {
-        "success"
-    };
-    let exit_class = if has_blocker {
-        ExitClass::BlockingFinding
-    } else {
-        ExitClass::Success
-    };
-
-    let summary = serde_json::json!({
-        "schema": "allie.release-decision.v0",
-        "status": status,
-        "packet_path": options.packet_path.to_string_lossy(),
-        "packet_run_id": packet["run"]["id"].as_str().unwrap_or("unknown"),
-        "changed_surfaces": options.changed_surfaces,
-        "blocking": {
-            "deterministic_failures": deterministic_failures,
-            "scripted_failures": scripted_failures,
-            "infrastructure_failures": infrastructure_failures,
-            "missing_required_evidence": missing_required_evidence,
-            "expired_waivers": expired_waivers,
-            "invalid_waivers": invalid_waivers
-        },
-        "review": {
-            "stale_evidence": stale_evidence
-        },
-        "review_needed_obligations": review_needed,
-        "not_tested_obligations": not_tested,
-        "model_findings_non_blocking": model_findings_non_blocking,
-        "evidence_artifacts": evidence_artifacts,
-        "policy": {
-            "model_status": packet["policy"]["model_status"].clone(),
-            "model_provider_allowlist": packet["policy"]["model_provider_allowlist"].clone(),
-            "zdr_required": packet["policy"]["zdr_required"].clone()
-        }
-    });
-    let summary_text = release_summary_text(&summary);
-    let github_check = serde_json::json!({
-        "name": "Allie accessibility evidence",
-        "conclusion": conclusion,
-        "output": {
-            "title": format!("Allie release decision: {status}"),
-            "summary": summary_text,
-            "text": summary_text
-        }
-    });
-
-    ReleaseProjection {
-        summary,
-        github_check,
-        exit_class,
-    }
-}
-
-fn string_set_at(value: &serde_json::Value) -> BTreeSet<String> {
-    value
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str())
-                .map(ToString::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn packet_is_stale(packet: &serde_json::Value, stale_after_days: i64) -> bool {
-    let Some(finished_at) = packet["run"]["finished_at"].as_str() else {
-        return true;
-    };
-    let Ok(finished_at) = DateTime::parse_from_rfc3339(finished_at) else {
-        return true;
-    };
-    let age = Utc::now().signed_duration_since(finished_at.with_timezone(&Utc));
-    age.num_days() > stale_after_days
-}
-
-fn expired_touched_waivers(
-    packet: &serde_json::Value,
-    changed_surfaces: &[String],
-) -> Vec<serde_json::Value> {
-    let changed = changed_surfaces.iter().cloned().collect::<BTreeSet<_>>();
-    packet["waivers"]
-        .as_array()
-        .map(|waivers| {
-            waivers
-                .iter()
-                .filter(|waiver| waiver_is_expired_for_changed_surface(waiver, &changed))
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn waiver_is_expired_for_changed_surface(
-    waiver: &serde_json::Value,
-    changed_surfaces: &BTreeSet<String>,
-) -> bool {
-    if !waiver_touches_changed_surface(waiver, changed_surfaces) {
-        return false;
-    }
-    let Some(expires_at) = waiver["expires_at"].as_str() else {
-        return false;
-    };
-    let Ok(expires_at) = DateTime::parse_from_rfc3339(expires_at) else {
-        return true;
-    };
-    if expires_at.with_timezone(&Utc) >= Utc::now() {
-        return false;
-    }
-    true
-}
-
-fn invalid_touched_waivers(
-    packet: &serde_json::Value,
-    changed_surfaces: &[String],
-) -> Vec<serde_json::Value> {
-    let changed = changed_surfaces.iter().cloned().collect::<BTreeSet<_>>();
-    packet["waivers"]
-        .as_array()
-        .map(|waivers| {
-            waivers
-                .iter()
-                .filter(|waiver| {
-                    waiver_touches_changed_surface(waiver, &changed)
-                        && !waiver_has_required_release_metadata(waiver)
-                })
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn waiver_touches_changed_surface(
-    waiver: &serde_json::Value,
-    changed_surfaces: &BTreeSet<String>,
-) -> bool {
-    if changed_surfaces.is_empty() {
-        return true;
-    }
-    let Some(surface) = waiver["surface"].as_str() else {
-        return true;
-    };
-    surface.trim().is_empty() || changed_surfaces.contains(surface)
-}
-
-fn waiver_has_required_release_metadata(waiver: &serde_json::Value) -> bool {
-    let Some(surface) = waiver["surface"].as_str() else {
-        return false;
-    };
-    if surface.trim().is_empty() {
-        return false;
-    }
-    let Some(status) = waiver["status"].as_str() else {
-        return false;
-    };
-    if !matches!(status, "waived" | "risk_accepted") {
-        return false;
-    }
-    let Some(expires_at) = waiver["expires_at"].as_str() else {
-        return false;
-    };
-    if DateTime::parse_from_rfc3339(expires_at).is_err() {
-        return false;
-    }
-    let provenance_ok = waiver["provenance"]
-        .as_str()
-        .map(|value| !value.trim().is_empty())
-        .or_else(|| {
-            waiver["provenance"]
-                .as_object()
-                .map(|value| !value.is_empty())
-        })
-        .unwrap_or(false);
-    let packet_ref_ok = waiver["packet_ref"]
-        .as_str()
-        .map(|value| !value.trim().is_empty())
-        .or_else(|| {
-            waiver["packet_refs"].as_array().map(|values| {
-                values
-                    .iter()
-                    .any(|value| value.as_str().is_some_and(|item| !item.trim().is_empty()))
-            })
-        })
-        .unwrap_or(false);
-
-    provenance_ok && packet_ref_ok
-}
-
-fn release_summary_text(summary: &serde_json::Value) -> String {
-    format!(
-        "status={} deterministic_failures={} scripted_failures={} infrastructure_failures={} review_needed={} not_tested={}",
-        summary["status"].as_str().unwrap_or("unknown"),
-        summary["blocking"]["deterministic_failures"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["blocking"]["scripted_failures"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["blocking"]["infrastructure_failures"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["review_needed_obligations"]
-            .as_array()
-            .map(|items| items.len())
-            .unwrap_or_default(),
-        summary["not_tested_obligations"]
-            .as_array()
-            .map(|items| items.len())
-            .unwrap_or_default()
-    )
-}
-
-fn render_release_report(summary: &serde_json::Value) -> String {
-    let text = escape_html(&release_summary_text(summary));
-    format!(
-        r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Allie Release Decision</title>
-  <style>
-    body {{ margin: 0; font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #151719; background: #f5f7fa; }}
-    main {{ width: min(100% - 40px, 900px); margin: 0 auto; padding: 40px 0; }}
-    section {{ background: #fff; border: 1px solid #d7dde5; padding: 20px; margin-top: 18px; }}
-    h1 {{ margin: 0; font-size: 42px; line-height: 1.05; letter-spacing: 0; }}
-    h2 {{ margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #58616c; }}
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Allie release decision: {status}</h1>
-    <section>
-      <h2>Evidence Projection</h2>
-      <p>{text}</p>
-      <p>This is a projection of evidence packets, not a legal compliance guarantee and not a global score.</p>
-    </section>
-  </main>
-</body>
-</html>
-"#,
-        status = escape_html(summary["status"].as_str().unwrap_or("unknown")),
-        text = text
-    )
-}
-
-fn read_release_packet(packet_path: &Path) -> Result<serde_json::Value> {
-    let packet_text = fs::read_to_string(packet_path).map_err(|source| AllieError::Io {
-        context: format!("read evidence packet {}", packet_path.display()),
-        source,
-    })?;
-    let packet = serde_json::from_str::<EvidencePacket>(&packet_text).map_err(|source| {
-        AllieError::Json {
-            context: format!("parse evidence packet {}", packet_path.display()),
-            source,
-        }
-    })?;
-    validate_release_packet(&packet)?;
-    serde_json::to_value(packet).map_err(|source| AllieError::Json {
-        context: format!("normalize evidence packet {}", packet_path.display()),
-        source,
-    })
-}
-
 pub(crate) fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
     let text = fs::read_to_string(path).map_err(|source| AllieError::Io {
         context: format!("read json {}", path.display()),
@@ -2459,136 +1723,6 @@ pub(crate) fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Resul
         context: format!("parse json {}", path.display()),
         source,
     })
-}
-
-fn validate_release_packet(packet: &EvidencePacket) -> Result<()> {
-    if packet.schema != EVIDENCE_SCHEMA {
-        return Err(AllieError::InvalidManifest(format!(
-            "invalid evidence packet schema {}; expected {EVIDENCE_SCHEMA}",
-            packet.schema
-        )));
-    }
-
-    if !matches!(packet.summary.status.as_str(), "pass" | "fail" | "error") {
-        return Err(AllieError::InvalidManifest(format!(
-            "invalid evidence packet status {}; expected pass, fail, or error",
-            packet.summary.status
-        )));
-    }
-
-    Ok(())
-}
-
-fn read_worker_response(response_path: &Path) -> Result<WorkerResponse> {
-    let response_text = match fs::read_to_string(response_path) {
-        Ok(text) => text,
-        Err(source) => {
-            return Ok(WorkerResponse::error(format!(
-                "worker partial-write: read response {}: {source}",
-                response_path.display()
-            )));
-        }
-    };
-
-    match serde_json::from_str::<WorkerResponse>(&response_text) {
-        Ok(response) => Ok(response),
-        Err(source) => Ok(WorkerResponse::error(format!(
-            "worker partial-write: parse response {}: {source}",
-            response_path.display()
-        ))),
-    }
-}
-
-fn invoke_worker(
-    request_path: &Path,
-    response_path: &Path,
-    timeout_ms: u64,
-) -> std::result::Result<(), RunFailure> {
-    let worker_script = std::env::var_os("ALLIE_BROWSER_WORKER")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("workers/browser/run.mjs")
-        });
-
-    if !worker_script.exists() {
-        return Err(RunFailure::new(
-            "worker-missing",
-            "worker-adapter",
-            format!("worker script not found at {}", worker_script.display()),
-        ));
-    }
-
-    let mut child = Command::new("node")
-        .arg(&worker_script)
-        .arg("--request")
-        .arg(request_path)
-        .arg("--response")
-        .arg(response_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| {
-            RunFailure::new(
-                "worker-spawn-failed",
-                "worker-adapter",
-                format!("spawn worker {}: {source}", worker_script.display()),
-            )
-        })?;
-
-    match child
-        .wait_timeout(Duration::from_millis(timeout_ms))
-        .map_err(|source| {
-            RunFailure::new(
-                "worker-wait-failed",
-                "worker-adapter",
-                format!("wait for worker {}: {source}", worker_script.display()),
-            )
-        })? {
-        Some(status) => {
-            let output = child.wait_with_output().map_err(|source| {
-                RunFailure::new(
-                    "worker-output-failed",
-                    "worker-adapter",
-                    format!(
-                        "collect worker output {}: {source}",
-                        worker_script.display()
-                    ),
-                )
-            })?;
-            if !status.success() {
-                return Err(RunFailure::new(
-                    "worker-crash",
-                    "worker-adapter",
-                    format!(
-                        "{}\n{}",
-                        String::from_utf8_lossy(&output.stdout),
-                        String::from_utf8_lossy(&output.stderr)
-                    ),
-                ));
-            }
-        }
-        None => {
-            let _ = child.kill();
-            let output = child.wait_with_output().map_err(|source| {
-                RunFailure::new(
-                    "worker-timeout",
-                    "worker-adapter",
-                    format!("worker timed out after {timeout_ms} ms and output collection failed: {source}"),
-                )
-            })?;
-            return Err(RunFailure::new(
-                "worker-timeout",
-                "worker-adapter",
-                format!(
-                    "worker timed out after {timeout_ms} ms\n{}\n{}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                ),
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2911,65 +2045,12 @@ struct ManifestState {
     promotion_state: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct WorkerRequest {
-    schema: &'static str,
-    run_id: String,
-    manifest_id: String,
-    target: WorkerTarget,
-    browser: BrowserSettings,
-    states: Vec<ManifestState>,
-    artifacts_dir: String,
-    /// Authenticated-audit recipe (selectors, paths, env-var NAMES). Carries no
-    /// credential value; the worker reads secret values from its own env.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    auth: Option<AuthFlow>,
-}
-
-impl WorkerRequest {
-    fn from_manifest(
-        run_id: &str,
-        manifest: &FlowManifest,
-        manifest_path: &Path,
-        artifacts_dir: &Path,
-    ) -> Result<Self> {
-        let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-        let target = WorkerTarget {
-            kind: manifest.target.kind.clone(),
-            fixture_dir: manifest
-                .target
-                .fixture_dir
-                .as_ref()
-                .map(|path| normalize_relative(manifest_dir, path)),
-            base_url: manifest.target.base_url.clone(),
-        };
-
-        Ok(Self {
-            schema: WORKER_REQUEST_SCHEMA,
-            run_id: run_id.to_string(),
-            manifest_id: manifest.id.clone(),
-            target,
-            browser: manifest.browser.clone(),
-            states: manifest.flow.states.clone(),
-            artifacts_dir: artifacts_dir.to_string_lossy().to_string(),
-            auth: manifest.auth.clone(),
-        })
-    }
-}
-
-fn normalize_relative(base: &Path, path: &Path) -> String {
+pub(crate) fn normalize_relative(base: &Path, path: &Path) -> String {
     if path.is_absolute() {
         path.to_string_lossy().to_string()
     } else {
         base.join(path).to_string_lossy().to_string()
     }
-}
-
-#[derive(Debug, Serialize)]
-struct WorkerTarget {
-    kind: String,
-    fixture_dir: Option<String>,
-    base_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -3033,117 +2114,11 @@ struct FlowCandidate {
     trace: bool,
 }
 
-#[derive(Debug, Deserialize)]
-struct WorkerResponse {
-    schema: String,
-    status: WorkerRunStatus,
-    actual_base_url: Option<String>,
-    #[serde(default)]
-    states: Vec<WorkerStateResult>,
-    #[serde(default)]
-    errors: Vec<String>,
-    #[serde(default)]
-    nondeterminism: Vec<String>,
-}
-
-impl WorkerResponse {
-    fn validate(&self) -> Result<()> {
-        if self.schema != WORKER_RESPONSE_SCHEMA {
-            return Err(AllieError::Worker(format!(
-                "unexpected worker response schema {}",
-                self.schema
-            )));
-        }
-        Ok(())
-    }
-}
-
-impl WorkerResponse {
-    fn error(message: String) -> Self {
-        Self {
-            schema: WORKER_RESPONSE_SCHEMA.to_string(),
-            status: WorkerRunStatus::Error,
-            actual_base_url: None,
-            states: Vec::new(),
-            errors: vec![message],
-            nondeterminism: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum WorkerRunStatus {
-    Passed,
-    Failed,
-    Error,
-}
-
-#[derive(Debug, Deserialize)]
-struct WorkerStateResult {
-    id: String,
-    route: String,
-    url: String,
-    title: String,
-    http_status: Option<u16>,
-    screenshot_path: Option<String>,
-    axe_json_path: Option<String>,
-    #[serde(default)]
-    dom_snapshot_path: Option<String>,
-    #[serde(default)]
-    accessibility_tree_path: Option<String>,
-    #[serde(default)]
-    video_path: Option<String>,
-    #[serde(default)]
-    trace_path: Option<String>,
-    #[serde(default)]
-    keyboard_focus_order: Vec<String>,
-    #[serde(default)]
-    axe_violations: Vec<AxeViolation>,
-    #[serde(default)]
-    console_errors: Vec<String>,
-    #[serde(default)]
-    network_errors: Vec<String>,
-    #[serde(default)]
-    state_errors: Vec<String>,
-    #[serde(default)]
-    features: Option<PageFeatures>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct AxeViolation {
-    id: String,
-    impact: Option<String>,
-    help: Option<String>,
-    description: Option<String>,
-    #[serde(default)]
-    tags: Vec<String>,
-    #[serde(default)]
-    nodes: usize,
-}
-
 #[derive(Debug)]
 struct ContractFailure {
     state_id: String,
     route: String,
     message: String,
-}
-
-#[derive(Clone, Debug)]
-struct RunFailure {
-    kind: String,
-    source: String,
-    message: String,
-}
-
-impl RunFailure {
-    fn new(kind: &str, source: &str, message: String) -> Self {
-        Self {
-            kind: kind.to_string(),
-            source: source.to_string(),
-            message,
-        }
-    }
 }
 
 #[expect(
@@ -3195,7 +2170,7 @@ fn write_packet_and_report(
     let infrastructure_failures =
         run_failures.len() + response_error_count + response.nondeterminism.len();
 
-    let mut artifacts = worker_artifacts(out_dir, &response, &manifest.artifacts, finished_at)?;
+    let mut artifacts = worker::artifacts(out_dir, &response, &manifest.artifacts, finished_at)?;
     let findings = findings_from_response(
         &response,
         &artifacts,
@@ -3265,10 +2240,7 @@ fn write_packet_and_report(
         replay: Replay {
             command: replay_command,
             manifest_path: manifest_path.to_string_lossy().to_string(),
-            environment_requirements: vec![
-                "npm install".to_string(),
-                "npx playwright install chromium".to_string(),
-            ],
+            environment_requirements: worker::environment_requirements(),
             credential_profile: manifest.auth_profile_name(),
             browser: manifest.browser.clone(),
             seed_data: vec!["checked-in fixture fixtures/login".to_string()],
@@ -3349,90 +2321,6 @@ fn failure_class_for(
         ExitClass::InfrastructureFailure => Some("infrastructure-failure".to_string()),
         ExitClass::Success | ExitClass::Usage => None,
     }
-}
-
-fn worker_artifacts(
-    out_dir: &Path,
-    response: &WorkerResponse,
-    artifact_policy: &ArtifactPolicy,
-    timestamp: DateTime<Utc>,
-) -> Result<Vec<ArtifactMetadata>> {
-    let mut artifacts = Vec::new();
-    for state in &response.states {
-        if let Some(path) = &state.axe_json_path {
-            artifacts.push(artifact_for_path(
-                &format!("axe-json-{}", state.id),
-                "axe_json",
-                out_dir,
-                &out_dir.join(path),
-                Some(state.id.clone()),
-                "playwright-axe-worker",
-                artifact_policy,
-                timestamp,
-            )?);
-        }
-        if let Some(path) = &state.screenshot_path {
-            artifacts.push(artifact_for_path(
-                &format!("screenshot-{}", state.id),
-                "screenshot",
-                out_dir,
-                &out_dir.join(path),
-                Some(state.id.clone()),
-                "playwright-axe-worker",
-                artifact_policy,
-                timestamp,
-            )?);
-        }
-        if let Some(path) = &state.dom_snapshot_path {
-            artifacts.push(artifact_for_path(
-                &format!("dom-snapshot-{}", state.id),
-                "dom_snapshot",
-                out_dir,
-                &out_dir.join(path),
-                Some(state.id.clone()),
-                "playwright-axe-worker",
-                artifact_policy,
-                timestamp,
-            )?);
-        }
-        if let Some(path) = &state.accessibility_tree_path {
-            artifacts.push(artifact_for_path(
-                &format!("accessibility-tree-{}", state.id),
-                "accessibility_tree",
-                out_dir,
-                &out_dir.join(path),
-                Some(state.id.clone()),
-                "playwright-axe-worker",
-                artifact_policy,
-                timestamp,
-            )?);
-        }
-        if let Some(path) = &state.video_path {
-            artifacts.push(artifact_for_path(
-                &format!("video-{}", state.id),
-                "video",
-                out_dir,
-                &out_dir.join(path),
-                Some(state.id.clone()),
-                "playwright-axe-worker",
-                artifact_policy,
-                timestamp,
-            )?);
-        }
-        if let Some(path) = &state.trace_path {
-            artifacts.push(artifact_for_path(
-                &format!("trace-{}", state.id),
-                "trace",
-                out_dir,
-                &out_dir.join(path),
-                Some(state.id.clone()),
-                "playwright-axe-worker",
-                artifact_policy,
-                timestamp,
-            )?);
-        }
-    }
-    Ok(artifacts)
 }
 
 #[expect(
@@ -3611,140 +2499,6 @@ fn findings_from_response(
     findings
 }
 
-fn obligation_from_tags(policy_profile: &str, tags: &[String]) -> String {
-    if policy_profile != "wcag22-aa" {
-        return tags
-            .iter()
-            .find(|tag| tag.starts_with("wcag"))
-            .cloned()
-            .unwrap_or_else(|| format!("{policy_profile}:unmapped-axe-rule"));
-    }
-
-    let profile = wcag22_profile();
-    let Some(map) = profile
-        .get("axe_tag_map")
-        .and_then(|value| value.as_object())
-    else {
-        return "wcag22-aa:unmapped-axe-rule".to_string();
-    };
-
-    let mut candidates = tags.iter().collect::<Vec<_>>();
-    candidates.sort_by_key(|tag| std::cmp::Reverse(tag.len()));
-    for tag in candidates {
-        if let Some(obligation) = map
-            .get(tag)
-            .and_then(|value| value.get("obligation"))
-            .and_then(|value| value.as_str())
-        {
-            return obligation.to_string();
-        }
-    }
-
-    "wcag22-aa:unmapped-axe-rule".to_string()
-}
-
-pub(crate) fn deterministic_pass_obligation(policy_profile: &str) -> String {
-    if policy_profile != "wcag22-aa" {
-        return format!("{policy_profile}:deterministic-machine-checks");
-    }
-
-    wcag22_profile()
-        .get("deterministic_pass_obligation")
-        .and_then(|value| value.get("obligation"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("wcag22-aa:deterministic-axe-rules")
-        .to_string()
-}
-
-fn scripted_profile_obligations(policy_profile: &str) -> Vec<String> {
-    let mut obligations = profile_obligation_list(policy_profile, "scripted_obligations");
-    obligations.extend(criteria_with_method(policy_profile, "scripted"));
-    obligations.sort();
-    obligations.dedup();
-    obligations
-}
-
-fn human_review_profile_obligations(policy_profile: &str) -> Vec<String> {
-    let mut obligations = profile_obligation_list(policy_profile, "human_review_obligations");
-    obligations.extend(criteria_with_method(policy_profile, "human_review"));
-    obligations.sort();
-    obligations.dedup();
-    obligations
-}
-
-pub(crate) fn profile_obligation_list(policy_profile: &str, key: &str) -> Vec<String> {
-    if policy_profile != "wcag22-aa" {
-        return Vec::new();
-    }
-
-    wcag22_profile()
-        .get(key)
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("obligation").and_then(|value| value.as_str()))
-                .map(ToString::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn wcag22_profile() -> &'static serde_json::Value {
-    static PROFILE: OnceLock<serde_json::Value> = OnceLock::new();
-    PROFILE.get_or_init(|| {
-        serde_json::from_str(WCAG22_AA_PROFILE_JSON)
-            .expect("embedded wcag22-aa profile is valid JSON")
-    })
-}
-
-fn criteria_with_method(policy_profile: &str, method: &str) -> Vec<String> {
-    if policy_profile != "wcag22-aa" {
-        return Vec::new();
-    }
-    wcag22_success_criteria()
-        .into_iter()
-        .filter(|criterion| criterion["method"].as_str() == Some(method))
-        .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
-        .collect()
-}
-
-pub(crate) fn wcag22_success_criteria() -> Vec<serde_json::Value> {
-    wcag22_profile()
-        .get("success_criteria")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default()
-}
-
-pub(crate) fn criterion_title(obligation: &str) -> String {
-    wcag22_success_criteria()
-        .into_iter()
-        .find(|criterion| criterion["obligation"].as_str() == Some(obligation))
-        .and_then(|criterion| {
-            let num = criterion["num"].as_str()?;
-            let handle = criterion["handle"].as_str()?;
-            Some(format!("{num} {handle}"))
-        })
-        .or_else(|| profile_obligation_title(obligation))
-        .unwrap_or_else(|| obligation.to_string())
-}
-
-fn profile_obligation_title(obligation: &str) -> Option<String> {
-    let profile = wcag22_profile();
-    if profile["deterministic_pass_obligation"]["obligation"].as_str() == Some(obligation) {
-        return profile["deterministic_pass_obligation"]["title"]
-            .as_str()
-            .map(ToString::to_string);
-    }
-    ["scripted_obligations", "human_review_obligations"]
-        .into_iter()
-        .filter_map(|key| profile.get(key).and_then(|value| value.as_array()))
-        .flat_map(|items| items.iter())
-        .find(|item| item["obligation"].as_str() == Some(obligation))
-        .and_then(|item| item["title"].as_str().map(ToString::to_string))
-}
-
 /// Combine the per-state feature inventories into one page-level view: counts
 /// sum, `lang` holds only if every inspected state declared it, and a reflow
 /// overflow on any state counts as an overflow.
@@ -3781,136 +2535,6 @@ fn aggregate_features<'a>(
     }
     agg.lang = saw_state && lang_all;
     agg
-}
-
-/// True when a criterion does not apply given the page's content — e.g. no
-/// media for the time-based-media criteria, or no forms for input-assistance.
-fn feature_not_applicable(obligation: &str, features: &PageFeatures) -> bool {
-    let media_absent = features.audio == 0 && features.video == 0;
-    let inputs_absent = features.forms == 0 && features.inputs == 0;
-    matches!(
-        obligation,
-        "wcag22-aa:1.2.1-audio-only-and-video-only-prerecorded"
-            | "wcag22-aa:1.2.2-captions-prerecorded"
-            | "wcag22-aa:1.2.3-audio-description-or-media-alternative-prerecorded"
-            | "wcag22-aa:1.2.4-captions-live"
-            | "wcag22-aa:1.2.5-audio-description-prerecorded"
-        if media_absent
-    ) || (obligation == "wcag22-aa:1.4.2-audio-control" && features.audio == 0)
-        || (matches!(
-            obligation,
-            "wcag22-aa:1.3.5-identify-input-purpose"
-                | "wcag22-aa:3.3.1-error-identification"
-                | "wcag22-aa:3.3.3-error-suggestion"
-                | "wcag22-aa:3.3.4-error-prevention-legal-financial-data"
-                | "wcag22-aa:3.3.7-redundant-entry"
-                | "wcag22-aa:3.3.8-accessible-authentication-minimum"
-        ) && inputs_absent)
-        || (obligation == "wcag22-aa:2.5.7-dragging-movements" && features.draggable == 0)
-}
-
-/// Human-readable reason an applicable-by-default criterion was ruled out.
-pub(crate) fn applicability_reason(obligation: &str) -> String {
-    match obligation {
-        o if o.starts_with("wcag22-aa:1.2.") => {
-            "No <audio> or <video> elements were detected on the inspected states, so this time-based media criterion does not apply.".to_string()
-        }
-        "wcag22-aa:1.4.2-audio-control" => {
-            "No <audio> elements were detected, so audio control does not apply.".to_string()
-        }
-        "wcag22-aa:1.3.5-identify-input-purpose"
-        | "wcag22-aa:3.3.1-error-identification"
-        | "wcag22-aa:3.3.3-error-suggestion"
-        | "wcag22-aa:3.3.4-error-prevention-legal-financial-data"
-        | "wcag22-aa:3.3.7-redundant-entry"
-        | "wcag22-aa:3.3.8-accessible-authentication-minimum" => {
-            "No forms or input fields were detected on the inspected states, so this input-assistance criterion does not apply.".to_string()
-        }
-        "wcag22-aa:2.5.7-dragging-movements" => {
-            "No draggable elements were detected, so dragging-movement alternatives do not apply.".to_string()
-        }
-        other => format!(
-            "{} was determined not applicable to the inspected content.",
-            criterion_title(other)
-        ),
-    }
-}
-
-/// Decide a criterion's verdict from page features and observed signals. This
-/// is the rule that guarantees no criterion is left `not_tested`: every path
-/// returns applicable evidence (pass/fail/not_applicable) or queues the
-/// criterion for agentic (AI) review.
-fn criterion_feature_verdict(
-    obligation: &str,
-    method: &str,
-    features: &PageFeatures,
-    keyboard_observed: bool,
-) -> (&'static str, &'static str, &'static str, &'static str) {
-    if feature_not_applicable(obligation, features) {
-        return (
-            "not_applicable",
-            "machine_proven",
-            "applicability",
-            "allie-applicability-oracle",
-        );
-    }
-    match obligation {
-        "wcag22-aa:3.1.1-language-of-page" => {
-            return if features.lang {
-                (
-                    "pass",
-                    "machine_proven",
-                    "deterministic",
-                    "allie-lang-attribute-check",
-                )
-            } else {
-                (
-                    "fail",
-                    "machine_proven",
-                    "deterministic",
-                    "allie-lang-attribute-check",
-                )
-            };
-        }
-        "wcag22-aa:1.4.10-reflow" if features.reflow_checked => {
-            return if features.reflow_overflow {
-                (
-                    "fail",
-                    "script_observed",
-                    "scripted",
-                    "allie-reflow-320px-check",
-                )
-            } else {
-                (
-                    "pass",
-                    "script_observed",
-                    "scripted",
-                    "allie-reflow-320px-check",
-                )
-            };
-        }
-        _ => {}
-    }
-    match method {
-        "axe" => (
-            "pass",
-            "machine_proven",
-            "deterministic",
-            "axe-core-success-criterion-tags",
-        ),
-        "scripted" if keyboard_observed && obligation.contains("keyboard") => (
-            "pass",
-            "script_observed",
-            "scripted",
-            "playwright-keyboard-traversal",
-        ),
-        _ => (
-            "needs_review",
-            "requires_human_or_agent_review",
-            "agentic",
-            "allie-agentic-review-queue",
-        ),
-    }
 }
 
 fn verdicts_from_findings(
@@ -4479,6 +3103,7 @@ fn git_metadata(args: &[&str]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::standards::{criterion_level, criterion_principle, criterion_source_url};
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -4730,49 +3355,6 @@ mod tests {
     }
 
     #[test]
-    fn worker_request_carries_auth_env_names_not_secret_values() {
-        let _guard = AUTH_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
-        // Set a sentinel secret in the env; the serialized request must contain
-        // the env NAME (so the worker can read it) but never the VALUE.
-        let sentinel = "sentinel-secret-do-not-serialize-7f3c";
-        // SAFETY: single-threaded test; restored before returning.
-        unsafe {
-            std::env::set_var("ALLIE_AUTH_FIXTURE_PASSWORD", sentinel);
-            std::env::set_var("ALLIE_AUTH_FIXTURE_USER", "qa@example.test");
-        }
-
-        let manifest = FlowManifest::load(Path::new("examples/auth-fixture-flow.yml")).unwrap();
-        assert!(
-            manifest.preflight_failures().is_empty(),
-            "preflight should pass with both auth env vars set"
-        );
-
-        let temp = tempdir().unwrap();
-        let request = WorkerRequest::from_manifest(
-            "run-auth-secret",
-            &manifest,
-            Path::new("examples/auth-fixture-flow.yml"),
-            &temp.path().join("artifacts"),
-        )
-        .unwrap();
-        let json = serde_json::to_string_pretty(&request).unwrap();
-
-        unsafe {
-            std::env::remove_var("ALLIE_AUTH_FIXTURE_PASSWORD");
-            std::env::remove_var("ALLIE_AUTH_FIXTURE_USER");
-        }
-
-        assert!(
-            json.contains("ALLIE_AUTH_FIXTURE_PASSWORD"),
-            "request must carry the env NAME so the worker can read it"
-        );
-        assert!(
-            !json.contains(sentinel),
-            "request must NOT carry the secret VALUE (secrets stay off disk)"
-        );
-    }
-
-    #[test]
     fn auth_preflight_fails_with_missing_credential_when_value_env_unset() {
         let _guard = AUTH_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         // Ensure the auth env vars are unset for this assertion.
@@ -5013,7 +3595,8 @@ mod tests {
 
     #[test]
     fn wcag22_profile_maps_axe_tags_to_versioned_obligations() {
-        let profile: serde_json::Value = serde_json::from_str(WCAG22_AA_PROFILE_JSON).unwrap();
+        let profile: serde_json::Value =
+            serde_json::from_str(standards::WCAG22_AA_PROFILE_JSON).unwrap();
 
         assert_eq!(profile["id"], "wcag22-aa");
         assert_eq!(
@@ -5057,7 +3640,8 @@ mod tests {
 
     #[test]
     fn wcag22_profile_contains_complete_aa_obligation_ledger() {
-        let profile: serde_json::Value = serde_json::from_str(WCAG22_AA_PROFILE_JSON).unwrap();
+        let profile: serde_json::Value =
+            serde_json::from_str(standards::WCAG22_AA_PROFILE_JSON).unwrap();
         let criteria = profile["success_criteria"].as_array().unwrap();
 
         assert_eq!(criteria.len(), 55);
@@ -5898,9 +4482,9 @@ mod tests {
         assert_eq!(reviewed["review"][0]["provider"], "offline-recorded");
         assert_eq!(reviewed["findings"][0]["evidence_class"], "agentic");
 
-        let projection = project_release_decision(&reviewed, &release_options(vec!["login-form"]));
+        let projection = project_release_value(&reviewed, &release_options(vec!["login-form"]));
         assert_eq!(projection.exit_class, ExitClass::Success);
-        assert_eq!(projection.summary["status"], "needs_review");
+        assert_eq!(projection.summary.status, "needs_review");
     }
 
     #[test]
@@ -6064,11 +4648,11 @@ mod tests {
         packet["summary"]["status"] = serde_json::json!("fail");
         packet["summary"]["deterministic_failures"] = serde_json::json!(1);
 
-        let projection = project_release_decision(&packet, &release_options(vec![]));
+        let projection = project_release_value(&packet, &release_options(vec![]));
 
         assert_eq!(projection.exit_class, ExitClass::BlockingFinding);
-        assert_eq!(projection.summary["status"], "blocked");
-        assert_eq!(projection.github_check["conclusion"], "failure");
+        assert_eq!(projection.summary.status, "blocked");
+        assert_eq!(projection.github_check.conclusion, "failure");
     }
 
     #[test]
@@ -6078,29 +4662,38 @@ mod tests {
             {
                 "id": "agentic-1",
                 "title": "Possible label ambiguity",
+                "description": "Agentic review reported possible ambiguity.",
                 "evidence_class": "agentic",
+                "standard_obligation": "wcag22-aa:3.3.2-labels-or-instructions",
+                "severity": "moderate",
+                "status": "needs_review",
                 "confidence": "agent_inferred"
+                ,"source": "allie-agentic-review"
+                ,"affected_route": "/"
+                ,"affected_state": "login-form"
+                ,"artifact_refs": []
+                ,"replay_command": "cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest"
             }
         ]);
 
-        let projection = project_release_decision(&packet, &release_options(vec!["login-form"]));
+        let projection = project_release_value(&packet, &release_options(vec!["login-form"]));
 
         assert_eq!(projection.exit_class, ExitClass::Success);
-        assert_eq!(projection.summary["status"], "needs_review");
-        assert_eq!(projection.github_check["conclusion"], "neutral");
-        assert_eq!(projection.summary["model_findings_non_blocking"], 1);
+        assert_eq!(projection.summary.status, "needs_review");
+        assert_eq!(projection.github_check.conclusion, "neutral");
+        assert_eq!(projection.summary.model_findings_non_blocking, 1);
     }
 
     #[test]
     fn release_projection_blocks_missing_changed_surface_evidence() {
         let packet = minimal_release_packet();
 
-        let projection = project_release_decision(&packet, &release_options(vec!["settings"]));
+        let projection = project_release_value(&packet, &release_options(vec!["settings"]));
 
         assert_eq!(projection.exit_class, ExitClass::BlockingFinding);
-        assert_eq!(projection.summary["status"], "blocked");
+        assert_eq!(projection.summary.status, "blocked");
         assert_eq!(
-            projection.summary["blocking"]["missing_required_evidence"][0],
+            projection.summary.blocking.missing_required_evidence[0],
             "settings"
         );
     }
@@ -6119,12 +4712,12 @@ mod tests {
             }
         ]);
 
-        let projection = project_release_decision(&packet, &release_options(vec!["login-form"]));
+        let projection = project_release_value(&packet, &release_options(vec!["login-form"]));
 
         assert_eq!(projection.exit_class, ExitClass::BlockingFinding);
-        assert_eq!(projection.summary["status"], "blocked");
+        assert_eq!(projection.summary.status, "blocked");
         assert_eq!(
-            projection.summary["blocking"]["expired_waivers"][0]["id"],
+            projection.summary.blocking.expired_waivers[0]["id"],
             "waiver-1"
         );
     }
@@ -6141,12 +4734,12 @@ mod tests {
             }
         ]);
 
-        let projection = project_release_decision(&packet, &release_options(vec!["login-form"]));
+        let projection = project_release_value(&packet, &release_options(vec!["login-form"]));
 
         assert_eq!(projection.exit_class, ExitClass::BlockingFinding);
-        assert_eq!(projection.summary["status"], "blocked");
+        assert_eq!(projection.summary.status, "blocked");
         assert_eq!(
-            projection.summary["blocking"]["invalid_waivers"][0]["id"],
+            projection.summary.blocking.invalid_waivers[0]["id"],
             "waiver-2"
         );
     }
@@ -6157,12 +4750,12 @@ mod tests {
         packet["run"]["finished_at"] =
             serde_json::json!((Utc::now() - chrono::Duration::days(30)).to_rfc3339());
 
-        let projection = project_release_decision(&packet, &release_options(vec!["login-form"]));
+        let projection = project_release_value(&packet, &release_options(vec!["login-form"]));
 
         assert_eq!(projection.exit_class, ExitClass::Success);
-        assert_eq!(projection.summary["status"], "needs_review");
-        assert_eq!(projection.github_check["conclusion"], "neutral");
-        assert_eq!(projection.summary["review"]["stale_evidence"], true);
+        assert_eq!(projection.summary.status, "needs_review");
+        assert_eq!(projection.github_check.conclusion, "neutral");
+        assert!(projection.summary.review.stale_evidence);
     }
 
     fn release_options(changed_surfaces: Vec<&str>) -> ReleaseOptions {
@@ -6175,6 +4768,14 @@ mod tests {
                 .collect(),
             stale_after_days: 7,
         }
+    }
+
+    fn project_release_value(
+        packet: &serde_json::Value,
+        options: &ReleaseOptions,
+    ) -> release::ReleaseProjection {
+        let packet: EvidencePacket = serde_json::from_value(packet.clone()).unwrap();
+        release::project_release_decision(&packet, options)
     }
 
     fn minimal_release_packet() -> serde_json::Value {
@@ -6191,24 +4792,74 @@ mod tests {
             },
             "run": {
                 "id": "run-release",
-                "finished_at": Utc::now().to_rfc3339()
+                "started_at": Utc::now().to_rfc3339(),
+                "finished_at": Utc::now().to_rfc3339(),
+                "allie_version": "0.1.0",
+                "git_sha": "test-sha",
+                "git_branch": "test-branch",
+                "ci_provider": null,
+                "actor": "test"
+            },
+            "target": {
+                "base_url": "http://127.0.0.1:49152",
+                "environment": "test",
+                "app_name": "Allie Fixture",
+                "auth_profile": "none",
+                "credential_provider": {
+                    "provider": "none",
+                    "env": null,
+                    "required": false,
+                    "status": "not_required"
+                },
+                "flow_manifest": "examples/login-flow.yml"
+            },
+            "policy": {
+                "profile": "wcag22-aa",
+                "blocking_classes": ["deterministic"],
+                "worker_timeout_ms": 30000,
+                "model_provider_allowlist": [],
+                "model_status": "disabled",
+                "zdr_required": true,
+                "redaction_profile": "not_redacted_local_fixture",
+                "budget": {
+                    "model_calls": 0,
+                    "max_states": 1
+                }
             },
             "coverage": {
+                "routes_visited": ["/"],
                 "states_captured": ["login-form"],
-                "surfaces_discovered": ["Allie Fixture"]
+                "surfaces_discovered": ["Allie Fixture"],
+                "flows_exercised": ["login-flow"],
+                "state_metadata": [],
+                "standards_obligations_evaluated": [],
+                "obligations_not_tested": [],
+                "obligations_requiring_human_review": []
             },
             "artifacts": [
-                {"type": "axe_json"},
-                {"type": "screenshot"},
-                {"type": "html_report"}
+                {"id":"axe-json-login-form","type":"axe_json","path":"artifacts/axe-login-form.json","hash":"sha256:test","redaction_status":"not_redacted_local_fixture","retention_class":"local_ephemeral","unavailable_reason":null,"related_flow_state":"login-form","creation_tool":"allie-release-test-fixture","timestamp":Utc::now().to_rfc3339()},
+                {"id":"screenshot-login-form","type":"screenshot","path":"artifacts/login-form.png","hash":"sha256:test","redaction_status":"not_redacted_local_fixture","retention_class":"local_ephemeral","unavailable_reason":null,"related_flow_state":"login-form","creation_tool":"allie-release-test-fixture","timestamp":Utc::now().to_rfc3339()},
+                {"id":"report-html","type":"html_report","path":"report.html","hash":"sha256:test","redaction_status":"not_redacted_local_fixture","retention_class":"local_ephemeral","unavailable_reason":null,"related_flow_state":null,"creation_tool":"allie-report-writer","timestamp":Utc::now().to_rfc3339()}
             ],
             "findings": [],
             "verdicts": [],
             "waivers": [],
-            "policy": {
-                "model_status": "disabled",
-                "model_provider_allowlist": [],
-                "zdr_required": true
+            "review": [],
+            "agentic_assessments": [],
+            "replay": {
+                "command": "cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest",
+                "manifest_path": "examples/login-flow.yml",
+                "environment_requirements": [],
+                "credential_profile": "none",
+                "browser": {
+                    "viewport": {"width": 1280, "height": 720},
+                    "color_scheme": "light",
+                    "reduced_motion": "reduce",
+                    "locale": "en-US",
+                    "zoom": 1.0
+                },
+                "seed_data": [],
+                "known_nondeterminism": []
             }
         })
     }
@@ -6358,7 +5009,7 @@ flow:
 
     fn passing_worker_response() -> WorkerResponse {
         WorkerResponse {
-            schema: WORKER_RESPONSE_SCHEMA.to_string(),
+            schema: worker::response_schema().to_string(),
             status: WorkerRunStatus::Passed,
             actual_base_url: Some("http://127.0.0.1:49152".to_string()),
             states: vec![WorkerStateResult {
