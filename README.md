@@ -154,8 +154,9 @@ npm run auth:smoke
 ```
 
 It logs into a local fixture, reaches the gated route, verifies the credential
-value never lands in any artifact, and confirms the negative control (no session
-→ HTTP-200 login wall) blocks instead of passing.
+value never lands in any artifact, proves the `storage_state_env` hatch reaches
+the same gated route from a captured session, and confirms the negative control
+(no session → HTTP-200 login wall) blocks instead of passing.
 
 ## WCAG Coverage Report
 
