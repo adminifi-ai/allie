@@ -14,9 +14,10 @@ There is no account to create and nothing sent to a vendor by default. Allie run
 where your code runs.
 
 Allie's job is autonomous accessibility audit, mapping, and reporting. It
-discovers the product surface, writes and runs the tests and agentic QA loops
-itself, analyzes screenshots and video walkthroughs with vision models, proves
-what can be proven automatically, and renders a defensible, replayable picture of
+discovers the codebase, product surfaces, routes, themes, workflows, and likely
+user stories; writes and runs the tests and agentic QA loops itself; analyzes
+screenshots, GIFs, and video walkthroughs with vision models; proves what can be
+proven automatically; and renders a defensible, replayable picture of
 accessibility status tied to a specific code revision.
 
 Allie does not remediate. Fixing what the audit finds — by hand, by ticket, or by
@@ -46,13 +47,14 @@ is written to be trusted and acted on by a machine as readily as by a person.
 ## The Job
 
 Given a repository, a running or staged app, and a policy profile, Allie should
-discover the sitemap, product surfaces, and likely user stories; write and replay
-deterministic Playwright + axe coverage through a real browser; map every result
-to its relevant WCAG 2.2 A/AA obligation; run agentic vision passes over
-screenshots and video walkthroughs that render a committed pass/fail verdict
-(shown asterisked, with the evidence inlined) on criteria that require judgment;
-and produce a report where you can drill from standard to criterion, surface,
-finding, test, artifact, agentic context, waiver, and release decision.
+discover the sitemap, product surfaces, likely user stories, relevant config,
+themes, and interaction states; write and replay deterministic Playwright + axe
+coverage through a real browser; map every result to its relevant WCAG 2.2 A/AA
+obligation; run agentic vision passes over screenshots, GIFs, and video
+walkthroughs that render a committed pass/fail verdict (shown asterisked, with
+the evidence inlined) on criteria that require judgment; and produce a report
+where every in-scope criterion is green, red, not applicable, or explicitly
+unverified across every discovered product surface.
 
 The output is the product. It is deep and comprehensive by default, generated
 automatically, and structured so the next agent — or the next human — can trust
@@ -68,6 +70,9 @@ breaks one of them, it is the wrong change regardless of how convenient it is.
 - **No silent gaps.** Every in-scope criterion gets an explicit status. "Not
   tested" is visible and honest; it is never dressed up as a pass and never
   quietly omitted.
+- **Surface coverage is part of the claim.** A green criterion is meaningful
+  only for the routes, states, themes, viewports, and workflows Allie actually
+  mapped and exercised.
 - **Honest uncertainty.** Deterministic certainty and model judgment never blend
   into one fake number. A machine-certain failure, a scripted result, an agentic
   verdict, and a human attestation are different kinds of knowing, and the report
@@ -105,6 +110,9 @@ The repo should refuse work that erodes the invariants above, specifically:
   onto the local path.
 - Provider or browser details leaking outside their boundaries — model routing
   outside the gateway, Playwright/axe specifics outside the worker adapter.
+- Infrastructure-specific coupling in the core report contract. GitHub Actions
+  may be the common integration path, but CI, nightly, weekly, staging, and
+  local runs should all consume the same evidence model.
 
 ## Strategic Bets
 
@@ -130,6 +138,9 @@ can be revisited if evidence says we bet wrong.
    so structured that whatever comes next — a fix, a ticket, an auditor sign-off —
    starts from evidence, not a fresh investigation. Allie does not take that next
    step itself.
+6. CI and scheduled verification are first-class distribution paths. Pull
+   requests should show what accessibility changed, while nightly or weekly
+   staging runs answer whether the shipped product is still accessible.
 
 ## Lifespan
 
