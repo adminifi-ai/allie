@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie 015 Live Base URL Discovery Plan</title>
+  <style>
+    :root { color-scheme: light; --ink: #17191f; --muted: #5c6470; --line: #cfd6df; --wash: #f3f6fa; --accent: #2057d6; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: #fff; font: 16px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    header, main { width: min(100% - 48px, 1200px); margin: 0 auto; }
+    header { padding: 28px 0 12px; display: flex; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); }
+    main { padding: 32px 0 56px; }
+    h1 { margin: 0; font-size: 44px; line-height: 1.03; letter-spacing: 0; }
+    h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    p, ul { margin: 0; }
+    ul { padding-left: 1.2rem; }
+    code { background: var(--wash); padding: .1em .28em; border-radius: 4px; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, .75fr); gap: 32px; align-items: end; }
+    .panel, .cell { border: 1px solid var(--line); padding: 18px; background: #fff; }
+    .panel { background: var(--wash); }
+    .grid { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cell { border: 0; min-width: 0; }
+    .section { margin-top: 28px; }
+    .kicker, .muted { color: var(--muted); }
+    .accent { color: var(--accent); font-weight: 700; }
+    .phase { display: grid; grid-template-columns: 10rem minmax(0, 1fr); gap: 18px; padding: 14px 0; border-top: 1px solid var(--line); }
+    .phase:first-child { border-top: 0; }
+    @media (max-width: 860px) { header, .hero, .grid.three, .grid.two, .phase { grid-template-columns: 1fr; } h1 { font-size: 34px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>PLAN / 015</strong>
+    <span class="muted">Allie live base_url discovery</span>
+  </header>
+  <main>
+    <section class="hero">
+      <div>
+        <p class="kicker">Backlog 015, child 3</p>
+        <h1>Teach discovery to crawl a live <code>base_url</code> target, without changing Allie's audit-only product boundary.</h1>
+      </div>
+      <aside class="panel">
+        <h2>Chosen Design</h2>
+        <p>Implement a small deterministic HTTP crawler behind `src/discovery/live.rs`: start from `target.base_url`, fetch same-origin HTML, read same-origin `/sitemap.xml`, bound route count, and emit the existing discovery, flow-plan, and map artifacts.</p>
+      </aside>
+    </section>
+
+    <section class="grid three section">
+      <article class="cell">
+        <h2>State</h2>
+        <p>`src/discovery.rs` owns fixture discovery and product-map generation. Manifests already require `target.base_url` for non-fixture targets, but discovery ignores it.</p>
+      </article>
+      <article class="cell">
+        <h2>Acceptance</h2>
+        <p>A local live HTTP test site with `/`, `/settings`, `/help`, and sitemap-only `/account` appears in `discovery.json`, `flow-plan.json`, and `product-map.json` when the manifest uses `kind: web` and `base_url`.</p>
+      </article>
+      <article class="cell">
+        <h2>Non-Goals</h2>
+        <p>No credentialed crawl, no JavaScript browser crawl, no HTTPS/TLS crawling, no agentic model change, no remediation, and no release blocking on model-only findings.</p>
+      </article>
+    </section>
+
+    <section class="grid three section">
+      <article class="cell">
+        <h2>Standards</h2>
+        <ul>
+          <li>Rust-first; no Node or Playwright details in discovery.</li>
+          <li>Bounded crawl to avoid surprise network exploration.</li>
+          <li>Same-origin only; fragments, mailto, external hosts, non-HTTP schemes, and assets ignored.</li>
+          <li>Manifest-specified states remain authoritative and merge with crawl output.</li>
+        </ul>
+      </article>
+      <article class="cell">
+        <h2>Verification System</h2>
+        <p><strong>Claim:</strong> live `base_url` discovery produces routes from HTTP HTML, not only fixture files.</p>
+        <p><strong>Falsifier:</strong> the generated artifacts miss `/settings` or sitemap-only `/account`, or include an external route.</p>
+        <p><strong>Driver:</strong> Rust unit/CLI test with a local `TcpListener` site plus repo smokes.</p>
+      </article>
+      <article class="cell">
+        <h2>Evidence Packet</h2>
+        <p>Commit the regression test; leave runtime proof in `.allie/discovery/015-live-base-url-smoke/`, `.allie/maps/015-live-base-url-smoke/`, and PR body after running local commands.</p>
+      </article>
+    </section>
+
+    <section class="grid two section">
+      <article class="cell">
+        <h2>Execution</h2>
+        <div class="phase"><span class="accent">1 docs</span><p>Update README/evidence docs to state that `base_url` discovery performs bounded same-origin HTTP link and sitemap discovery.</p></div>
+        <div class="phase"><span class="accent">2 tests</span><p>Add a failing live HTTP discovery test using a local server and CLI artifact assertions.</p></div>
+        <div class="phase"><span class="accent">3 code</span><p>Implement the non-fixture `base_url` branch through a dedicated live discovery module; keep manifest states authoritative and merge live candidates.</p></div>
+        <div class="phase"><span class="accent">4 QA</span><p>Run targeted live discovery/map commands, then `cargo fmt --check`, `cargo test --locked`, `cargo clippy --locked -- -D warnings`, and `npm run verify`.</p></div>
+      </article>
+      <article class="cell">
+        <h2>Stop Rules</h2>
+        <ul>
+          <li>Stop if the manifest needs new public schema fields to make the slice honest.</li>
+          <li>Stop if network behavior requires auth, JavaScript execution, or browser crawling for acceptance.</li>
+          <li>Stop if reachable live candidates fail to appear in committed tests or the persistent smoke packet.</li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="panel section">
+      <h2>Review Focus</h2>
+      <p>Critics should hunt URL normalization bugs, unbounded crawl behavior, external-host leakage, misleading confidence labels, and whether `verify` can still imply complete coverage when the live crawl only sees static links.</p>
+    </section>
+  </main>
+</body>
+</html>

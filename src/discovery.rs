@@ -12,8 +12,10 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
+mod live;
 mod render;
 
+use live::discover_live_base_url_surfaces;
 use render::{render_discovery_report, render_product_surface_map};
 
 const DEFAULT_AGENT_TIMEOUT_MS: u64 = 120_000;
@@ -850,6 +852,12 @@ fn discover_surfaces(
                     provenance: vec![html_path.to_string_lossy().to_string()],
                 });
         }
+    } else if let Some(base_url) = &manifest.target.base_url {
+        for discovered in discover_live_base_url_surfaces(base_url)? {
+            surfaces
+                .entry(discovered.route.clone())
+                .or_insert(discovered);
+        }
     }
 
     Ok(surfaces.into_values().collect())
@@ -905,7 +913,11 @@ fn route_to_id(route: &str) -> String {
 
 fn html_title(path: &Path) -> Option<String> {
     let text = fs::read_to_string(path).ok()?;
-    let lower = text.to_lowercase();
+    html_title_from_text(&text)
+}
+
+fn html_title_from_text(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
     let start = lower.find("<title>")? + "<title>".len();
     let end = lower[start..].find("</title>")? + start;
     Some(text[start..end].trim().to_string())
