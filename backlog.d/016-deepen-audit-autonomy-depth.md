@@ -9,7 +9,7 @@ a zero-false-positive ceiling on vision failures.
 
 ## Oracle
 - [x] Generated flows include multi-step interactions/assertions, not 1:1 surface→state stubs (src/lib.rs:1009-1030, run_promote_flow:1074).
-- [ ] Vision model receives video walkthroughs, not only sampled stills (workers/agentic/review.mjs:244 filters to screenshots).
+- [x] Vision model receives video walkthroughs, not only sampled stills (workers/agentic/review.mjs:244 filters to screenshots).
 - [ ] Agentic loop iterates (observe → act → re-judge), not single-shot (review.mjs:59-105).
 - [ ] Agentic review fans out across all discovered surfaces with retries (review.mjs:51, agentic.rs:95-117).
 - [ ] Vision FAIL verdicts enforce a zero-false-positive ceiling, benchmarked against a labeled set.
@@ -31,3 +31,8 @@ a zero-false-positive ceiling on vision failures.
   manifest. Local fixture discovery infers conservative deterministic steps for
   simple `aria-controls` menus and email fields, and `npm run autonomous:smoke`
   verifies the generated YAML plus post-action DOM evidence.
+- 2026-06-30: Agentic model calls now include captured focus/motion walkthrough
+  clips as `video_url` media alongside screenshot `image_url` parts. The
+  offline `npm run agentic:smoke` gate uses a fake OpenRouter endpoint to prove
+  the outgoing payload contains WebM video media without requiring a live model
+  key.

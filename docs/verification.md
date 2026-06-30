@@ -211,8 +211,11 @@ assistive-technology obligations are still marked `not_tested` or
 
 `npm run agentic:smoke` proves the agentic review gateway launches the browser,
 captures media, and returns a well-formed inconclusive assessment when no model
-API key is present. This is the offline graceful-degradation guard; live model
-behavior is covered by real `verify` and workbench runs.
+API key is present. It also starts a local fake OpenRouter endpoint and verifies
+that a model request includes both screenshot `image_url` parts and captured
+WebM walkthrough clips as `video_url` parts. This keeps the smoke offline while
+locking the provider payload shape; live model behavior is covered by real
+`verify` and workbench runs.
 
 `npm run autonomous:smoke` proves the autonomous workbench path. It leaves:
 

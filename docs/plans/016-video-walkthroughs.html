@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en" data-ae-mode="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Plan 016 - Video Walkthroughs</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/misty-step/aesthetic@v2.5.1/aesthetic.css">
+  <style>
+    :root { --ae-accent: #245c4f; }
+    .plan-wide .ae-bar, .plan-wide .ae-stage { width: min(92rem, 100% - 4rem); }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(24em, .72fr); gap: 3em; align-items: end; }
+    .grid-4, .grid-2 { display: grid; gap: 1px; background: var(--ae-line); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cell { min-width: 0; background: var(--ae-surface); padding: 1.15em 1.3em; }
+    .wash { background: var(--ae-wash); }
+    .rule { border-top: 1px solid var(--ae-line); margin: 1.3em 0; }
+    @media (max-width: 980px) {
+      .plan-wide .ae-bar, .plan-wide .ae-stage { width: min(100% - 2rem, 92rem); }
+      .hero, .grid-4, .grid-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="ae-screen plan-wide">
+  <header class="ae-bar">
+    <a class="ae-name" href="../..">ALLIE / PLAN 016</a>
+    <p class="ae-chrome">autonomy-depth slice - model video input</p>
+  </header>
+  <main class="ae-stage ae-stage-scroll">
+    <article class="ae-view">
+      <section class="hero" aria-label="Plan contract">
+        <div>
+          <p class="ae-chrome">BACKLOG 016 - CHILD 2</p>
+          <h1 class="ae-strong">The vision model should receive the recorded walkthrough clips, not only sampled stills.</h1>
+          <p class="ae-lede">Allie already records focus and motion clips for the human report. This slice moves those same WebM artifacts across the provider boundary as base64 `video_url` content when a compatible OpenRouter model call runs.</p>
+        </div>
+        <aside class="ae-panel">
+          <h2 class="ae-h">CHOSEN DESIGN</h2>
+          <p>Keep Rust as the policy and packet owner. In the agentic worker, encode captured WebM clips into OpenRouter video content parts beside the existing screenshots.</p>
+          <div class="rule"></div>
+          <h2 class="ae-h">QUALITY SYSTEM</h2>
+          <p>Standards: no remediation scope; model-only findings remain advisory; browser capture stays in the worker; provider detail stays outside Rust.</p>
+          <p>Proof: offline fake OpenRouter smoke verifies `video_url` in the outgoing payload, plus full `npm run verify`.</p>
+        </aside>
+      </section>
+      <section class="grid-4" aria-label="Execution contract" style="margin-top: 2em">
+        <article class="cell"><h2 class="ae-h">CLAIM</h2><p>Agentic review model requests include clips for focus or motion batches that captured clips.</p></article>
+        <article class="cell"><h2 class="ae-h">FALSIFIER</h2><p>The model request body contains only text and `image_url` parts, or clips remain report-only.</p></article>
+        <article class="cell"><h2 class="ae-h">DRIVER</h2><p>`scripts/agentic-smoke.sh` with a local HTTP server standing in for OpenRouter.</p></article>
+        <article class="cell wash"><h2 class="ae-h">STOP IF</h2><p>Video requires a hosted upload path, secrets in artifacts, or a provider-specific branch leaks into Rust.</p></article>
+      </section>
+      <section class="grid-2" aria-label="Scope" style="margin-top: 2em">
+        <article class="cell">
+          <h2 class="ae-h">SCOPE</h2>
+          <p>Send captured focus and motion clips to the model as `video_url` base64 data URLs. Preserve existing screenshot behavior and report media.</p>
+          <p>Do not implement observe-act-rejudge, all-surface fan-out, precision benchmarking, or any remediation feature.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">SOURCE CHECK</h2>
+          <p>OpenRouter documents video-capable chat completions with `video_url` content parts and base64 data URLs for local videos, including WebM support.</p>
+          <p>Because provider support varies by model, errors remain degraded review context rather than release blockers.</p>
+        </article>
+      </section>
+    </article>
+  </main>
+</div>
+</body>
+</html>
