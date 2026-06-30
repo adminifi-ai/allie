@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en" data-ae-mode="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Plan 016 - Agentic Surface Fanout</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/misty-step/aesthetic@v2.5.1/aesthetic.css">
+  <style>
+    :root { --ae-accent: #25615f; }
+    .plan-wide .ae-bar, .plan-wide .ae-stage { width: min(92rem, 100% - 4rem); }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(24em, .72fr); gap: 3em; align-items: end; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--ae-line); }
+    .cell { min-width: 0; background: var(--ae-surface); padding: 1.15em 1.3em; }
+    .wash { background: var(--ae-wash); }
+    .rule { border-top: 1px solid var(--ae-line); margin: 1.3em 0; }
+    @media (max-width: 980px) {
+      .plan-wide .ae-bar, .plan-wide .ae-stage { width: min(100% - 2rem, 92rem); }
+      .hero, .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="ae-screen plan-wide">
+  <header class="ae-bar">
+    <a class="ae-name" href="../..">ALLIE / PLAN 016</a>
+    <p class="ae-chrome">autonomy-depth slice - surface fanout</p>
+  </header>
+  <main class="ae-stage ae-stage-scroll">
+    <article class="ae-view">
+      <section class="hero" aria-label="Plan contract">
+        <div>
+          <p class="ae-chrome">BACKLOG 016 - CHILD 4</p>
+          <h1 class="ae-strong">Agentic review should judge every captured surface, not just the first page.</h1>
+          <p class="ae-lede">Allie already records captured state metadata in the evidence packet. This slice passes those states to the agentic gateway, captures per-surface evidence with bounded retries, and aggregates model verdicts so any surface failure wins while inconclusive coverage never becomes a fabricated pass.</p>
+        </div>
+        <aside class="ae-panel">
+          <h2 class="ae-h">CHOSEN DESIGN</h2>
+          <p>Rust owns the deterministic review-surface list from `coverage.state_metadata` and verdict `affected_states`. The worker owns Playwright capture, fake/live provider calls, retry, and final per-obligation aggregation.</p>
+          <div class="rule"></div>
+          <h2 class="ae-h">QUALITY SYSTEM</h2>
+          <p>Substantive harness change: offline fake-provider smoke, integrated autonomous smoke, full repo gate, and harsh architecture review over the diff.</p>
+        </aside>
+      </section>
+      <section class="grid" aria-label="Verification system" style="margin-top: 2em">
+        <article class="cell"><h2 class="ae-h">CLAIM</h2><p>Agentic review fans out across all captured surfaces and retries transient capture/model failures without weakening no-fabrication policy.</p></article>
+        <article class="cell"><h2 class="ae-h">FALSIFIER</h2><p>The fake OpenRouter run sees only one surface, no retry, unsafe action keys, or a pass when one reviewed surface is missing or inconclusive.</p></article>
+        <article class="cell"><h2 class="ae-h">DRIVER</h2><p>`npm run agentic:smoke`, `npm run autonomous:smoke`, then full `npm run verify`.</p></article>
+        <article class="cell wash"><h2 class="ae-h">STOP IF</h2><p>Fanout requires provider details in Rust, blocks releases on model-only findings, or needs destructive browser actions.</p></article>
+      </section>
+    </article>
+  </main>
+</div>
+</body>
+</html>

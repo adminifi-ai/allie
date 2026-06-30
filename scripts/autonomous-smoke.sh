@@ -165,6 +165,15 @@ if (!packet.agentic_assessments.length) {
 if (!packet.agentic_assessments.some((assessment) => assessment.assessment === 'inconclusive' && assessment.media.length > 0)) {
   throw new Error('missing degraded live-gateway assessment with captured media');
 }
+const request = JSON.parse(fs.readFileSync(path.join(jobDir, 'steps/run/agentic-request.json'), 'utf8'));
+const surfaceIds = new Set((request.surfaces || []).map((surface) => surface.id));
+for (const id of ['home', 'settings']) {
+  if (!surfaceIds.has(id)) throw new Error(`live agentic request missing ${id} review surface`);
+}
+const mediaCaptions = packet.agentic_assessments.flatMap((assessment) => assessment.media.map((entry) => entry.caption));
+if (!mediaCaptions.some((caption) => caption.includes('settings'))) {
+  throw new Error('live agentic assessment did not retain settings-surface media');
+}
 NODE
 
 mkdir -p "$(dirname "$AGENTIC_ERROR_WORKER")"
