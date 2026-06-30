@@ -23,6 +23,32 @@ cargo run --locked -- promote-flow \
   --flow-plan "$DISCOVERY_DIR/flow-plan.json" \
   --out "$DISCOVERY_DIR/generated-flow.yml"
 
+node - "$DISCOVERY_DIR/flow-plan.json" <<'NODE'
+const fs = require('fs');
+const flowPlan = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const byId = new Map(flowPlan.candidates.map((candidate) => [candidate.id, candidate]));
+const home = byId.get('home');
+const settings = byId.get('settings');
+if (!home?.steps?.some((step) => step.click?.selector === '#open-menu')) {
+  throw new Error('generated home candidate did not click the actions menu');
+}
+if (!home.steps.some((step) => step.wait_for?.selector === '#menu:not([hidden])')) {
+  throw new Error('generated home candidate did not wait for the revealed menu');
+}
+if (!settings?.steps?.some((step) => step.fill?.selector === '#email')) {
+  throw new Error('generated settings candidate did not fill the email field');
+}
+if (!settings.steps.some((step) => step.type?.text === '.typed')) {
+  throw new Error('generated settings candidate did not type into the email field');
+}
+if (!settings.steps.some((step) => step.wait_for?.selector === '#email-preview[data-ready]')) {
+  throw new Error('generated settings candidate did not wait for the email preview readiness signal');
+}
+NODE
+grep -q "steps:" "$DISCOVERY_DIR/generated-flow.yml"
+grep -q "#open-menu" "$DISCOVERY_DIR/generated-flow.yml"
+grep -q "qa@example.test" "$DISCOVERY_DIR/generated-flow.yml"
+
 set +e
 cargo run --locked -- run \
   --manifest "$DISCOVERY_DIR/generated-flow.yml" \
@@ -46,6 +72,31 @@ test "$release_status" -eq 1
 
 node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$DISCOVERY_DIR/discovery.json','utf8')); if(p.schema!=='allie.discovery.v0') process.exit(1); if(!p.surfaces.some(s=>s.id==='settings')) process.exit(1);"
 node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$RUN_DIR/evidence.json','utf8')); const types=new Set(p.artifacts.map(a=>a.type)); for (const t of ['axe_json','screenshot','dom_snapshot','accessibility_tree','trace','html_report']) if(!types.has(t)) process.exit(1); if(!p.verdicts.some(v=>v.obligation==='wcag22-aa:2.4.11-focus-not-obscured-minimum')) process.exit(1);"
+node - "$RUN_DIR/evidence.json" "$RUN_DIR/artifacts/dom-home.html" "$RUN_DIR/artifacts/dom-settings.html" <<'NODE'
+const fs = require('fs');
+const packet = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+for (const id of ['home', 'settings']) {
+  const state = packet.coverage.state_metadata.find((item) => item.id === id);
+  if (!state) throw new Error(`missing generated state metadata for ${id}`);
+  if (state.state_errors.length !== 0) {
+    throw new Error(`generated state ${id} had state errors: ${JSON.stringify(state.state_errors)}`);
+  }
+}
+const homeDom = fs.readFileSync(process.argv[3], 'utf8');
+if (!homeDom.includes('id="menu"') || !homeDom.includes('Manage account settings')) {
+  throw new Error('generated home DOM did not capture the revealed actions menu');
+}
+if (homeDom.includes('id="menu" hidden')) {
+  throw new Error('generated home DOM captured the actions menu while still hidden');
+}
+const settingsDom = fs.readFileSync(process.argv[4], 'utf8');
+if (!settingsDom.includes('qa@example.test.typed')) {
+  throw new Error('generated settings DOM did not capture typed email evidence');
+}
+if (!settingsDom.includes('id="email-preview"') || !settingsDom.includes('data-ready')) {
+  throw new Error('generated settings DOM did not capture the ready email preview');
+}
+NODE
 node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$REVIEW_DIR/evidence-reviewed.json','utf8')); if(!p.review.length) process.exit(1); if(!p.findings.some(f=>f.evidence_class==='agentic')) process.exit(1);"
 node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync('$RELEASE_DIR/release-summary.json','utf8')); if(r.status!=='blocked') process.exit(1);"
 

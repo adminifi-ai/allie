@@ -245,6 +245,13 @@ contrast issue. That failure proves enforcement is wired: review still runs, and
 release projection blocks on deterministic evidence while keeping agentic context
 non-authoritative.
 
+The generated flow is not only a route echo. Its flow-plan candidates and
+promoted manifest include deterministic state steps for the workbench fixture:
+the home state clicks the actions menu and waits for `#menu:not([hidden])`, while
+the settings state fills and types into `#email` before waiting for
+`#email-preview[data-ready]`. The smoke checks both the generated YAML and the
+captured DOM artifacts so a future route-only regression fails.
+
 Use the job status command to inspect the durable run state:
 
 ```sh

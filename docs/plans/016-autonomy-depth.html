@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en" data-ae-mode="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Plan 016 - Autonomy Depth</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/misty-step/aesthetic@v2.5.1/aesthetic.css">
+  <style>
+    :root { --ae-accent: #2557a7; }
+    .plan-wide .ae-bar, .plan-wide .ae-stage { width: min(92rem, 100% - 4rem); }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(24em, .72fr); gap: 3em; align-items: end; }
+    .grid-5, .grid-3, .grid-2 { display: grid; gap: 1px; background: var(--ae-line); }
+    .grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cell { min-width: 0; background: var(--ae-surface); padding: 1.15em 1.3em; }
+    .wash { background: var(--ae-wash); }
+    .phase { display: grid; grid-template-columns: 8em minmax(0, 1fr) minmax(15em, .65fr); gap: 1.2em; border-top: 1px solid var(--ae-line); padding-top: 1em; margin-top: 1em; }
+    .phase:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+    .rule { border-top: 1px solid var(--ae-line); margin: 1.3em 0; }
+    @media (max-width: 980px) {
+      .plan-wide .ae-bar, .plan-wide .ae-stage { width: min(100% - 2rem, 92rem); }
+      .hero, .grid-5, .grid-3, .grid-2, .phase { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="ae-screen plan-wide">
+  <header class="ae-bar">
+    <a class="ae-name" href="../..">ALLIE / PLAN 016</a>
+    <p class="ae-chrome">autonomy-depth slice - generated multi-step replay</p>
+  </header>
+
+  <main class="ae-stage ae-stage-scroll">
+    <article class="ae-view">
+      <section class="hero" aria-label="Plan contract">
+        <div>
+          <p class="ae-chrome">BACKLOG 016 - P1 - DEEPEN AUDIT AUTONOMY DEPTH</p>
+          <h1 class="ae-strong">Generated flows should exercise simple interactions, not just echo routes.</h1>
+          <p class="ae-lede">The first 016 milestone makes discovery produce replayable multi-step candidates through Allie's existing state-step contract. A generated flow for the workbench fixture should click the actions menu and type into settings before evidence capture, proving the audit reaches post-interaction states.</p>
+        </div>
+        <aside class="ae-panel">
+          <h2 class="ae-h">CHOSEN DESIGN</h2>
+          <p>Extend `FlowCandidate` with existing `StateStep`s, infer a small deterministic interaction plan from local fixture HTML, and preserve those steps during `promote-flow`.</p>
+          <div class="rule"></div>
+          <h2 class="ae-h">QUALITY SYSTEM</h2>
+          <p>Standards: Rust owns schemas and promotion; the browser worker remains the only Playwright boundary; model-only findings stay advisory; no remediation scope.</p>
+          <p>Proof: focused failing-then-passing Rust test, `npm run autonomous:smoke`, full `npm run verify`, and thermo review.</p>
+          <div class="rule"></div>
+          <p class="ae-dim">Premise: `backlog.d/016-deepen-audit-autonomy-depth.md`, `src/discovery.rs`, `examples/autonomous-workbench.yml`, `fixtures/workbench/*`.</p>
+        </aside>
+      </section>
+
+      <section class="grid-5" aria-label="Executive contract" style="margin-top: 2em">
+        <article class="cell"><h2 class="ae-h">STANDARDS</h2><p>Generated replay gets deeper without a second interaction DSL or hidden model dependency.</p></article>
+        <article class="cell"><h2 class="ae-h">ACCEPTANCE</h2><p>Flow-plan candidates include steps; promoted manifests serialize steps; run evidence proves post-action DOM states.</p></article>
+        <article class="cell"><h2 class="ae-h">VERIFY</h2><p>Focused Rust tests, autonomous smoke evidence, full gate, and diff review.</p></article>
+        <article class="cell"><h2 class="ae-h">COMMUNICATE</h2><p>Report this as child 1 of 016, with other 016 children still open unless completed.</p></article>
+        <article class="cell wash"><h2 class="ae-h">STOP IF</h2><p>Heuristics require secrets, Playwright leaks into Rust, or generated steps cannot be falsified by evidence.</p></article>
+      </section>
+
+      <section class="grid-3" aria-label="Current state" style="margin-top: 1px">
+        <article class="cell">
+          <h2 class="ae-h">CURRENT STATE</h2>
+          <p>`run_discovery` emits one candidate per surface. `run_promote_flow` currently sets `steps: Vec::new()`, so generated replay is route coverage only.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">CHANGE SHAPE</h2>
+          <p>Carry candidate state steps through the flow-plan packet and generate conservative steps from static fixture signals like `aria-controls` buttons and email fields.</p>
+        </article>
+        <article class="cell wash">
+          <h2 class="ae-h">PROOF SURFACE</h2>
+          <p>`npm run autonomous:smoke` checks generated flow YAML and evidence DOM artifacts for the open menu and typed email state.</p>
+        </article>
+      </section>
+
+      <section class="grid-2" aria-label="Scope" style="margin-top: 2em">
+        <article class="cell">
+          <h2 class="ae-h">SCOPE</h2>
+          <p><strong>Goal:</strong> satisfy the first 016 oracle: generated flows include multi-step interactions/assertions.</p>
+          <p><strong>Non-goals:</strong> video-to-model ingestion, observe-act-rejudge loops, all-surface model fan-out, and precision benchmarking.</p>
+          <p><strong>Invariant:</strong> Allie audits, maps, reports, and produces evidence; it does not remediate.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">REPO ANCHORS</h2>
+          <p><code>src/discovery.rs</code> - discovery packet, flow plan, promotion.</p>
+          <p><code>src/lib.rs</code> - manifest state-step model and tests.</p>
+          <p><code>workers/browser/run.mjs</code> - existing state-step execution boundary.</p>
+          <p><code>scripts/autonomous-smoke.sh</code> - live autonomous replay proof.</p>
+        </article>
+      </section>
+
+      <section class="ae-panel" aria-label="Verification system" style="margin-top: 2em">
+        <h2 class="ae-h">VERIFICATION SYSTEM</h2>
+        <p><strong>Claim:</strong> generated flows can replay deterministic interactions before evidence capture.</p>
+        <p><strong>Falsifier:</strong> generated YAML has no `steps`, run artifacts show the menu still hidden, or typed email state is missing.</p>
+        <p><strong>Driver:</strong> `cargo run --locked -- discover`, `promote-flow`, `run`, and `npm run autonomous:smoke`.</p>
+        <p><strong>Grader:</strong> flow-plan JSON and generated YAML include steps; evidence DOM contains open menu and typed email values with no state-step errors.</p>
+        <p><strong>Evidence packet:</strong> `.allie/discovery/autonomous-smoke/flow-plan.json`, `generated-flow.yml`, `.allie/runs/autonomous-smoke/evidence.json`, and DOM artifacts.</p>
+      </section>
+
+      <section class="ae-panel" aria-label="Execution plan" style="margin-top: 2em">
+        <h2 class="ae-h">EXECUTION PLAN</h2>
+        <div class="phase"><strong class="ae-accent">1 red</strong><p>Add a focused test that expects generated candidates and promoted manifests to carry state steps.</p><p class="ae-dim">Evidence: failing Rust test before implementation.</p></div>
+        <div class="phase"><strong class="ae-accent">2 build</strong><p>Extend the flow-plan packet and derive conservative deterministic steps from local fixture HTML.</p><p class="ae-dim">Evidence: focused test green.</p></div>
+        <div class="phase"><strong class="ae-accent">3 qa</strong><p>Strengthen autonomous smoke to inspect generated steps and post-action evidence.</p><p class="ae-dim">Evidence: autonomous smoke transcript.</p></div>
+        <div class="phase"><strong class="ae-accent">4 close</strong><p>Run thermo/refactor/document checks, full gate, PR, merge, then re-ground backlog.</p><p class="ae-dim">Evidence: green CI and clean synced master.</p></div>
+      </section>
+    </article>
+  </main>
+</div>
+</body>
+</html>
