@@ -237,6 +237,7 @@ fn run_agentic_review_with_timeout(
         .unwrap_or("openrouter")
         .to_string();
     let model = response["model"].as_str().unwrap_or_default().to_string();
+    let fail_precision_passed = agentic_fail_precision_passed(&response);
     let empty = Vec::new();
     for assessment in response["assessments"].as_array().unwrap_or(&empty) {
         let Some(obligation) = assessment["obligation"].as_str() else {
@@ -306,7 +307,7 @@ fn run_agentic_review_with_timeout(
         // "agentic" evidence class so the report renders it with an asterisk.
         // Never fabricate: only an explicit pass/fail promotes; "inconclusive"
         // or a missing verdict leaves the criterion at needs_review.
-        if let Some(new_status) = agentic_promoted_status(&verdict_str) {
+        if let Some(new_status) = agentic_promoted_status(&verdict_str, fail_precision_passed) {
             for verdict in packet.verdicts.iter_mut().filter(|verdict| {
                 verdict.obligation == obligation && verdict.status == "needs_review"
             }) {
@@ -368,14 +369,25 @@ fn agentic_response_errors(response: &serde_json::Value) -> String {
         .unwrap_or_else(|| "no worker error details recorded".to_string())
 }
 
+fn agentic_fail_precision_passed(response: &serde_json::Value) -> bool {
+    let gate = &response["precision_gate"];
+    gate["status"].as_str() == Some("pass")
+        && gate["labeled_cases"].as_u64().unwrap_or_default() > 0
+        && gate["expected_pass_cases"].as_u64().unwrap_or_default() > 0
+        && gate["fail_false_positives"].as_u64() == Some(0)
+}
+
 /// Map an agentic verdict string to the criterion status it may promote to.
-/// Only an explicit "pass"/"fail" promotes; anything else (notably
-/// "inconclusive" or an empty/unknown value) returns None so the criterion
-/// stays at needs_review — the agentic reviewer never fabricates a verdict.
-fn agentic_promoted_status(verdict: &str) -> Option<&'static str> {
+/// PASS can promote because it does not create a false-failure release block.
+/// FAIL promotes only after the worker's labeled precision gate proves zero
+/// false-positive FAILs; otherwise it remains attached review context and the
+/// criterion stays at needs_review. Anything else (notably "inconclusive" or an
+/// empty/unknown value) returns None — the agentic reviewer never fabricates a
+/// verdict.
+fn agentic_promoted_status(verdict: &str, fail_precision_passed: bool) -> Option<&'static str> {
     match verdict.trim().to_lowercase().as_str() {
         "pass" => Some("pass"),
-        "fail" => Some("fail"),
+        "fail" if fail_precision_passed => Some("fail"),
         _ => None,
     }
 }
@@ -405,14 +417,61 @@ mod tests {
     static AGENTIC_WORKER_ENV_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn agentic_promoted_status_only_promotes_explicit_pass_or_fail() {
-        assert_eq!(agentic_promoted_status("pass"), Some("pass"));
-        assert_eq!(agentic_promoted_status("fail"), Some("fail"));
-        assert_eq!(agentic_promoted_status("FAIL"), Some("fail"));
+    fn agentic_promoted_status_only_promotes_fail_with_precision_gate() {
+        assert_eq!(agentic_promoted_status("pass", false), Some("pass"));
+        assert_eq!(agentic_promoted_status("fail", false), None);
+        assert_eq!(agentic_promoted_status("fail", true), Some("fail"));
+        assert_eq!(agentic_promoted_status("FAIL", true), Some("fail"));
         // Inconclusive / empty / unknown never promote — no fabricated verdicts.
-        assert_eq!(agentic_promoted_status("inconclusive"), None);
-        assert_eq!(agentic_promoted_status(""), None);
-        assert_eq!(agentic_promoted_status("needs_human"), None);
+        assert_eq!(agentic_promoted_status("inconclusive", true), None);
+        assert_eq!(agentic_promoted_status("", true), None);
+        assert_eq!(agentic_promoted_status("needs_human", true), None);
+    }
+
+    #[test]
+    fn agentic_fail_precision_gate_requires_zero_false_positives() {
+        let passing_gate = serde_json::json!({
+            "precision_gate": {
+                "status": "pass",
+                "labeled_cases": 2,
+                "expected_pass_cases": 1,
+                "fail_false_positives": 0
+            }
+        });
+        assert!(agentic_fail_precision_passed(&passing_gate));
+
+        let failing_gate = serde_json::json!({
+            "precision_gate": {
+                "status": "fail",
+                "labeled_cases": 2,
+                "expected_pass_cases": 1,
+                "fail_false_positives": 1
+            }
+        });
+        assert!(!agentic_fail_precision_passed(&failing_gate));
+
+        let missing_labels = serde_json::json!({
+            "precision_gate": {
+                "status": "pass",
+                "labeled_cases": 0,
+                "expected_pass_cases": 0,
+                "fail_false_positives": 0
+            }
+        });
+        assert!(!agentic_fail_precision_passed(&missing_labels));
+
+        let no_expected_pass_cases = serde_json::json!({
+            "precision_gate": {
+                "status": "pass",
+                "labeled_cases": 1,
+                "expected_pass_cases": 0,
+                "fail_false_positives": 0
+            }
+        });
+        assert!(!agentic_fail_precision_passed(&no_expected_pass_cases));
+
+        let missing_gate = serde_json::json!({});
+        assert!(!agentic_fail_precision_passed(&missing_gate));
     }
 
     #[test]

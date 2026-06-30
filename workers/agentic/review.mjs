@@ -105,6 +105,10 @@ async function run(request) {
         }
       }
     }
+    const precisionGate = evaluatePrecisionGate(request.precision_gate, assessmentResults);
+    if (precisionGate?.status === 'fail') {
+      errors.push(`precision gate failed: ${precisionGate.fail_false_positives} false-positive FAIL(s), ${precisionGate.missing_labels} missing labeled result(s)`);
+    }
     const assessments = finalizeAssessments(request.criteria || [], assessmentResults, artifactsDir);
 
     await browser.close();
@@ -119,6 +123,7 @@ async function run(request) {
       calls,
       usage,
       assessments,
+      ...(precisionGate ? { precision_gate: precisionGate } : {}),
       errors,
     };
   } catch (error) {
@@ -395,6 +400,42 @@ function weakestConfidence(values) {
   if (values.includes('medium')) return 'medium';
   if (values.includes('high')) return 'high';
   return 'not_observed';
+}
+
+function evaluatePrecisionGate(gateRequest, assessmentResults) {
+  const labels = Array.isArray(gateRequest?.labels) ? gateRequest.labels.map(normalizePrecisionLabel).filter(Boolean) : [];
+  if (labels.length === 0) return null;
+  const falsePositiveLabels = [];
+  const missingLabels = [];
+  for (const label of labels) {
+    const result = (assessmentResults.get(label.obligation) || []).find((entry) => entry.surface.id === label.surface_id);
+    if (!result || result.verdict === 'inconclusive') {
+      missingLabels.push(label);
+      continue;
+    }
+    if (label.expected === 'pass' && result.verdict === 'fail') {
+      falsePositiveLabels.push(label);
+    }
+  }
+  const expectedPassCases = labels.filter((label) => label.expected === 'pass').length;
+  const status = falsePositiveLabels.length === 0 && missingLabels.length === 0 ? 'pass' : 'fail';
+  return {
+    schema: 'allie.agentic.precision_gate.v0',
+    status,
+    labeled_cases: labels.length,
+    expected_pass_cases: expectedPassCases,
+    fail_false_positives: falsePositiveLabels.length,
+    missing_labels: missingLabels.length,
+    false_positive_labels: falsePositiveLabels,
+  };
+}
+
+function normalizePrecisionLabel(label) {
+  const surfaceId = String(label?.surface_id || '').trim();
+  const obligation = String(label?.obligation || '').trim();
+  const expected = String(label?.expected || '').trim().toLowerCase();
+  if (!surfaceId || !obligation || !['pass', 'fail'].includes(expected)) return null;
+  return { surface_id: surfaceId, obligation, expected };
 }
 
 // --- model boundary ---------------------------------------------------------

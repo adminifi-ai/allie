@@ -16,6 +16,7 @@
     "consumer-cwd:smoke": "scripts/consumer-cwd-smoke.sh",
     "distribution:smoke": "scripts/distribution-smoke.sh",
     "agentic:smoke": "scripts/agentic-smoke.sh",
+    "agentic:precision": "node scripts/agentic-fail-precision-smoke.mjs",
     "package:release": "scripts/package-release.sh",
     "release:smoke": "cargo run --locked -- release --packet .allie/runs/v0-smoke/evidence.json --out .allie/releases/v0-smoke --changed-surface login-form",
     "autonomous:smoke": "scripts/autonomous-smoke.sh",
