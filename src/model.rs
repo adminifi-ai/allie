@@ -59,7 +59,18 @@ pub(crate) struct ProductMapPacket {
     pub(crate) standards: StandardsProfileSummary,
     pub(crate) surfaces: Vec<ProductSurface>,
     pub(crate) workflows: Vec<ProductWorkflow>,
+    #[serde(default)]
+    pub(crate) discovery_diagnostics: Vec<DiscoveryDiagnostic>,
     pub(crate) open_questions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct DiscoveryDiagnostic {
+    pub(crate) source: String,
+    pub(crate) severity: String,
+    pub(crate) route: Option<String>,
+    pub(crate) url: Option<String>,
+    pub(crate) message: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

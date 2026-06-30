@@ -22,6 +22,8 @@ mod discovery;
 mod release;
 mod report;
 mod standards;
+#[cfg(test)]
+mod test_support;
 mod workbench;
 mod worker;
 
@@ -2100,6 +2102,9 @@ fn git_metadata(args: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
     use crate::standards::{criterion_level, criterion_principle, criterion_source_url};
+    use crate::test_support::{
+        start_live_discovery_site, unused_local_base_url, write_live_discovery_manifest,
+    };
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -2107,6 +2112,10 @@ mod tests {
     // threads cannot observe each other's set/remove. Poisoning is irrelevant
     // (we only need exclusion), so an outer panic must not block other tests.
     static AUTH_ENV_GUARD: Mutex<()> = Mutex::new(());
+    // Serializes Playwright-backed workbench CLI tests because the browser
+    // worker process and artifact paths are not isolated enough for parallel
+    // launches to be a meaningful unit test signal.
+    static WORKBENCH_CLI_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
     fn placeholder_cli_points_to_v0_command() {
@@ -2721,6 +2730,169 @@ mod tests {
     }
 
     #[test]
+    fn discovery_and_map_cli_crawl_live_base_url_same_origin_routes() {
+        let site = start_live_discovery_site();
+        let temp = tempdir().unwrap();
+        let manifest_path = write_live_discovery_manifest(temp.path(), &site.base_url);
+        let discovery_dir = temp.path().join("discovery");
+        let map_dir = temp.path().join("map");
+        let project_root = temp.path().join("project");
+        fs::create_dir_all(&project_root).unwrap();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_cli_with_io(
+            vec![
+                "discover".to_string(),
+                "--manifest".to_string(),
+                manifest_path.to_string_lossy().to_string(),
+                "--out".to_string(),
+                discovery_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let discovery: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(discovery_dir.join("discovery.json")).unwrap(),
+        )
+        .unwrap();
+        let discovered_routes = discovery["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|surface| surface["route"].as_str().unwrap().to_string())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            discovered_routes,
+            BTreeSet::from([
+                "/".to_string(),
+                "/account".to_string(),
+                "/help".to_string(),
+                "/settings".to_string()
+            ])
+        );
+        assert!(
+            discovery["surfaces"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|surface| surface["source"] == "base-url-crawl"
+                    && surface["confidence"] == "live_http_discovered")
+        );
+        assert!(discovery["diagnostics"].as_array().unwrap().is_empty());
+
+        stdout.clear();
+        stderr.clear();
+        let code = run_cli_with_io(
+            vec![
+                "map".to_string(),
+                "--manifest".to_string(),
+                manifest_path.to_string_lossy().to_string(),
+                "--project-root".to_string(),
+                project_root.to_string_lossy().to_string(),
+                "--out".to_string(),
+                map_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let map: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(map_dir.join("product-map.json")).unwrap())
+                .unwrap();
+        let map_routes = map["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|surface| surface["routes"].as_array().unwrap())
+            .map(|route| route.as_str().unwrap().to_string())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            map_routes,
+            BTreeSet::from([
+                "/".to_string(),
+                "/account".to_string(),
+                "/help".to_string(),
+                "/settings".to_string()
+            ])
+        );
+        assert!(map["discovery_diagnostics"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn discovery_and_map_record_live_base_url_diagnostics_for_unreachable_targets() {
+        let temp = tempdir().unwrap();
+        let base_url = unused_local_base_url();
+        let manifest_path = write_live_discovery_manifest(temp.path(), &base_url);
+        let discovery_dir = temp.path().join("discovery");
+        let map_dir = temp.path().join("map");
+        let project_root = temp.path().join("project");
+        fs::create_dir_all(&project_root).unwrap();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_cli_with_io(
+            vec![
+                "discover".to_string(),
+                "--manifest".to_string(),
+                manifest_path.to_string_lossy().to_string(),
+                "--out".to_string(),
+                discovery_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let discovery: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(discovery_dir.join("discovery.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(discovery["surfaces"][0]["route"], "/");
+        let diagnostics = discovery["diagnostics"].as_array().unwrap();
+        assert!(!diagnostics.is_empty());
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic["source"]
+                .as_str()
+                .unwrap()
+                .starts_with("base-url-crawl:")
+                && diagnostic["severity"] == "warning"
+        }));
+
+        stdout.clear();
+        stderr.clear();
+        let code = run_cli_with_io(
+            vec![
+                "map".to_string(),
+                "--manifest".to_string(),
+                manifest_path.to_string_lossy().to_string(),
+                "--project-root".to_string(),
+                project_root.to_string_lossy().to_string(),
+                "--out".to_string(),
+                map_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let map: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(map_dir.join("product-map.json")).unwrap())
+                .unwrap();
+        assert!(!map["discovery_diagnostics"].as_array().unwrap().is_empty());
+        assert!(
+            map["open_questions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|question| question.as_str().unwrap().contains("Discovery diagnostic"))
+        );
+    }
+
+    #[test]
     fn map_cli_writes_product_map_agent_receipt_and_generated_flow() {
         let temp = tempdir().unwrap();
         let site_dir = temp.path().join("site");
@@ -3226,6 +3398,9 @@ mod tests {
 
     #[test]
     fn workbench_start_writes_durable_job_lifecycle() {
+        let _guard = WORKBENCH_CLI_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let temp = tempdir().unwrap();
         let job_dir = temp.path().join("job");
         let mut stdout = Vec::new();
@@ -3288,6 +3463,9 @@ mod tests {
 
     #[test]
     fn workbench_status_cancel_and_resume_are_auditable() {
+        let _guard = WORKBENCH_CLI_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let temp = tempdir().unwrap();
         let job_dir = temp.path().join("job");
         let mut stdout = Vec::new();
@@ -3370,6 +3548,9 @@ mod tests {
 
     #[test]
     fn workbench_start_rejects_existing_durable_job_directory() {
+        let _guard = WORKBENCH_CLI_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let temp = tempdir().unwrap();
         let job_dir = temp.path().join("job");
         let mut stdout = Vec::new();

@@ -59,6 +59,24 @@ This is the first draft of the Allie evidence packet. The formal V0 JSON Schema 
 - obligations not tested;
 - obligations requiring human review.
 
+## Discovery
+
+`allie discover --manifest <flow.yml> --out <dir>` writes a discovery packet and
+flow plan. For `target.kind: local_fixture`, discovery reads checked-in HTML
+fixtures. For live web targets, discovery starts at an `http://`
+`target.base_url`, fetches same-origin HTML pages, extracts links, and records
+bounded route candidates from links and same-origin `/sitemap.xml` entries.
+External hosts, fragments, asset links, and non-HTTP schemes are ignored. HTTPS,
+credentialed crawling, and JavaScript-driven navigation discovery are follow-on
+layers, not implied by this packet.
+
+Discovery output is a candidate map, not a legal or complete-coverage claim.
+Manifest-declared states remain authoritative and are merged with discovered
+routes; generated flows must still replay through `allie run` before release
+enforcement. Live crawl failures are recorded in the packet's `diagnostics`
+array and the product map's `discovery_diagnostics` array instead of being
+silently converted into clean manifest-only coverage.
+
 ## Artifacts
 
 Artifact types:
