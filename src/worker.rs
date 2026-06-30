@@ -20,6 +20,14 @@ pub(crate) struct WorkerExecution {
     pub(crate) run_failures: Vec<RunFailure>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct WorkerDeterminism {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) timestamp: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fixture_port: Option<u16>,
+}
+
 #[cfg(test)]
 pub(crate) fn response_schema() -> &'static str {
     WORKER_RESPONSE_SCHEMA
@@ -30,6 +38,7 @@ pub(crate) fn execute(
     manifest: &FlowManifest,
     manifest_path: &Path,
     out_dir_abs: &Path,
+    determinism: Option<WorkerDeterminism>,
     mut run_failures: Vec<RunFailure>,
 ) -> Result<WorkerExecution> {
     let request_path = out_dir_abs.join("worker-request.json");
@@ -40,6 +49,7 @@ pub(crate) fn execute(
             manifest,
             manifest_path,
             &out_dir_abs.join("artifacts"),
+            determinism,
         )?;
         write_json_pretty(&request_path, &request)?;
 
@@ -173,6 +183,8 @@ struct WorkerRequest {
     states: Vec<ManifestState>,
     artifacts_dir: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    determinism: Option<WorkerDeterminism>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     auth: Option<AuthFlow>,
 }
 
@@ -182,6 +194,7 @@ impl WorkerRequest {
         manifest: &FlowManifest,
         manifest_path: &Path,
         artifacts_dir: &Path,
+        determinism: Option<WorkerDeterminism>,
     ) -> Result<Self> {
         let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
         let target = WorkerTarget {
@@ -202,6 +215,7 @@ impl WorkerRequest {
             browser: manifest.browser.clone(),
             states: manifest.flow.states.clone(),
             artifacts_dir: artifacts_dir.to_string_lossy().to_string(),
+            determinism,
             auth: manifest.auth.clone(),
         })
     }
@@ -446,6 +460,7 @@ mod tests {
             &manifest,
             Path::new("examples/auth-fixture-flow.yml"),
             &temp.path().join("artifacts"),
+            None,
         )
         .unwrap();
         let json = serde_json::to_string_pretty(&request).unwrap();

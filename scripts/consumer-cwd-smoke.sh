@@ -31,6 +31,12 @@ mkdir -p "$WORK/.allie"
   --fixture-dir "$ALLIE_REPO/fixtures/login" \
   --force
 
+git -C "$WORK" init -q
+git -C "$WORK" config user.email "allie-smoke@example.invalid"
+git -C "$WORK" config user.name "Allie Smoke"
+git -C "$WORK" add .allie/manifest.yml
+git -C "$WORK" commit -q -m "consumer fixture manifest"
+
 cd "$WORK"
 # `allie run` exits non-zero on findings; assert on captured evidence, not exit.
 ALLIE_BROWSER_WORKER="$ALLIE_REPO/workers/browser/run.mjs" \
@@ -40,17 +46,26 @@ EVID=".allie/run/latest/evidence.json"
 test -f "$EVID"
 
 node - "$EVID" <<'NODE'
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 const evid = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const captured = evid.summary?.states_captured ?? 0;
 const infra = evid.summary?.infrastructure_failures ?? 0;
+const expectedSha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+const expectedBranch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
 if (captured < 1) {
   throw new Error(`consumer-cwd run captured no states (states_captured=${captured}); the worker handshake broke from a foreign CWD`);
 }
 if (infra > 0) {
   throw new Error(`consumer-cwd run had infrastructure_failures=${infra}; expected the worker to run cleanly from a foreign CWD`);
 }
-console.log(`consumer-cwd smoke ok: states_captured=${captured}, infrastructure_failures=${infra}`);
+if (evid.run?.git_sha !== expectedSha) {
+  throw new Error(`consumer-cwd run recorded git_sha=${evid.run?.git_sha}; expected ${expectedSha}`);
+}
+if (evid.run?.git_branch !== expectedBranch) {
+  throw new Error(`consumer-cwd run recorded git_branch=${evid.run?.git_branch}; expected ${expectedBranch}`);
+}
+console.log(`consumer-cwd smoke ok: states_captured=${captured}, infrastructure_failures=${infra}, git=${expectedBranch}@${expectedSha}`);
 NODE
 
 echo "consumer cwd smoke passed: $WORK/.allie/run/latest"

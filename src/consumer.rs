@@ -350,6 +350,7 @@ fn run_verify_pipeline(options: &VerifyOptions) -> Result<VerifyPipelineReceipts
     let run = run_v0(RunOptions {
         manifest_path: promoted.manifest_path.clone(),
         out_dir: options.out_dir.join("run"),
+        project_root: Some(project_root.clone()),
     })?;
     let promoted_manifest = FlowManifest::load(&promoted.manifest_path)?;
     if promoted_manifest.model.enabled {

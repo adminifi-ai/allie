@@ -8,8 +8,6 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 mod model;
 
@@ -21,6 +19,7 @@ mod consumer;
 mod discovery;
 mod release;
 mod report;
+mod runtime;
 mod standards;
 #[cfg(test)]
 mod test_support;
@@ -34,6 +33,7 @@ pub(crate) use crate::discovery::{
     run_promote_flow,
 };
 use crate::model::*;
+use crate::runtime::{GitProvenance, RunContext, current_time_millis};
 use crate::standards::{
     criterion_feature_verdict, criterion_title, deterministic_pass_obligation,
     human_review_profile_obligations, obligation_from_tags, profile_obligation_list,
@@ -68,6 +68,8 @@ pub enum AllieError {
         source: serde_yaml::Error,
     },
     InvalidManifest(String),
+    Provenance(String),
+    Runtime(String),
     Worker(String),
 }
 
@@ -78,6 +80,8 @@ impl Display for AllieError {
             Self::Json { context, source } => write!(f, "{context}: {source}"),
             Self::Yaml { context, source } => write!(f, "{context}: {source}"),
             Self::InvalidManifest(message) => write!(f, "invalid manifest: {message}"),
+            Self::Provenance(message) => write!(f, "provenance error: {message}"),
+            Self::Runtime(message) => write!(f, "runtime error: {message}"),
             Self::Worker(message) => write!(f, "worker failed: {message}"),
         }
     }
@@ -89,7 +93,9 @@ impl Error for AllieError {
             Self::Io { source, .. } => Some(source),
             Self::Json { source, .. } => Some(source),
             Self::Yaml { source, .. } => Some(source),
-            Self::InvalidManifest(_) | Self::Worker(_) => None,
+            Self::InvalidManifest(_) | Self::Provenance(_) | Self::Runtime(_) | Self::Worker(_) => {
+                None
+            }
         }
     }
 }
@@ -135,6 +141,7 @@ pub struct RunReceipt {
 struct RunOptions {
     manifest_path: PathBuf,
     out_dir: PathBuf,
+    project_root: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -223,6 +230,7 @@ pub fn run_cli_with_io(
 fn parse_run_options(args: &[String]) -> std::result::Result<RunOptions, String> {
     let mut manifest_path = None;
     let mut out_dir = None;
+    let mut project_root = None;
     let mut index = 0;
 
     while index < args.len() {
@@ -241,6 +249,13 @@ fn parse_run_options(args: &[String]) -> std::result::Result<RunOptions, String>
                     .ok_or_else(|| "--out requires a directory".to_string())?;
                 out_dir = Some(PathBuf::from(value));
             }
+            "--project-root" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--project-root requires a directory".to_string())?;
+                project_root = Some(PathBuf::from(value));
+            }
             unexpected => return Err(format!("unexpected argument: {unexpected}")),
         }
         index += 1;
@@ -249,6 +264,7 @@ fn parse_run_options(args: &[String]) -> std::result::Result<RunOptions, String>
     Ok(RunOptions {
         manifest_path: manifest_path.ok_or_else(|| "--manifest is required".to_string())?,
         out_dir: out_dir.ok_or_else(|| "--out is required".to_string())?,
+        project_root,
     })
 }
 
@@ -501,15 +517,17 @@ fn parse_review_options(args: &[String]) -> std::result::Result<ReviewOptions, S
 }
 
 fn run_v0(options: RunOptions) -> Result<RunReceipt> {
-    let started_at = now_utc();
     let manifest = FlowManifest::load(&options.manifest_path)?;
     manifest.validate()?;
+    let context =
+        RunContext::from_manifest_path(&options.manifest_path, options.project_root.as_deref())?;
+    let started_at = context.now();
     fs::create_dir_all(&options.out_dir).map_err(|source| AllieError::Io {
         context: format!("create output directory {}", options.out_dir.display()),
         source,
     })?;
 
-    let run_id = new_run_id();
+    let run_id = context.new_run_id();
     // Absolutize the worker handshake paths. The bundled Node worker resolves
     // request/response/artifacts paths against its own repoRoot (the Allie
     // checkout), so relative paths only line up when Allie runs from its own
@@ -523,6 +541,7 @@ fn run_v0(options: RunOptions) -> Result<RunReceipt> {
         &manifest,
         &options.manifest_path,
         &out_dir_abs,
+        context.worker_determinism(),
         manifest.preflight_failures(),
     )?;
 
@@ -533,8 +552,9 @@ fn run_v0(options: RunOptions) -> Result<RunReceipt> {
         worker_execution.response,
         worker_execution.run_failures,
         started_at,
-        now_utc(),
+        context.now(),
         run_id,
+        &context.provenance,
     )
 }
 
@@ -1203,6 +1223,7 @@ fn write_packet_and_report(
     started_at: DateTime<Utc>,
     finished_at: DateTime<Utc>,
     run_id: String,
+    provenance: &GitProvenance,
 ) -> Result<RunReceipt> {
     fs::create_dir_all(out_dir).map_err(|source| AllieError::Io {
         context: format!("create output directory {}", out_dir.display()),
@@ -1266,8 +1287,8 @@ fn write_packet_and_report(
             started_at: started_at.to_rfc3339(),
             finished_at: finished_at.to_rfc3339(),
             allie_version: env!("CARGO_PKG_VERSION").to_string(),
-            git_sha: git_metadata(&["rev-parse", "--short", "HEAD"]).unwrap_or_default(),
-            git_branch: git_metadata(&["branch", "--show-current"]).unwrap_or_default(),
+            git_sha: provenance.sha.clone(),
+            git_branch: provenance.branch.clone(),
             ci_provider: std::env::var("CI").ok().map(|_| "generic-ci".to_string()),
             actor: std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()),
         },
@@ -2144,13 +2165,6 @@ pub(crate) fn now_utc() -> DateTime<Utc> {
     Utc::now()
 }
 
-fn current_time_millis() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default()
-}
-
 fn new_run_id() -> String {
     let millis = current_time_millis();
     format!("run-{millis}")
@@ -2161,21 +2175,15 @@ fn new_job_id() -> String {
     format!("job-{millis}")
 }
 
-fn git_metadata(args: &[&str]) -> Option<String> {
-    let output = Command::new("git").args(args).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime;
     use crate::standards::{criterion_level, criterion_principle, criterion_source_url};
     use crate::test_support::{
         start_live_discovery_site, unused_local_base_url, write_live_discovery_manifest,
     };
+    use std::process::Command;
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -2183,6 +2191,7 @@ mod tests {
     // threads cannot observe each other's set/remove. Poisoning is irrelevant
     // (we only need exclusion), so an outer panic must not block other tests.
     static AUTH_ENV_GUARD: Mutex<()> = Mutex::new(());
+    static SOURCE_DATE_EPOCH_GUARD: Mutex<()> = Mutex::new(());
     // Serializes Playwright-backed workbench CLI tests because the browser
     // worker process and artifact paths are not isolated enough for parallel
     // launches to be a meaningful unit test signal.
@@ -2211,6 +2220,78 @@ mod tests {
         assert_eq!(manifest.id, "login-flow");
         assert_eq!(manifest.policy.profile, "wcag22-aa");
         assert_eq!(manifest.flow.states[0].id, "login-form");
+    }
+
+    #[test]
+    fn run_context_freezes_clock_and_worker_determinism_explicitly() {
+        let _guard = SOURCE_DATE_EPOCH_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            std::env::set_var("SOURCE_DATE_EPOCH", "1700000000");
+            std::env::set_var("ALLIE_FIXTURE_PORT", "43100");
+        }
+
+        let manifest = FlowManifest::load(Path::new("examples/login-flow.yml")).unwrap();
+        let context =
+            RunContext::from_manifest_path(Path::new("examples/login-flow.yml"), None).unwrap();
+        let determinism = context.worker_determinism().unwrap();
+
+        assert_eq!(manifest.id, "login-flow");
+        assert_eq!(context.now().to_rfc3339(), "2023-11-14T22:13:20+00:00");
+        assert_eq!(context.new_run_id(), "run-1700000000000");
+        assert_eq!(
+            determinism.timestamp.as_deref(),
+            Some("2023-11-14T22:13:20.000Z")
+        );
+        assert_eq!(determinism.fixture_port, Some(43100));
+
+        unsafe {
+            std::env::remove_var("SOURCE_DATE_EPOCH");
+            std::env::remove_var("ALLIE_FIXTURE_PORT");
+        }
+    }
+
+    #[test]
+    fn run_context_reads_git_provenance_from_manifest_repo_not_process_cwd() {
+        let temp = tempdir().unwrap();
+        let manifest_path = write_static_manifest(temp.path(), "home");
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(temp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "allie-test@example.invalid"])
+            .current_dir(temp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Allie Test"])
+            .current_dir(temp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["add", "flow.yml"])
+            .current_dir(temp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-q", "-m", "fixture flow"])
+            .current_dir(temp.path())
+            .status()
+            .unwrap();
+
+        let context = RunContext::from_manifest_path(&manifest_path, None).unwrap();
+
+        assert_eq!(
+            context.provenance.sha,
+            runtime::git_metadata_at(temp.path(), &["rev-parse", "--short", "HEAD"]).unwrap()
+        );
+        assert_eq!(
+            context.provenance.branch,
+            runtime::git_metadata_at(temp.path(), &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap()
+        );
     }
 
     #[test]
@@ -2321,6 +2402,7 @@ mod tests {
             Utc::now(),
             Utc::now(),
             "run-test".to_string(),
+            &test_provenance(),
         )
         .unwrap();
 
@@ -2339,6 +2421,15 @@ mod tests {
         assert!(!packet.contains("\"status\": \"not_tested\""));
         assert!(packet.contains("\"status\": \"needs_review\""));
         assert!(packet.contains("cargo run --locked -- run --manifest examples/login-flow.yml"));
+        let packet_json: EvidencePacket = serde_json::from_str(&packet).unwrap();
+        assert_eq!(
+            packet_json.run.git_sha,
+            runtime::git_metadata(&["rev-parse", "--short", "HEAD"]).unwrap()
+        );
+        assert_eq!(
+            packet_json.run.git_branch,
+            runtime::git_metadata(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap()
+        );
 
         let report = fs::read_to_string(receipt.report_path).unwrap();
         assert!(report.contains("Allie evidence status"));
@@ -2390,6 +2481,7 @@ mod tests {
             Utc::now(),
             Utc::now(),
             "run-missing-artifact".to_string(),
+            &test_provenance(),
         )
         .unwrap();
 
@@ -2428,6 +2520,7 @@ mod tests {
             Utc::now(),
             Utc::now(),
             "run-missing-credential".to_string(),
+            &test_provenance(),
         )
         .unwrap();
 
@@ -2572,6 +2665,7 @@ mod tests {
             Utc::now(),
             Utc::now(),
             "run-model-policy".to_string(),
+            &test_provenance(),
         )
         .unwrap();
 
@@ -2600,6 +2694,7 @@ mod tests {
             Utc::now(),
             Utc::now(),
             "run-partial-write".to_string(),
+            &test_provenance(),
         )
         .unwrap();
 
@@ -2631,6 +2726,7 @@ mod tests {
             Utc::now(),
             Utc::now(),
             "run-timeout".to_string(),
+            &test_provenance(),
         )
         .unwrap();
 
@@ -2668,6 +2764,7 @@ mod tests {
             Utc::now(),
             Utc::now(),
             "run-nondeterminism".to_string(),
+            &test_provenance(),
         )
         .unwrap();
 
@@ -3347,7 +3444,7 @@ mod tests {
                 .any(|value| value == "axe-core")
         );
 
-        assert_eq!(scripted_cell.status, "needs_review");
+        assert_eq!(scripted_cell.status, "not_tested");
         assert_eq!(scripted_cell.confidence, "script_observed");
         assert!(scripted_cell.artifact_refs.is_empty());
         assert!(scripted_cell.test_refs.is_empty());
@@ -3357,6 +3454,44 @@ mod tests {
                 .iter()
                 .any(|value| value == "axe-home")
         );
+    }
+
+    #[test]
+    fn uncovered_criterion_cell_renders_not_tested_instead_of_review() {
+        let map: ProductMapPacket = read_json_file(Path::new(
+            "fixtures/vanity-dogfood-legacy-61/product-map.json",
+        ))
+        .unwrap();
+        let mut packet: EvidencePacket =
+            read_json_file(Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json")).unwrap();
+        packet
+            .verdicts
+            .retain(|verdict| verdict.obligation != "wcag22-aa:1.4.10-reflow");
+        packet
+            .findings
+            .retain(|finding| finding.standard_obligation != "wcag22-aa:1.4.10-reflow");
+
+        let report = compliance::build_compliance_report(
+            &map,
+            &packet,
+            Path::new("fixtures/vanity-dogfood-legacy-61/product-map.json"),
+            Path::new("fixtures/vanity-dogfood-legacy-61/evidence.json"),
+        );
+
+        let cell = report
+            .criterion_coverage
+            .iter()
+            .find(|cell| cell.criterion_id == "wcag22-aa:1.4.10-reflow")
+            .unwrap();
+        let criterion = report
+            .criteria
+            .iter()
+            .find(|criterion| criterion.id == "wcag22-aa:1.4.10-reflow")
+            .unwrap();
+
+        assert_eq!(cell.status, "not_tested");
+        assert_eq!(criterion.status, "not_tested");
+        assert!(report.summary.not_tested > 0);
     }
 
     #[test]
@@ -4320,6 +4455,7 @@ flow:
             Utc::now(),
             Utc::now(),
             "run-release-cli".to_string(),
+            &test_provenance(),
         )
         .unwrap()
         .evidence_path
@@ -4355,9 +4491,14 @@ flow:
             Utc::now(),
             Utc::now(),
             "run-failing-evidence".to_string(),
+            &test_provenance(),
         )
         .unwrap()
         .evidence_path
+    }
+
+    fn test_provenance() -> GitProvenance {
+        GitProvenance::read(Path::new(".")).unwrap()
     }
 
     fn passing_worker_response() -> WorkerResponse {

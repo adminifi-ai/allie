@@ -32,6 +32,12 @@ This is the first draft of the Allie evidence packet. The formal V0 JSON Schema 
 - `run.ci_provider`
 - `run.actor`
 
+`run.git_sha` and `run.git_branch` are required provenance, not best-effort
+metadata. `allie run` records them from the Git checkout that contains the
+manifest path, or from `--project-root <dir>` when the caller supplies an
+explicit project root. A run against a directory with no Git commit fails as an
+infrastructure/provenance error instead of writing empty revision fields.
+
 ## Target
 
 - `target.base_url`

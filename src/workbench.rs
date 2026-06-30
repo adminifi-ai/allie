@@ -317,6 +317,7 @@ fn run_workbench_start_with_job(
     let run = match run_v0(RunOptions {
         manifest_path: promoted.manifest_path.clone(),
         out_dir: run_dir,
+        project_root: Some(project_root.clone()),
     }) {
         Ok(receipt) => receipt,
         Err(error) => return workbench_step_error(&options.out_dir, job, "run", error),
