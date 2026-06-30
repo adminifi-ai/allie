@@ -44,9 +44,16 @@ cargo fmt --check
 cargo test --locked
 npm run worker:smoke
 npm run evidence:smoke
+npm run action:smoke
+npm run auth:smoke
+npm run visibility:smoke
+npm run coverage:smoke
 npm run consumer:smoke
+npm run consumer-cwd:smoke
+npm run agentic:smoke
 npm run release:smoke
 npm run autonomous:smoke
+npm run size:smoke
 ```
 
 ## Expected Evidence
@@ -74,6 +81,20 @@ writer work together. It leaves:
 The expected happy-path packet summary is `status: pass`, `exit_code: 0`,
 one captured state, and artifact types `axe_json`, `screenshot`, and
 `html_report`.
+
+`npm run action:smoke` proves manifest state setup actions execute before
+evidence capture. It clicks open the workbench fixture menu, waits for the panel,
+asserts the DOM artifact contains the revealed link, then runs a negative
+control where a missing action selector records `state-step-failed` and blocks:
+
+```text
+.allie/runs/action-steps-smoke/evidence.json
+.allie/runs/action-steps-smoke/report.html
+.allie/runs/action-steps-smoke/worker-request.json
+.allie/runs/action-steps-smoke/artifacts/dom-open-menu.html
+.allie/runs/action-steps-smoke/artifacts/dom-typed-email.html
+.allie/runs/action-steps-negative-smoke/evidence.json
+```
 
 `npm run consumer:smoke` proves the portable consuming-app contract. It
 scaffolds a manifest with `allie init`, runs `allie verify` over the same

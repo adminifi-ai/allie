@@ -21,8 +21,17 @@
       <form>
         <label for="email">Email</label>
         <input id="email" name="email" autocomplete="email" required>
+        <p id="email-preview" aria-live="polite"></p>
         <button type="submit">Save settings</button>
       </form>
     </main>
+    <script>
+      const email = document.querySelector('#email');
+      const preview = document.querySelector('#email-preview');
+      email.addEventListener('input', () => {
+        preview.textContent = email.value;
+        preview.toggleAttribute('data-ready', email.value.includes('.typed'));
+      });
+    </script>
   </body>
 </html>

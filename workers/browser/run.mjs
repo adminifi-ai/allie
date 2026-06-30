@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 
 const WORKER_REQUEST_SCHEMA = 'allie.worker.request.v0';
 const WORKER_RESPONSE_SCHEMA = 'allie.worker.response.v0';
+const STATE_STEP_TIMEOUT_MS = 5000;
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
 
@@ -165,14 +166,7 @@ async function performLogin(context, baseUrl, auth) {
         } else if (step.click) {
           await page.click(step.click.selector);
         } else if (step.wait_for) {
-          if (step.wait_for.selector) {
-            await page.waitForSelector(step.wait_for.selector, { timeout: SHORT_TIMEOUT_MS });
-          } else if (step.wait_for.url_contains) {
-            const fragment = step.wait_for.url_contains;
-            await page.waitForURL((url) => url.toString().includes(fragment), { timeout: SHORT_TIMEOUT_MS });
-          } else {
-            throw new Error('wait_for requires selector or url_contains');
-          }
+          await waitForCondition(page, step.wait_for, SHORT_TIMEOUT_MS);
         } else {
           throw new Error('unknown auth step');
         }
@@ -205,11 +199,11 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
 
   const targetUrl = new URL(state.path, baseUrl).toString();
   const navigationResponse = await page.goto(targetUrl, { waitUntil: 'networkidle' });
-  const httpStatus = navigationResponse?.status() ?? null;
+  const navigationStatus = navigationResponse?.status() ?? null;
   const stateErrors = [];
 
-  if (state.required && httpStatus !== null && (httpStatus < 200 || httpStatus >= 400)) {
-    stateErrors.push(`required route returned HTTP ${httpStatus}`);
+  if (state.required && navigationStatus !== null && (navigationStatus < 200 || navigationStatus >= 400)) {
+    stateErrors.push(`required route returned HTTP ${navigationStatus}`);
   }
 
   // No-silent-gaps: when an authenticated_marker is declared, a gated state must
@@ -235,12 +229,16 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
     }
   }
 
+  await performStateSteps(page, state, stateErrors);
+
   if (zoom && zoom !== 1) {
     await page.evaluate((value) => {
       document.documentElement.style.zoom = String(value);
     }, zoom);
   }
 
+  const finalUrl = page.url();
+  const httpStatus = finalUrl === targetUrl ? navigationStatus : null;
   const title = await page.title();
   const keyboardFocusOrder = state.keyboard ? await captureKeyboardFocusOrder(page) : [];
   const screenshotPath = state.screenshot ? path.join(artifactsDir, `${state.id}.png`) : null;
@@ -295,7 +293,7 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
     await fs.writeFile(tracePath, `${JSON.stringify({
       state: state.id,
       route: state.path,
-      url: targetUrl,
+      url: finalUrl,
       title,
       keyboard_focus_order: keyboardFocusOrder,
       console_errors: consoleErrors,
@@ -321,7 +319,7 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
   return {
     id: state.id,
     route: state.path,
-    url: targetUrl,
+    url: finalUrl,
     title,
     http_status: httpStatus,
     screenshot_path: screenshotPath ? path.relative(path.resolve(repoRoot, path.dirname(path.dirname(screenshotPath))), screenshotPath) : null,
@@ -337,6 +335,49 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
     state_errors: stateErrors,
     features,
   };
+}
+
+async function performStateSteps(page, state, stateErrors) {
+  const steps = state.steps ?? [];
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    const kind = stateStepKind(step);
+    try {
+      if (step.fill) {
+        await page.fill(step.fill.selector, step.fill.value ?? '', { timeout: STATE_STEP_TIMEOUT_MS });
+      } else if (step.type) {
+        await page.locator(step.type.selector).first().type(step.type.text ?? '', { timeout: STATE_STEP_TIMEOUT_MS });
+      } else if (step.click) {
+        await page.click(step.click.selector, { timeout: STATE_STEP_TIMEOUT_MS });
+      } else if (step.wait_for || step.waitFor) {
+        await waitForCondition(page, step.wait_for ?? step.waitFor, STATE_STEP_TIMEOUT_MS);
+      } else {
+        throw new Error('unknown state step');
+      }
+    } catch {
+      stateErrors.push(`state-step-failed at step ${index} (${kind})`);
+      return;
+    }
+  }
+}
+
+async function waitForCondition(page, waitFor, timeoutMs) {
+  if (waitFor?.selector) {
+    await page.waitForSelector(waitFor.selector, { timeout: timeoutMs });
+  } else if (waitFor?.url_contains) {
+    const fragment = waitFor.url_contains;
+    await page.waitForURL((url) => url.toString().includes(fragment), { timeout: timeoutMs });
+  } else {
+    throw new Error('wait_for requires selector or url_contains');
+  }
+}
+
+function stateStepKind(step) {
+  if (step.fill) return 'fill';
+  if (step.type) return 'type';
+  if (step.click) return 'click';
+  if (step.wait_for || step.waitFor) return 'wait_for';
+  return 'unknown';
 }
 
 // Page feature inventory + lightweight scripted signals. Allie uses these to

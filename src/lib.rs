@@ -855,6 +855,9 @@ impl FlowManifest {
                     state.id
                 )));
             }
+            for (index, step) in state.steps.iter().enumerate() {
+                step.validate(&state.id, index)?;
+            }
         }
 
         if let Some(auth) = &self.auth {
@@ -1088,6 +1091,8 @@ struct ManifestState {
     path: String,
     description: String,
     required: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    steps: Vec<StateStep>,
     axe: bool,
     screenshot: bool,
     #[serde(default)]
@@ -1102,6 +1107,72 @@ struct ManifestState {
     trace: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     promotion_state: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+enum StateStep {
+    Fill { fill: StateFill },
+    Type { r#type: StateType },
+    Click { click: StateClick },
+    WaitFor { wait_for: StateWaitFor },
+}
+
+impl StateStep {
+    fn validate(&self, state_id: &str, index: usize) -> Result<()> {
+        let label = format!("state {state_id} step {index}");
+        match self {
+            StateStep::Fill { fill } => {
+                require_name(&format!("{label} fill selector"), &fill.selector)?;
+            }
+            StateStep::Type { r#type } => {
+                require_name(&format!("{label} type selector"), &r#type.selector)?;
+                require_name(&format!("{label} type text"), &r#type.text)?;
+            }
+            StateStep::Click { click } => {
+                require_name(&format!("{label} click selector"), &click.selector)?;
+            }
+            StateStep::WaitFor { wait_for } => {
+                if wait_for.is_empty() {
+                    return Err(AllieError::InvalidManifest(format!(
+                        "{label} wait_for requires a selector or url_contains"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct StateFill {
+    selector: String,
+    value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct StateType {
+    selector: String,
+    text: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct StateClick {
+    selector: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct StateWaitFor {
+    #[serde(default)]
+    selector: Option<String>,
+    #[serde(default)]
+    url_contains: Option<String>,
+}
+
+impl StateWaitFor {
+    fn is_empty(&self) -> bool {
+        self.selector.is_none() && self.url_contains.is_none()
+    }
 }
 
 pub(crate) fn normalize_relative(base: &Path, path: &Path) -> String {
@@ -2140,6 +2211,36 @@ mod tests {
         assert_eq!(manifest.id, "login-flow");
         assert_eq!(manifest.policy.profile, "wcag22-aa");
         assert_eq!(manifest.flow.states[0].id, "login-form");
+    }
+
+    #[test]
+    fn state_action_steps_validate_and_serialize_to_state_contract() {
+        let manifest = FlowManifest::load(Path::new("examples/action-steps-flow.yml")).unwrap();
+
+        manifest.validate().unwrap();
+
+        assert_eq!(manifest.flow.states[0].id, "open-menu");
+        assert_eq!(manifest.flow.states[0].steps.len(), 2);
+        let state_json = serde_json::to_string(&manifest.flow.states[0]).unwrap();
+        assert!(state_json.contains("\"steps\""));
+        assert!(state_json.contains("\"click\""));
+        assert!(state_json.contains("\"wait_for\""));
+        let typed_state_json = serde_json::to_string(&manifest.flow.states[1]).unwrap();
+        assert!(typed_state_json.contains("\"fill\""));
+        assert!(typed_state_json.contains("\"type\""));
+        assert!(!state_json.contains("value_env"));
+    }
+
+    #[test]
+    fn state_action_wait_for_requires_a_real_assertion() {
+        let mut manifest = FlowManifest::load(Path::new("examples/action-steps-flow.yml")).unwrap();
+        manifest.flow.states[0].steps = vec![StateStep::WaitFor {
+            wait_for: StateWaitFor::default(),
+        }];
+
+        let error = manifest.validate().unwrap_err().to_string();
+
+        assert!(error.contains("state open-menu step 0 wait_for requires"));
     }
 
     #[test]

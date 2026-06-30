@@ -8,7 +8,7 @@ fixture — logs in, discovers its surface, and produces a trustworthy WCAG audi
 packet.
 
 ## Oracle
-- [ ] Worker executes pre-state action steps (fill/click/type/waitFor), not just `goto`.
+- [x] Worker executes pre-state action steps (fill/click/type/waitFor), not just `goto`.
 - [ ] BYO credentials reach the browser (env → login step → reused storageState); creds never written to packets (redaction holds).
 - [x] Discovery crawls a live `base_url` target (HTTP fetch + link graph), not only the fixture filesystem.
 - [ ] Live agentic review runs in the workbench loop (no `offline-recorded`/`allie-vision-fixture` hardcode) when `model.enabled`.
@@ -43,5 +43,11 @@ same-origin HTTP links and `/sitemap.xml` entries, then feeds those candidates
 into `allie map`. This is static discovery only: HTTPS/TLS, credentialed crawl,
 JavaScript navigation discovery, live agentic review, changed-surface inference,
 and real authenticated-app dogfood remain in this epic.
+
+**Delivered slice 3:** `flow.states[].steps` now lets a manifest perform
+non-secret state setup actions (`fill`, `type`, `click`, `wait_for`) before
+browser evidence capture. Auth/login secrets still belong in `auth.steps` via
+env-var names; state steps are for deterministic UI setup such as opening menus
+or waiting for panels.
 
 **Why:** real-app-proving lane (auth preflight-only `lib.rs:2862`; worker goto-only `run.mjs:128`; no credential serialization `lib.rs:3029`) + autonomy-depth lane (discovery fixture-only `lib.rs:1915`; workbench review offline `workbench.rs:390`). Operator priority #1. Land the worker-adapter extraction (epic 019, child 1) first to give child 1 here a clean seam.

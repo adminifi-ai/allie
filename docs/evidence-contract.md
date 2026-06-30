@@ -59,6 +59,13 @@ This is the first draft of the Allie evidence packet. The formal V0 JSON Schema 
 - obligations not tested;
 - obligations requiring human review.
 
+Manifest states may declare non-secret `steps` (`fill`, `type`, `click`, and
+`wait_for`) that the browser worker performs after navigation and before
+capturing evidence. The resulting artifacts represent the post-action state.
+Step failures are recorded as state errors so required evidence blocks instead
+of silently passing. Credential values do not belong in state steps; use
+`auth.steps` with env-var names for secret-bearing login recipes.
+
 ## Discovery
 
 `allie discover --manifest <flow.yml> --out <dir>` writes a discovery packet and

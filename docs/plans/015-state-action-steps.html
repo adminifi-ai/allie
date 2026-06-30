@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie 015 State Action Steps Plan</title>
+  <style>
+    :root { color-scheme: light; --ink:#151719; --muted:#56616f; --line:#d8dee8; --wash:#f5f7fa; --panel:#fff; --accent:#265cff; }
+    * { box-sizing: border-box; }
+    body { margin:0; color:var(--ink); background:var(--wash); font:16px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width:min(100% - 40px, 1120px); margin:0 auto; padding:40px 0 56px; }
+    h1 { margin:0; font-size:42px; line-height:1.05; letter-spacing:0; }
+    h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+    p { margin:0; }
+    p + p { margin-top:8px; }
+    code { background:#eef2f7; padding:.08em .28em; border-radius:4px; }
+    section { margin-top:18px; padding:20px; background:var(--panel); border:1px solid var(--line); }
+    ul { margin:0; padding-left:20px; }
+    li + li { margin-top:6px; }
+    .label { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:.08em; }
+    .cards { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-top:22px; }
+    .cards div { background:var(--panel); padding:16px; min-height:158px; }
+    .grid { display:grid; grid-template-columns:1.1fr .9fr; gap:18px; }
+    .strong { font-weight:700; }
+    @media (max-width: 860px) { main { width:min(100% - 24px, 1120px); } .grid, .cards { grid-template-columns:1fr; } h1 { font-size:34px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="label">Backlog 015 / child 1</p>
+    <h1>Let manifest states perform deterministic setup actions before evidence capture.</h1>
+    <p>Allie already logs in through <code>auth.steps</code>. This slice adds non-secret <code>flow.states[].steps</code> so a state can click, fill, type, and wait before axe, screenshot, DOM, accessibility-tree, keyboard, video, and trace evidence are captured.</p>
+
+    <div class="cards" aria-label="work contract">
+      <div>
+        <h2>Chosen Design</h2>
+        <p>Add a small state-step DTO beside <code>ManifestState</code> and execute it inside the browser worker after <code>goto</code> and auth-marker verification, before evidence capture. Login secrets stay in <code>auth.steps</code>.</p>
+      </div>
+      <div>
+        <h2>Proof Surface</h2>
+        <p><code>npm run action:smoke</code> drives the checked-in fixture, opens hidden UI, and proves the DOM artifact contains the revealed panel. <code>npm run verify</code> keeps the full regression floor.</p>
+      </div>
+      <div>
+        <h2>Stop Rules</h2>
+        <p>Stop if action values become secret-bearing, if failures disappear into a clean packet, if auth login and state actions share an unclear schema, or if the worker request drifts from the evidence contract.</p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section>
+        <h2>Acceptance</h2>
+        <ul>
+          <li>Manifests accept <code>flow.states[].steps</code> with <code>fill</code>, <code>type</code>, <code>click</code>, and <code>wait_for</code>.</li>
+          <li>The worker executes steps before capture, so DOM/screenshot/axe evidence reflects the post-action state.</li>
+          <li>Failed state steps record a state error and block instead of crashing or passing silently.</li>
+          <li>Docs distinguish non-secret state setup from secret-bearing <code>auth.steps</code>.</li>
+          <li>The full repo gate remains green.</li>
+        </ul>
+      </section>
+      <section>
+        <h2>Verification System</h2>
+        <p><span class="strong">Claim:</span> a manifest can open hidden UI before Allie records evidence.</p>
+        <p><span class="strong">Falsifier:</span> the DOM artifact lacks the revealed panel, or a missing selector still produces a pass packet.</p>
+        <p><span class="strong">Driver:</span> <code>npm run action:smoke</code> plus focused Rust validation tests and <code>npm run verify</code>.</p>
+        <p><span class="strong">Evidence packet:</span> <code>.allie/runs/action-steps-smoke/</code> with worker request, evidence packet, report, and DOM artifact.</p>
+      </section>
+    </div>
+
+    <section>
+      <h2>Review Focus</h2>
+      <p>Critics should hunt schema confusion between auth and state steps, secret leakage through literal action values, state-step failure modes that look like clean evidence, and any Playwright detail leaking beyond the worker boundary.</p>
+    </section>
+  </main>
+</body>
+</html>

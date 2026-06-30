@@ -117,6 +117,29 @@ plus a local HTML report:
 The packet reports accessibility evidence status, confidence, and residual
 review needs. It is not a legal compliance guarantee.
 
+Each listed flow state may include non-secret setup actions that run after
+navigation and before evidence capture. Use these for deterministic UI state,
+such as opening a menu, filling a search box with fixture text, or waiting for a
+panel before axe, screenshot, DOM, accessibility-tree, video, trace, or keyboard
+evidence is captured:
+
+```yaml
+flow:
+  states:
+    - id: opened-menu
+      path: /
+      steps:
+        - click: { selector: "#open-menu" }
+        - wait_for: { selector: "#menu:not([hidden])" }
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+```
+
+State-step literal values are serialized into the worker request and may appear
+in artifacts. Keep credentials and other secrets in `auth.steps` with
+`value_env`; use `flow.states[].steps` only for non-secret interaction setup.
+
 ## Authenticated Audit
 
 To audit routes behind a login wall, add an optional `auth` block to the
