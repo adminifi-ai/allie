@@ -4,6 +4,7 @@ use crate::{
     AllieError, FlowManifest, Result, artifact_for_path, now_utc, read_json_file, write_json_pretty,
 };
 use std::collections::BTreeSet;
+use std::fmt::{self, Display};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -14,7 +15,24 @@ use wait_timeout::ChildExt;
 pub(crate) struct AgenticReviewSummary {
     pub(crate) criteria: usize,
     pub(crate) calls: u64,
-    pub(crate) status: String,
+    pub(crate) status: AgenticReviewOutcome,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AgenticReviewOutcome {
+    Skipped,
+    Completed,
+    Degraded,
+}
+
+impl Display for AgenticReviewOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Skipped => "skipped",
+            Self::Completed => "ok",
+            Self::Degraded => "degraded",
+        })
+    }
 }
 
 fn agentic_worker_script() -> PathBuf {
@@ -38,9 +56,10 @@ fn agentic_model_setting(value: &Option<String>, fallback: &str) -> String {
 /// evidence packet, and promote each committed verdict to the criterion's
 /// pass/fail status — marked with the "agentic" evidence class so the report
 /// renders it with an asterisk (a reviewer judgment, not a machine-proven
-/// result). Best-effort: returns an error the caller can log, and never
-/// fabricates a verdict — an "inconclusive" or unavailable result leaves the
-/// criterion at needs_review.
+/// result). Model-unavailable degradation is advisory and leaves criteria at
+/// needs_review; worker/protocol failure returns an error. It never fabricates
+/// a verdict — an "inconclusive" or unavailable result leaves the criterion at
+/// needs_review.
 pub(crate) fn run_agentic_review(
     manifest: &FlowManifest,
     packet_path: &Path,
@@ -59,7 +78,7 @@ pub(crate) fn run_agentic_review(
         return Ok(AgenticReviewSummary {
             criteria: 0,
             calls: 0,
-            status: "skipped".to_string(),
+            status: AgenticReviewOutcome::Skipped,
         });
     }
 
@@ -165,6 +184,7 @@ pub(crate) fn run_agentic_review(
     }
 
     let response: serde_json::Value = read_json_file(&response_path)?;
+    let outcome = agentic_response_outcome(&response, output.status.success())?;
     let timestamp = now_utc();
     let policy = ArtifactPolicy {
         redaction_status: "not_redacted_local".to_string(),
@@ -269,8 +289,47 @@ pub(crate) fn run_agentic_review(
     Ok(AgenticReviewSummary {
         criteria: obligations.len(),
         calls: response["calls"].as_u64().unwrap_or_default(),
-        status: response["status"].as_str().unwrap_or("unknown").to_string(),
+        status: outcome,
     })
+}
+
+fn agentic_response_outcome(
+    response: &serde_json::Value,
+    worker_success: bool,
+) -> Result<AgenticReviewOutcome> {
+    let status = response["status"].as_str().unwrap_or("unknown");
+    match status {
+        "ok" if worker_success => Ok(AgenticReviewOutcome::Completed),
+        "degraded" if worker_success => Ok(AgenticReviewOutcome::Degraded),
+        "skipped" if worker_success => Ok(AgenticReviewOutcome::Skipped),
+        "error" => Err(AllieError::Worker(format!(
+            "agentic worker returned error: {}",
+            agentic_response_errors(response)
+        ))),
+        other if !worker_success => Err(AllieError::Worker(format!(
+            "agentic worker exited unsuccessfully with response status {other}: {}",
+            agentic_response_errors(response)
+        ))),
+        other => Err(AllieError::Worker(format!(
+            "agentic worker returned unknown response status {other}"
+        ))),
+    }
+}
+
+fn agentic_response_errors(response: &serde_json::Value) -> String {
+    response["errors"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+        .filter(|message| !message.is_empty())
+        .unwrap_or_else(|| "no worker error details recorded".to_string())
 }
 
 /// Map an agentic verdict string to the criterion status it may promote to.
@@ -314,5 +373,16 @@ mod tests {
         assert_eq!(agentic_promoted_status("inconclusive"), None);
         assert_eq!(agentic_promoted_status(""), None);
         assert_eq!(agentic_promoted_status("needs_human"), None);
+    }
+
+    #[test]
+    fn agentic_response_outcome_rejects_worker_error_status() {
+        let response = serde_json::json!({
+            "status": "error",
+            "errors": ["target could not be opened"]
+        });
+
+        let error = agentic_response_outcome(&response, false).unwrap_err();
+        assert!(error.to_string().contains("target could not be opened"));
     }
 }

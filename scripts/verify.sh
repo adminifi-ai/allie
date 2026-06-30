@@ -56,3 +56,5 @@ test -f .allie/jobs/autonomous-agentic-smoke/steps/run/agentic-response.json
 test -f .allie/jobs/autonomous-agentic-smoke/steps/run/evidence.json
 test -f .allie/jobs/autonomous-agentic-smoke/steps/report/compliance-report.json
 test -f .allie/jobs/autonomous-agentic-smoke/steps/release/release-summary.json
+test -f .allie/jobs/autonomous-agentic-error-smoke/job.json
+test -f .allie/jobs/autonomous-agentic-error-smoke/events.jsonl

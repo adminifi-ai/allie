@@ -168,6 +168,8 @@ assistive-technology obligations are still marked `not_tested` or
 .allie/jobs/autonomous-agentic-smoke/steps/run/evidence.json
 .allie/jobs/autonomous-agentic-smoke/steps/report/compliance-report.json
 .allie/jobs/autonomous-agentic-smoke/steps/release/release-summary.json
+.allie/jobs/autonomous-agentic-error-smoke/job.json
+.allie/jobs/autonomous-agentic-error-smoke/events.jsonl
 .allie/discovery/autonomous-smoke/discovery.json
 .allie/discovery/autonomous-smoke/flow-plan.json
 .allie/discovery/autonomous-smoke/generated-flow.yml
@@ -195,7 +197,10 @@ that non-local advisory agent modes stay on the one-shot `map` path until
 durable session adapters exist, and that a `model.enabled` workbench job runs
 the live agentic gateway before report/release. The model-enabled smoke unsets
 the configured API key, so the gateway must still capture media and write
-degraded `inconclusive` assessments without fabricating pass/fail verdicts.
+degraded `inconclusive` assessments without fabricating pass/fail verdicts. A
+separate synthetic worker-error path proves agentic worker infrastructure
+failures fail the `review` step before report/release instead of being recorded
+as completed advisory review.
 
 ## Failure Meanings
 
