@@ -1,6 +1,6 @@
 # Prove Allie on a real authenticated app
 
-Priority: P0 · Status: pending · Estimate: XL
+Priority: P0 · Status: done · Estimate: XL
 
 ## Goal
 Allie points at a real, running, authenticated web app — not the checked-in
@@ -13,7 +13,7 @@ packet.
 - [x] Discovery crawls a live `base_url` target (HTTP fetch + link graph), not only the fixture filesystem.
 - [x] Live agentic review runs in the workbench loop (no `offline-recorded`/`allie-vision-fixture` hardcode) when `model.enabled`.
 - [x] `verify` flags/refuses unauthenticated coverage when an auth profile implies a session (no false "no violations").
-- [ ] Dogfood receipt: a real authenticated app from a misty-step / adminifi-ai / personal repo audited end-to-end, receipt preserved.
+- [x] Dogfood receipt: a real authenticated app from a misty-step / adminifi-ai / personal repo audited end-to-end, receipt preserved.
 
 ## Verification System
 - Claim: Allie audits a real authenticated app and the packet reflects authenticated surfaces.
@@ -63,5 +63,15 @@ and release. `npm run autonomous:smoke` proves this with
 the gateway captures media, writes degraded `inconclusive` assessments, and
 keeps model-only findings advisory instead of falling back to the offline review
 fixture path.
+
+**Delivered slice 6:** The final dogfood receipt is preserved at
+`docs/dogfood/linejam/015-authenticated-verify.md`. It ran the composed
+`allie verify` pipeline against Linejam's Clerk-authenticated `/me/profile`
+route using a freshly generated local Playwright storageState. The run reached
+the authenticated route at HTTP 200 with no auth/state/console/network errors,
+captured the evidence packet/report/release receipts under
+`.allie/verify/linejam-auth-dogfood-e2e/`, and blocked on a deterministic
+contrast finding while the WCAG report also recorded scripted reflow overflow;
+there was no infrastructure/auth failure.
 
 **Why:** real-app-proving lane (auth preflight-only `lib.rs:2862`; worker goto-only `run.mjs:128`; no credential serialization `lib.rs:3029`) + autonomy-depth lane (discovery fixture-only `lib.rs:1915`; workbench review offline `workbench.rs:390`). Operator priority #1. Land the worker-adapter extraction (epic 019, child 1) first to give child 1 here a clean seam.
