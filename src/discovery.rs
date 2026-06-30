@@ -870,6 +870,9 @@ fn discover_surfaces(manifest: &FlowManifest, manifest_path: &Path) -> Result<Su
         };
         for html_path in html_files(&fixture_root)? {
             let route = route_for_fixture_file(&fixture_root, &html_path);
+            if is_auth_bootstrap_route(manifest, &route) {
+                continue;
+            }
             surfaces
                 .entry(route.clone())
                 .or_insert_with(|| DiscoveredSurface {
@@ -886,6 +889,9 @@ fn discover_surfaces(manifest: &FlowManifest, manifest_path: &Path) -> Result<Su
         let live = discover_live_base_url_surfaces(base_url)?;
         diagnostics.extend(live.diagnostics);
         for discovered in live.surfaces {
+            if is_auth_bootstrap_route(manifest, &discovered.route) {
+                continue;
+            }
             surfaces
                 .entry(discovered.route.clone())
                 .or_insert(discovered);
@@ -896,6 +902,13 @@ fn discover_surfaces(manifest: &FlowManifest, manifest_path: &Path) -> Result<Su
         surfaces: surfaces.into_values().collect(),
         diagnostics,
     })
+}
+
+fn is_auth_bootstrap_route(manifest: &FlowManifest, route: &str) -> bool {
+    manifest
+        .auth
+        .as_ref()
+        .is_some_and(|auth| auth.is_bootstrap_route(route))
 }
 
 fn html_files(root: &Path) -> Result<Vec<PathBuf>> {
