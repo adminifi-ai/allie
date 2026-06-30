@@ -11,6 +11,10 @@ cargo fmt --check
 cargo test --locked
 npm run worker:smoke
 npm run evidence:smoke
+npm run action:smoke
+npm run auth:smoke
+npm run visibility:smoke
+npm run coverage:smoke
 npm run consumer:smoke
 npm run consumer-cwd:smoke
 npm run agentic:smoke

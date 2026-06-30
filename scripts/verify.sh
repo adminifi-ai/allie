@@ -5,6 +5,7 @@ cargo fmt --check
 cargo test --locked
 npm run worker:smoke
 npm run evidence:smoke
+npm run action:smoke
 npm run auth:smoke
 npm run visibility:smoke
 npm run coverage:smoke
@@ -17,6 +18,10 @@ npm run size:smoke
 
 test -f .allie/runs/v0-smoke/evidence.json
 test -f .allie/runs/v0-smoke/report.html
+test -f .allie/runs/action-steps-smoke/evidence.json
+test -f .allie/runs/action-steps-smoke/artifacts/dom-open-menu.html
+test -f .allie/runs/action-steps-smoke/artifacts/dom-typed-email.html
+test -f .allie/runs/action-steps-negative-smoke/evidence.json
 test -f .allie/maps/v0-smoke/product-map.json
 test -f .allie/maps/v0-smoke/surface-map.html
 test -f .allie/maps/v0-smoke/agent-runner-receipt.json

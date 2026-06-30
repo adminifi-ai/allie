@@ -309,6 +309,7 @@ fn scaffold_manifest(options: &InitOptions) -> FlowManifest {
                 path: "/".to_string(),
                 description: "Home route first-smoke state.".to_string(),
                 required: true,
+                steps: Vec::new(),
                 axe: true,
                 screenshot: true,
                 dom_snapshot: true,
