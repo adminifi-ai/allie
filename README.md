@@ -323,6 +323,8 @@ two commands are the V0 live oracle and release projection, leaving inspectable
 evidence under `.allie/runs/latest/` and `.allie/releases/latest/`.
 The autonomous smoke leaves discovery, generated-flow, richer evidence, review,
 and blocked-release receipts under `.allie/*/autonomous-smoke/`. It also leaves
-durable workbench lifecycle receipts under `.allie/jobs/autonomous-smoke/`.
+durable workbench lifecycle receipts under `.allie/jobs/autonomous-smoke/` and
+proves the model-enabled workbench path under
+`.allie/jobs/autonomous-agentic-smoke/`.
 
 For a cold-start verification path, see [docs/verification.md](docs/verification.md).

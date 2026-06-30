@@ -351,8 +351,9 @@ fn run_verify_pipeline(options: &VerifyOptions) -> Result<VerifyPipelineReceipts
         manifest_path: promoted.manifest_path.clone(),
         out_dir: options.out_dir.join("run"),
     })?;
-    if manifest.model.enabled {
-        match crate::agentic::run_agentic_review(&manifest, &run.evidence_path) {
+    let promoted_manifest = FlowManifest::load(&promoted.manifest_path)?;
+    if promoted_manifest.model.enabled {
+        match crate::agentic::run_agentic_review(&promoted_manifest, &run.evidence_path) {
             Ok(summary) => eprintln!(
                 "Agentic review: {} criteria, {} model call(s), status {}",
                 summary.criteria, summary.calls, summary.status

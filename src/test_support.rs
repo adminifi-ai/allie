@@ -118,7 +118,7 @@ fn serve_live_discovery_connection(mut stream: TcpStream) {
         .unwrap_or("127.0.0.1");
     let body = match path {
         "/" => {
-            r#"<!doctype html><html><head><title>Live Home</title></head><body><nav><a href="/settings">Settings</a><a href="/help#top">Help</a><a href="https://example.invalid/offsite">Offsite</a><a href="mailto:a11y@example.invalid">Mail</a></nav></body></html>"#
+            r#"<!doctype html><html><head><title>Live Home</title></head><body><nav><a href="/settings">Settings</a><a href="/account">Account</a><a href="/help#top">Help</a><a href="https://example.invalid/offsite">Offsite</a><a href="mailto:a11y@example.invalid">Mail</a></nav></body></html>"#
         }
         "/account" => {
             r#"<!doctype html><html><head><title>Account</title></head><body><a href="/settings">Settings</a></body></html>"#
