@@ -10,8 +10,8 @@
 # (CWD == repoRoot) and so never exercised this path.
 #
 # This smoke reproduces a consumer repo with a temp dir, runs `allie` from that
-# dir against the bundled login fixture, and fails unless the worker captured at
-# least one real state with no infrastructure failure.
+# dir against the bundled login fixture, and fails unless the worker resolves
+# itself, captures at least one real state, and records no infrastructure failure.
 set -eu
 
 ALLIE_REPO="$(pwd)"
@@ -39,8 +39,8 @@ git -C "$WORK" commit -q -m "consumer fixture manifest"
 
 cd "$WORK"
 # `allie run` exits non-zero on findings; assert on captured evidence, not exit.
-ALLIE_BROWSER_WORKER="$ALLIE_REPO/workers/browser/run.mjs" \
-  "$BIN" run --manifest .allie/manifest.yml --out .allie/run/latest || true
+unset ALLIE_BROWSER_WORKER
+"$BIN" run --manifest .allie/manifest.yml --out .allie/run/latest || true
 
 EVID=".allie/run/latest/evidence.json"
 test -f "$EVID"

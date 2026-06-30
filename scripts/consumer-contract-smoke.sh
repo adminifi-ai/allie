@@ -102,8 +102,18 @@ const ciFiles = [
 ];
 const github = fs.readFileSync(ciFiles[0], 'utf8');
 const azure = fs.readFileSync(ciFiles[1], 'utf8');
+const doctorCommand = 'allie doctor --manifest .allie/manifest.yml --out .allie/doctor';
 for (const file of ciFiles) {
   const text = fs.readFileSync(file, 'utf8');
+  if (text.includes('ALLIE_BROWSER_WORKER')) {
+    throw new Error(`${file} must not require ALLIE_BROWSER_WORKER for the normal consumer path`);
+  }
+  if (text.includes('cargo install') || text.includes('git clone')) {
+    throw new Error(`${file} must consume the prebuilt Allie bundle instead of compiling in every consumer run`);
+  }
+  if (!text.includes(doctorCommand)) {
+    throw new Error(`${file} does not run allie doctor before verify`);
+  }
   if (!text.includes('allie verify --manifest .allie/manifest.yml --out .allie/verify/latest')) {
     throw new Error(`${file} does not call the portable verify command`);
   }

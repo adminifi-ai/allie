@@ -9,6 +9,7 @@ const VERIFY_SCHEMA: &str = "allie.verify.v0";
 pub(super) struct InitReceipt {
     pub(super) manifest_path: PathBuf,
     pub(super) next_command: String,
+    pub(super) setup_steps: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -217,6 +218,7 @@ pub(super) fn run_init(options: InitOptions) -> Result<InitReceipt> {
 
     Ok(InitReceipt {
         next_command: next_verify_command(&options.manifest_path),
+        setup_steps: first_run_checklist(&options.manifest_path),
         manifest_path: options.manifest_path,
     })
 }
@@ -886,6 +888,18 @@ fn next_verify_command(manifest_path: &Path) -> String {
         "allie verify --manifest {} --out .allie/verify/latest",
         manifest_path.display()
     )
+}
+
+fn first_run_checklist(manifest_path: &Path) -> Vec<String> {
+    vec![
+        "Ensure Node.js is on PATH.".to_string(),
+        "If using a source checkout instead of a release bundle, run `npm ci` and `npx playwright install chromium` in the Allie checkout.".to_string(),
+        format!(
+            "Run `allie doctor --manifest {} --out .allie/doctor`.",
+            manifest_path.display()
+        ),
+        "Start the target app, unless the manifest uses --fixture-dir.".to_string(),
+    ]
 }
 
 fn default_app_name() -> String {

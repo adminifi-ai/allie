@@ -1,12 +1,13 @@
 use crate::auth::AuthFlow;
 use crate::model::{ArtifactMetadata, ArtifactPolicy, BrowserSettings, PageFeatures};
+use crate::worker_runtime;
 use crate::{
     AllieError, FlowManifest, ManifestState, Result, artifact_for_path, normalize_relative,
     write_json_pretty,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use wait_timeout::ChildExt;
@@ -84,7 +85,7 @@ pub(crate) fn execute(
 
 pub(crate) fn environment_requirements() -> Vec<String> {
     vec![
-        "npm install".to_string(),
+        "npm ci".to_string(),
         "npx playwright install chromium".to_string(),
     ]
 }
@@ -357,36 +358,27 @@ fn invoke_worker(
     response_path: &Path,
     timeout_ms: u64,
 ) -> std::result::Result<(), RunFailure> {
-    let worker_script = std::env::var_os("ALLIE_BROWSER_WORKER")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("workers/browser/run.mjs")
-        });
+    let worker_script = worker_runtime::browser_worker_script()
+        .map_err(|message| RunFailure::new("worker-missing", "worker-adapter", message))?;
 
-    if !worker_script.exists() {
-        return Err(RunFailure::new(
-            "worker-missing",
-            "worker-adapter",
-            format!("worker script not found at {}", worker_script.display()),
-        ));
-    }
-
-    let mut child = Command::new("node")
+    let mut command = Command::new("node");
+    command
         .arg(&worker_script)
         .arg("--request")
         .arg(request_path)
         .arg("--response")
         .arg(response_path)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| {
-            RunFailure::new(
-                "worker-spawn-failed",
-                "worker-adapter",
-                format!("spawn worker {}: {source}", worker_script.display()),
-            )
-        })?;
+        .stderr(Stdio::piped());
+    worker_runtime::apply_worker_environment(&mut command, &worker_script);
+
+    let mut child = command.spawn().map_err(|source| {
+        RunFailure::new(
+            "worker-spawn-failed",
+            "worker-adapter",
+            format!("spawn worker {}: {source}", worker_script.display()),
+        )
+    })?;
 
     let status = child
         .wait_timeout(Duration::from_millis(timeout_ms))

@@ -34,6 +34,7 @@ Allie's consuming-app contract is local and host-agnostic first:
 
 ```sh
 allie init --manifest .allie/manifest.yml --app-name "My App"
+allie doctor --manifest .allie/manifest.yml --out .allie/doctor
 allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
 ```
 
@@ -69,19 +70,24 @@ GitHub and Azure examples live in [docs/ci](docs/ci). They call the same
 so HTML drilldowns can reach the map, evidence, WCAG report, release summary,
 JUnit, and SARIF files. Host-specific files do not fork accessibility policy.
 
-Until Allie has a packaged worker distribution, arbitrary repositories need the
-Rust binary plus the browser worker checkout:
+Arbitrary repositories install the release bundle, then run the same local
+preflight and verification commands. The bundle layout keeps the Rust binary and
+browser worker assets together, so the CLI resolves the worker automatically.
 
 ```sh
-git clone --depth 1 https://github.com/adminifi-ai/allie .allie/tooling/allie
-cargo install --path .allie/tooling/allie --locked
-cd .allie/tooling/allie
-npm ci
-npx playwright install chromium
-cd -
-ALLIE_BROWSER_WORKER=.allie/tooling/allie/workers/browser/run.mjs \
-  allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
+mkdir -p .allie/tooling
+curl -fsSL https://github.com/adminifi-ai/allie/releases/latest/download/allie-linux-x64.tar.gz \
+  | tar -xz -C .allie/tooling
+export PATH="$PWD/.allie/tooling/allie/bin:$PATH"
+allie doctor --manifest .allie/manifest.yml --out .allie/doctor
+allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
 ```
+
+When working from a source checkout instead of a release bundle, run `npm ci`
+and `npx playwright install chromium` in the Allie checkout once. The
+`ALLIE_BROWSER_WORKER` override remains available only for nonstandard layouts.
+Release bundles are produced with `npm run package:release` and published from
+tag builds.
 
 Interpret results as evidence status: `approved` exits `0`, `needs_review`
 exits `0` with neutral review-required evidence, `blocked` exits `1` because

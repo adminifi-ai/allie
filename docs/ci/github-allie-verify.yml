@@ -13,15 +13,16 @@ jobs:
 
       - name: Install Allie
         run: |
-          git clone --depth 1 https://github.com/adminifi-ai/allie .allie/tooling/allie
-          cargo install --path .allie/tooling/allie --locked
-          cd .allie/tooling/allie
-          npm ci
-          npx playwright install chromium
+          mkdir -p .allie/tooling
+          curl --fail --location --silent --show-error \
+            https://github.com/adminifi-ai/allie/releases/latest/download/allie-linux-x64.tar.gz \
+            | tar -xz -C .allie/tooling
+          echo "$PWD/.allie/tooling/allie/bin" >> "$GITHUB_PATH"
+
+      - name: Check Allie setup
+        run: allie doctor --manifest .allie/manifest.yml --out .allie/doctor
 
       - name: Run Allie
-        env:
-          ALLIE_BROWSER_WORKER: .allie/tooling/allie/workers/browser/run.mjs
         run: allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
 
       - name: Upload Allie evidence
@@ -29,4 +30,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: allie-verify
-          path: .allie/verify/latest
+          path: |
+            .allie/doctor
+            .allie/verify/latest

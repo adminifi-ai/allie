@@ -13,6 +13,7 @@ npm run visibility:smoke
 npm run coverage:smoke
 npm run consumer:smoke
 npm run consumer-cwd:smoke
+npm run distribution:smoke
 npm run agentic:smoke
 npm run release:smoke
 npm run autonomous:smoke
@@ -40,6 +41,9 @@ test -f .allie/consumer-contract-smoke/reporters/allie-report.html
 test -f .allie/consumer-contract-smoke/reporters/allie-report.md
 test -f .allie/consumer-contract-smoke/reporters/junit.xml
 test -f .allie/consumer-contract-smoke/reporters/allie.sarif
+test -f .allie/distribution-smoke/consumer/.allie/run/latest/evidence.json
+test -f .allie/distribution-smoke/consumer/.allie/doctor/doctor.json
+test -f .allie/distribution-smoke/consumer/.allie/doctor/browser-worker-smoke/worker-response.json
 test -f .allie/releases/v0-smoke/release-summary.json
 test -f .allie/releases/v0-smoke/github-check.json
 test -f .allie/releases/v0-smoke/release-report.html

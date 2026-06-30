@@ -17,17 +17,23 @@ steps:
   - checkout: self
 
   - script: |
-      git clone --depth 1 https://github.com/adminifi-ai/allie .allie/tooling/allie
-      cargo install --path .allie/tooling/allie --locked
-      cd .allie/tooling/allie
-      npm ci
-      npx playwright install chromium
+      mkdir -p .allie/tooling
+      curl --fail --location --silent --show-error \
+        https://github.com/adminifi-ai/allie/releases/latest/download/allie-linux-x64.tar.gz \
+        | tar -xz -C .allie/tooling
+      echo "##vso[task.prependpath]$(pwd)/.allie/tooling/allie/bin"
     displayName: Install Allie
+
+  - script: allie doctor --manifest .allie/manifest.yml --out .allie/doctor
+    displayName: Check Allie setup
 
   - script: allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
     displayName: Run Allie
-    env:
-      ALLIE_BROWSER_WORKER: .allie/tooling/allie/workers/browser/run.mjs
+
+  - publish: .allie/doctor
+    artifact: allie-doctor
+    displayName: Publish Allie doctor
+    condition: always()
 
   - publish: .allie/verify/latest
     artifact: allie-verify
