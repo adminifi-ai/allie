@@ -11,6 +11,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
+const AGENTIC_WORKER_TIMEOUT: Duration = Duration::from_secs(300);
+
 #[derive(Debug)]
 pub(crate) struct AgenticReviewSummary {
     pub(crate) criteria: usize,
@@ -63,6 +65,14 @@ fn agentic_model_setting(value: &Option<String>, fallback: &str) -> String {
 pub(crate) fn run_agentic_review(
     manifest: &FlowManifest,
     packet_path: &Path,
+) -> Result<AgenticReviewSummary> {
+    run_agentic_review_with_timeout(manifest, packet_path, AGENTIC_WORKER_TIMEOUT)
+}
+
+fn run_agentic_review_with_timeout(
+    manifest: &FlowManifest,
+    packet_path: &Path,
+    timeout: Duration,
 ) -> Result<AgenticReviewSummary> {
     let mut packet: EvidencePacket = read_json_file(packet_path)?;
 
@@ -166,16 +176,19 @@ pub(crate) fn run_agentic_review(
         .spawn()
         .map_err(|source| AllieError::Worker(format!("spawn agentic worker: {source}")))?;
     let status = child
-        .wait_timeout(Duration::from_millis(300_000))
+        .wait_timeout(timeout)
         .map_err(|source| AllieError::Worker(format!("wait for agentic worker: {source}")))?;
+    let Some(status) = status else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(AllieError::Worker(format!(
+            "agentic worker timed out after {} ms",
+            timeout.as_millis()
+        )));
+    };
     let output = child
         .wait_with_output()
         .map_err(|source| AllieError::Worker(format!("collect agentic worker output: {source}")))?;
-    if status.is_none() {
-        return Err(AllieError::Worker(
-            "agentic worker timed out after 300s".to_string(),
-        ));
-    }
     if !response_path.exists() {
         return Err(AllieError::Worker(format!(
             "agentic worker produced no response: {}",
@@ -184,7 +197,7 @@ pub(crate) fn run_agentic_review(
     }
 
     let response: serde_json::Value = read_json_file(&response_path)?;
-    let outcome = agentic_response_outcome(&response, output.status.success())?;
+    let outcome = agentic_response_outcome(&response, status.success())?;
     let timestamp = now_utc();
     let policy = ArtifactPolicy {
         redaction_status: "not_redacted_local".to_string(),
@@ -363,6 +376,10 @@ fn agentic_artifact_type(kind: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    static AGENTIC_WORKER_ENV_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
     fn agentic_promoted_status_only_promotes_explicit_pass_or_fail() {
@@ -384,5 +401,142 @@ mod tests {
 
         let error = agentic_response_outcome(&response, false).unwrap_err();
         assert!(error.to_string().contains("target could not be opened"));
+    }
+
+    #[test]
+    fn agentic_response_outcome_accepts_only_successful_terminal_statuses() {
+        for status in ["ok", "degraded", "skipped"] {
+            let response = serde_json::json!({ "status": status });
+
+            assert!(
+                agentic_response_outcome(&response, true).is_ok(),
+                "{status} should be accepted when worker exit succeeded"
+            );
+
+            let error = agentic_response_outcome(&response, false).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("agentic worker exited unsuccessfully"),
+                "{status} with a nonzero worker exit must fail closed"
+            );
+        }
+
+        let unknown = serde_json::json!({ "status": "maybe" });
+        let error = agentic_response_outcome(&unknown, true).unwrap_err();
+        assert!(error.to_string().contains("unknown response status maybe"));
+    }
+
+    #[test]
+    fn run_agentic_review_kills_worker_on_timeout_before_collecting_output() {
+        let _guard = AGENTIC_WORKER_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let temp = tempdir().unwrap();
+        let worker_path = temp.path().join("sleeping-agentic-worker.cjs");
+        fs::write(&worker_path, "setTimeout(() => process.exit(0), 250);\n").unwrap();
+        let packet_path = temp.path().join("evidence.json");
+        write_json_pretty(&packet_path, &minimal_agentic_packet()).unwrap();
+        let manifest =
+            FlowManifest::load(Path::new("examples/autonomous-workbench-agentic.yml")).unwrap();
+
+        unsafe {
+            std::env::set_var("ALLIE_AGENTIC_WORKER", worker_path.as_os_str());
+        }
+        let error =
+            run_agentic_review_with_timeout(&manifest, &packet_path, Duration::from_millis(1))
+                .unwrap_err();
+        unsafe {
+            std::env::remove_var("ALLIE_AGENTIC_WORKER");
+        }
+
+        assert!(error.to_string().contains("timed out after 1 ms"));
+    }
+
+    fn minimal_agentic_packet() -> serde_json::Value {
+        serde_json::json!({
+            "schema": "allie.evidence.v0",
+            "summary": {
+                "status": "pass",
+                "exit_code": 0,
+                "deterministic_failures": 0,
+                "scripted_failures": 0,
+                "infrastructure_failures": 0,
+                "states_captured": 1,
+                "failure_class": null
+            },
+            "run": {
+                "id": "agentic-timeout-test",
+                "started_at": "2026-06-30T00:00:00Z",
+                "finished_at": "2026-06-30T00:00:01Z",
+                "allie_version": env!("CARGO_PKG_VERSION"),
+                "git_sha": "test",
+                "git_branch": "test",
+                "ci_provider": null,
+                "actor": "test"
+            },
+            "target": {
+                "base_url": "http://127.0.0.1:1",
+                "environment": "test",
+                "app_name": "Allie test",
+                "auth_profile": "none",
+                "credential_provider": {
+                    "provider": "none",
+                    "env": null,
+                    "required": false,
+                    "status": "not_required"
+                },
+                "flow_manifest": "examples/autonomous-workbench-agentic.yml"
+            },
+            "policy": {
+                "profile": "wcag22-aa",
+                "blocking_classes": ["deterministic"],
+                "worker_timeout_ms": 30000,
+                "model_provider_allowlist": ["openrouter"],
+                "model_status": "enabled",
+                "zdr_required": true,
+                "redaction_profile": "not_redacted_local_fixture",
+                "budget": { "model_calls": 0, "max_states": 1 }
+            },
+            "coverage": {
+                "routes_visited": ["/"],
+                "surfaces_discovered": ["home"],
+                "flows_exercised": ["timeout-test"],
+                "states_captured": ["home"],
+                "state_metadata": [],
+                "standards_obligations_evaluated": ["wcag22-aa:2.4.7-focus-visible"],
+                "obligations_not_tested": [],
+                "obligations_requiring_human_review": ["wcag22-aa:2.4.7-focus-visible"]
+            },
+            "artifacts": [],
+            "findings": [],
+            "verdicts": [{
+                "obligation": "wcag22-aa:2.4.7-focus-visible",
+                "status": "needs_review",
+                "confidence": "needs_human",
+                "evidence_class": "human",
+                "source": "test",
+                "affected_states": ["home"],
+                "finding_refs": []
+            }],
+            "waivers": [],
+            "review": [],
+            "agentic_assessments": [],
+            "replay": {
+                "command": "cargo run --locked -- run --manifest examples/autonomous-workbench-agentic.yml --out test",
+                "manifest_path": "examples/autonomous-workbench-agentic.yml",
+                "environment_requirements": [],
+                "credential_profile": "none",
+                "browser": {
+                    "viewport": { "width": 1280, "height": 900 },
+                    "color_scheme": "light",
+                    "reduced_motion": "reduce",
+                    "locale": "en-US",
+                    "zoom": 1.0
+                },
+                "seed_data": [],
+                "known_nondeterminism": []
+            }
+        })
     }
 }
