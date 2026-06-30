@@ -73,7 +73,9 @@ layers, not implied by this packet.
 Discovery output is a candidate map, not a legal or complete-coverage claim.
 Manifest-declared states remain authoritative and are merged with discovered
 routes; generated flows must still replay through `allie run` before release
-enforcement.
+enforcement. Live crawl failures are recorded in the packet's `diagnostics`
+array and the product map's `discovery_diagnostics` array instead of being
+silently converted into clean manifest-only coverage.
 
 ## Artifacts
 

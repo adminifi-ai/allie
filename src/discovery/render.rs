@@ -38,6 +38,19 @@ pub(super) fn render_product_surface_map(map: &ProductMapPacket) -> String {
         .map(|question| format!("<li>{}</li>", escape_html(question)))
         .collect::<Vec<_>>()
         .join("");
+    let diagnostics = map
+        .discovery_diagnostics
+        .iter()
+        .map(|diagnostic| {
+            format!(
+                "<li><strong>{}</strong> {} {}</li>",
+                escape_html(&diagnostic.severity),
+                escape_html(&diagnostic.source),
+                escape_html(&diagnostic.message)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
     format!(
         r#"<!doctype html>
 <html lang="en">
@@ -82,6 +95,10 @@ pub(super) fn render_product_surface_map(map: &ProductMapPacket) -> String {
       <h2>Open Review Questions</h2>
       <ul>{questions}</ul>
     </section>
+    <section>
+      <h2>Discovery Diagnostics</h2>
+      <ul>{diagnostics}</ul>
+    </section>
   </main>
 </body>
 </html>
@@ -94,7 +111,8 @@ pub(super) fn render_product_surface_map(map: &ProductMapPacket) -> String {
         workflows = workflows,
         profile = escape_html(&map.standards.id),
         total = map.standards.total_obligations,
-        questions = questions
+        questions = questions,
+        diagnostics = diagnostics
     )
 }
 
@@ -115,10 +133,24 @@ pub(super) fn render_discovery_report(
         })
         .collect::<Vec<_>>()
         .join("");
+    let diagnostics = discovery
+        .diagnostics
+        .iter()
+        .map(|diagnostic| {
+            format!(
+                "<li><strong>{}</strong> {} {}</li>",
+                escape_html(&diagnostic.severity),
+                escape_html(&diagnostic.source),
+                escape_html(&diagnostic.message)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
     format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Allie Discovery</title></head><body><main><h1>Allie discovery</h1><p>Source manifest: <code>{}</code></p><p>Generated candidates: {}</p><ul>{}</ul><p>Generated flows must replay before enforcement.</p></main></body></html>"#,
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Allie Discovery</title></head><body><main><h1>Allie discovery</h1><p>Source manifest: <code>{}</code></p><p>Generated candidates: {}</p><ul>{}</ul><h2>Discovery Diagnostics</h2><ul>{}</ul><p>Generated flows must replay before enforcement.</p></main></body></html>"#,
         escape_html(&discovery.run.source_manifest),
         flow_plan.candidates.len(),
-        surfaces
+        surfaces,
+        diagnostics
     )
 }

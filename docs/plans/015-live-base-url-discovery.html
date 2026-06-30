@@ -55,7 +55,7 @@
       </article>
       <article class="cell">
         <h2>Acceptance</h2>
-        <p>A local live HTTP test site with `/`, `/settings`, `/help`, and sitemap-only `/account` appears in `discovery.json`, `flow-plan.json`, and `product-map.json` when the manifest uses `kind: web` and `base_url`.</p>
+        <p>A local live HTTP test site with `/`, `/settings`, `/help`, and sitemap-only `/account` appears in `discovery.json`, `flow-plan.json`, and `product-map.json` when the manifest uses `kind: web` and `base_url`; unreachable live targets preserve manifest routes and expose crawl diagnostics.</p>
       </article>
       <article class="cell">
         <h2>Non-Goals</h2>
@@ -81,7 +81,7 @@
       </article>
       <article class="cell">
         <h2>Evidence Packet</h2>
-        <p>Commit the regression test; leave runtime proof in `.allie/discovery/015-live-base-url-smoke/`, `.allie/maps/015-live-base-url-smoke/`, and PR body after running local commands.</p>
+        <p>Commit the regression test; leave runtime proof in `.allie/discovery/015-live-base-url-smoke/`, `.allie/maps/015-live-base-url-smoke/`, `.allie/discovery/015-live-base-url-unreachable-smoke/`, `.allie/maps/015-live-base-url-unreachable-smoke/`, and PR body after running local commands.</p>
       </article>
     </section>
 
@@ -99,13 +99,14 @@
           <li>Stop if the manifest needs new public schema fields to make the slice honest.</li>
           <li>Stop if network behavior requires auth, JavaScript execution, or browser crawling for acceptance.</li>
           <li>Stop if reachable live candidates fail to appear in committed tests or the persistent smoke packet.</li>
+          <li>Stop if live crawl fetch failures are silently converted into clean manifest-only coverage.</li>
         </ul>
       </article>
     </section>
 
     <section class="panel section">
       <h2>Review Focus</h2>
-      <p>Critics should hunt URL normalization bugs, unbounded crawl behavior, external-host leakage, misleading confidence labels, and whether `verify` can still imply complete coverage when the live crawl only sees static links.</p>
+      <p>Critics should hunt URL normalization bugs, unbounded crawl behavior, external-host leakage, misleading confidence labels, and whether `verify` can still imply complete coverage when the live crawl only sees static links or when a live fetch fails.</p>
     </section>
   </main>
 </body>

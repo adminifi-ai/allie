@@ -93,6 +93,8 @@ struct DiscoveryPacket {
     browser: BrowserSettings,
     promotion: DiscoveryPromotion,
     surfaces: Vec<DiscoveredSurface>,
+    #[serde(default)]
+    diagnostics: Vec<DiscoveryDiagnostic>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -122,6 +124,17 @@ struct DiscoveredSurface {
     provenance: Vec<String>,
 }
 
+#[derive(Clone, Debug)]
+struct SurfaceDiscovery {
+    surfaces: Vec<DiscoveredSurface>,
+    diagnostics: Vec<DiscoveryDiagnostic>,
+}
+
+struct ProductSurfaceDiscovery {
+    surfaces: Vec<ProductSurface>,
+    diagnostics: Vec<DiscoveryDiagnostic>,
+}
+
 pub(crate) fn run_discovery(options: DiscoveryOptions) -> Result<DiscoveryReceipt> {
     fs::create_dir_all(&options.out_dir).map_err(|source| AllieError::Io {
         context: format!(
@@ -134,7 +147,8 @@ pub(crate) fn run_discovery(options: DiscoveryOptions) -> Result<DiscoveryReceip
     let started_at = now_utc();
     let manifest = FlowManifest::load(&options.manifest_path)?;
     manifest.validate()?;
-    let surfaces = discover_surfaces(&manifest, &options.manifest_path)?;
+    let discovery_result = discover_surfaces(&manifest, &options.manifest_path)?;
+    let surfaces = discovery_result.surfaces;
     let discovery = DiscoveryPacket {
         schema: "allie.discovery.v0".to_string(),
         run: DiscoveryRun {
@@ -154,6 +168,7 @@ pub(crate) fn run_discovery(options: DiscoveryOptions) -> Result<DiscoveryReceip
                     .to_string(),
         },
         surfaces: surfaces.clone(),
+        diagnostics: discovery_result.diagnostics,
     };
     let flow_plan = FlowPlanPacket {
         schema: "allie.flow-plan.v0".to_string(),
@@ -263,7 +278,8 @@ pub(crate) fn run_map(options: MapOptions) -> Result<MapReceipt> {
     manifest.validate()?;
     let project_root =
         fs::canonicalize(&options.project_root).unwrap_or_else(|_| options.project_root.clone());
-    let surfaces = product_surfaces(&manifest, &options.manifest_path, &project_root)?;
+    let product_discovery = product_surfaces(&manifest, &options.manifest_path, &project_root)?;
+    let surfaces = product_discovery.surfaces;
     let workflows = vec![ProductWorkflow {
         id: manifest.flow.id.clone(),
         title: manifest.flow.description.clone(),
@@ -301,7 +317,8 @@ pub(crate) fn run_map(options: MapOptions) -> Result<MapReceipt> {
         standards: standards_profile_summary(&manifest.policy.profile),
         surfaces,
         workflows,
-        open_questions: product_map_open_questions(&manifest),
+        discovery_diagnostics: product_discovery.diagnostics.clone(),
+        open_questions: product_map_open_questions(&manifest, &product_discovery.diagnostics),
     };
     let generated_manifest = generated_flow_manifest(&manifest, &map.surfaces);
 
@@ -590,9 +607,10 @@ fn product_surfaces(
     manifest: &FlowManifest,
     manifest_path: &Path,
     project_root: &Path,
-) -> Result<Vec<ProductSurface>> {
+) -> Result<ProductSurfaceDiscovery> {
     let mut surfaces: BTreeMap<String, ProductSurface> = BTreeMap::new();
-    for discovered in discover_surfaces(manifest, manifest_path)? {
+    let discovery_result = discover_surfaces(manifest, manifest_path)?;
+    for discovered in discovery_result.surfaces {
         let route = discovered.route.clone();
         merge_product_surface(
             &mut surfaces,
@@ -648,7 +666,10 @@ fn product_surfaces(
         );
     }
 
-    Ok(surfaces.into_values().collect())
+    Ok(ProductSurfaceDiscovery {
+        surfaces: surfaces.into_values().collect(),
+        diagnostics: discovery_result.diagnostics,
+    })
 }
 
 fn merge_product_surface(
@@ -760,7 +781,10 @@ fn route_for_project_file(root: &Path, path: &Path) -> String {
     format!("/{}", relative.to_string_lossy().replace('\\', "/"))
 }
 
-fn product_map_open_questions(manifest: &FlowManifest) -> Vec<String> {
+fn product_map_open_questions(
+    manifest: &FlowManifest,
+    diagnostics: &[DiscoveryDiagnostic],
+) -> Vec<String> {
     let mut questions = Vec::new();
     if manifest.model.enabled {
         questions.push(
@@ -777,6 +801,12 @@ fn product_map_open_questions(manifest: &FlowManifest) -> Vec<String> {
         "Verify generated user stories and workflow names with the application owner before using them as release blockers."
             .to_string(),
     );
+    for diagnostic in diagnostics {
+        questions.push(format!(
+            "Discovery diagnostic from {}: {}",
+            diagnostic.source, diagnostic.message
+        ));
+    }
     questions
 }
 
@@ -809,11 +839,9 @@ fn generated_flow_manifest(manifest: &FlowManifest, surfaces: &[ProductSurface])
     generated
 }
 
-fn discover_surfaces(
-    manifest: &FlowManifest,
-    manifest_path: &Path,
-) -> Result<Vec<DiscoveredSurface>> {
+fn discover_surfaces(manifest: &FlowManifest, manifest_path: &Path) -> Result<SurfaceDiscovery> {
     let mut surfaces = BTreeMap::new();
+    let mut diagnostics = Vec::new();
     for state in &manifest.flow.states {
         surfaces.insert(
             state.path.clone(),
@@ -853,14 +881,19 @@ fn discover_surfaces(
                 });
         }
     } else if let Some(base_url) = &manifest.target.base_url {
-        for discovered in discover_live_base_url_surfaces(base_url)? {
+        let live = discover_live_base_url_surfaces(base_url)?;
+        diagnostics.extend(live.diagnostics);
+        for discovered in live.surfaces {
             surfaces
                 .entry(discovered.route.clone())
                 .or_insert(discovered);
         }
     }
 
-    Ok(surfaces.into_values().collect())
+    Ok(SurfaceDiscovery {
+        surfaces: surfaces.into_values().collect(),
+        diagnostics,
+    })
 }
 
 fn html_files(root: &Path) -> Result<Vec<PathBuf>> {

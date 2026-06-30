@@ -1,6 +1,7 @@
-use super::{DiscoveredSurface, html_title_from_text, route_to_id};
+use super::{DiscoveredSurface, SurfaceDiscovery, html_title_from_text, route_to_id};
+use crate::model::DiscoveryDiagnostic;
 use crate::{AllieError, Result};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
@@ -9,29 +10,34 @@ const LIVE_DISCOVERY_MAX_PAGES: usize = 24;
 const LIVE_DISCOVERY_MAX_BYTES: usize = 1024 * 1024;
 const LIVE_DISCOVERY_TIMEOUT_MS: u64 = 2_000;
 
-pub(super) fn discover_live_base_url_surfaces(base_url: &str) -> Result<Vec<DiscoveredSurface>> {
+pub(super) fn discover_live_base_url_surfaces(base_url: &str) -> Result<SurfaceDiscovery> {
     let base = LiveBaseUrl::parse(base_url)?;
-    let mut queue = vec![base.start_route.clone()];
-    let mut queued = BTreeSet::from([base.start_route.clone()]);
-    let mut visited = BTreeSet::new();
+    let mut queue = VecDeque::from([base.start_route.clone()]);
+    let mut seen = BTreeSet::from([base.start_route.clone()]);
     let mut surfaces = BTreeMap::new();
+    let mut diagnostics = Vec::new();
+    let mut budget_exhausted = false;
 
-    for route in discover_sitemap_routes(&base)? {
-        if queued.len() >= LIVE_DISCOVERY_MAX_PAGES {
+    for route in discover_sitemap_routes(&base, &mut diagnostics)? {
+        if !enqueue_route(&mut queue, &mut seen, route) {
+            budget_exhausted = true;
             break;
-        }
-        if queued.insert(route.clone()) {
-            queue.push(route);
         }
     }
 
-    while let Some(route) = queue.pop() {
-        if visited.len() >= LIVE_DISCOVERY_MAX_PAGES || !visited.insert(route.clone()) {
-            continue;
-        }
+    while let Some(route) = queue.pop_front() {
         let page = match fetch_live_html_page(&base, &route) {
             Ok(Some(page)) => page,
-            Ok(None) | Err(AllieError::Io { .. }) => continue,
+            Ok(None) => continue,
+            Err(error @ AllieError::Io { .. }) => {
+                diagnostics.push(live_diagnostic(
+                    "route_fetch",
+                    Some(route.clone()),
+                    Some(base.url_for_route(&route)),
+                    error.to_string(),
+                ));
+                continue;
+            }
             Err(source) => return Err(source),
         };
         surfaces.insert(
@@ -47,18 +53,31 @@ pub(super) fn discover_live_base_url_surfaces(base_url: &str) -> Result<Vec<Disc
             },
         );
         for href in html_links(&page.body) {
-            if visited.len() + queued.len() >= LIVE_DISCOVERY_MAX_PAGES {
+            let Some(next_route) = resolve_live_link(&base, &route, &href) else {
+                continue;
+            };
+            if !enqueue_route(&mut queue, &mut seen, next_route) {
+                budget_exhausted = true;
                 break;
-            }
-            if let Some(next_route) = resolve_live_link(&base, &route, &href)
-                && queued.insert(next_route.clone())
-            {
-                queue.push(next_route);
             }
         }
     }
 
-    Ok(surfaces.into_values().collect())
+    if budget_exhausted {
+        diagnostics.push(live_diagnostic(
+            "route_budget",
+            None,
+            Some(base.url_for_route(&base.start_route)),
+            format!(
+                "live discovery stopped after reaching the {LIVE_DISCOVERY_MAX_PAGES}-route budget"
+            ),
+        ));
+    }
+
+    Ok(SurfaceDiscovery {
+        surfaces: surfaces.into_values().collect(),
+        diagnostics,
+    })
 }
 
 #[derive(Debug)]
@@ -84,7 +103,7 @@ impl LiveBaseUrl {
             .unwrap_or((rest, "/".to_string()));
         let (host, port) = parse_host_port(authority)?;
         Ok(Self {
-            host,
+            host: host.to_ascii_lowercase(),
             port,
             start_route: normalize_live_route(&path),
         })
@@ -142,6 +161,33 @@ fn parse_host_port(authority: &str) -> Result<(String, u16)> {
         ));
     }
     Ok((host, port))
+}
+
+fn enqueue_route(queue: &mut VecDeque<String>, seen: &mut BTreeSet<String>, route: String) -> bool {
+    if seen.contains(&route) {
+        return true;
+    }
+    if seen.len() >= LIVE_DISCOVERY_MAX_PAGES {
+        return false;
+    }
+    seen.insert(route.clone());
+    queue.push_back(route);
+    true
+}
+
+fn live_diagnostic(
+    source: &str,
+    route: Option<String>,
+    url: Option<String>,
+    message: String,
+) -> DiscoveryDiagnostic {
+    DiscoveryDiagnostic {
+        source: format!("base-url-crawl:{source}"),
+        severity: "warning".to_string(),
+        route,
+        url,
+        message,
+    }
 }
 
 fn fetch_live_response(base: &LiveBaseUrl, route: &str) -> Result<Option<LiveHttpResponse>> {
@@ -230,10 +276,22 @@ fn fetch_live_html_page(base: &LiveBaseUrl, route: &str) -> Result<Option<LiveHt
     }))
 }
 
-fn discover_sitemap_routes(base: &LiveBaseUrl) -> Result<Vec<String>> {
+fn discover_sitemap_routes(
+    base: &LiveBaseUrl,
+    diagnostics: &mut Vec<DiscoveryDiagnostic>,
+) -> Result<Vec<String>> {
     let response = match fetch_live_response(base, "/sitemap.xml") {
         Ok(Some(response)) => response,
-        Ok(None) | Err(AllieError::Io { .. }) => return Ok(Vec::new()),
+        Ok(None) => return Ok(Vec::new()),
+        Err(error @ AllieError::Io { .. }) => {
+            diagnostics.push(live_diagnostic(
+                "sitemap_fetch",
+                Some("/sitemap.xml".to_string()),
+                Some(base.url_for_route("/sitemap.xml")),
+                error.to_string(),
+            ));
+            return Ok(Vec::new());
+        }
         Err(source) => return Err(source),
     };
     if response.content_type().is_some_and(|content_type| {

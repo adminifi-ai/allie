@@ -96,6 +96,13 @@ pub(crate) fn start_live_discovery_site() -> LiveDiscoverySite {
     }
 }
 
+pub(crate) fn unused_local_base_url() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    format!("http://{addr}")
+}
+
 fn serve_live_discovery_connection(mut stream: TcpStream) {
     let mut request = [0_u8; 2048];
     let size = stream.read(&mut request).unwrap_or(0);

@@ -47,7 +47,9 @@ route discovery before generating the flow plan and product map. The current
 live crawler supports `http://` targets and static HTML routes; HTTPS/TLS
 crawling, authenticated crawling, JavaScript-driven navigation discovery, and
 model review depth are separate follow-on layers. Manifest-listed states remain
-authoritative and merge with routes found from live links.
+authoritative and merge with routes found from live links. When a live route or
+sitemap cannot be fetched, Allie keeps manifest-declared states and records the
+miss in discovery diagnostics instead of silently implying complete coverage.
 
 `allie verify` is the primary operator command for consuming apps. It composes
 the existing discovery, generated-flow, product-map, evidence-run, WCAG report,
