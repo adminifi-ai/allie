@@ -18,6 +18,8 @@ import { chromium } from 'playwright';
 
 const REQUEST_SCHEMA = 'allie.agentic.request.v0';
 const RESPONSE_SCHEMA = 'allie.agentic.response.v0';
+const MAX_REVIEW_ACTIONS = 3;
+const ALLOWED_REVIEW_KEYS = new Set(['Tab', 'Escape', 'Enter', 'Space', 'ArrowDown', 'ArrowUp']);
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
 
@@ -48,7 +50,8 @@ async function run(request) {
     browser = await chromium.launch({ headless: true });
 
     // Capture the visual evidence the reviewer (and the model) will use.
-    const media = await captureEvidence(browser, target.baseUrl, request.browser, artifactsDir, errors);
+    const contextOptions = browserContextOptions(request.browser);
+    const media = await captureEvidence(browser, target.baseUrl, contextOptions, artifactsDir, errors);
 
     const groups = groupCriteria(request.criteria || []);
     const maxCalls = request.model.max_calls ?? 4;
@@ -58,20 +61,27 @@ async function run(request) {
 
     for (const group of groups) {
       if (group.items.length === 0) continue;
-      const groupMedia = mediaForGroup(group.kind, media);
+      let groupMedia = mediaForGroup(group.kind, media);
       // The model sees the full page plus criterion-specific screenshots/clips;
       // the report attaches only criterion-specific media since the full page
       // already shows once in the report's "what Allie inspected" gallery and
       // motion frames are model-only (the clip is friendlier for a human) —
       // avoids inlining the same or near-identical screenshots dozens of times.
-      const reportMedia = groupMedia.filter((entry) => entry !== media.fullpage && !entry.modelOnly);
       const verdicts = {};
       for (const batch of chunk(group.items, 8)) {
         if (apiKey && calls < maxCalls) {
           try {
-            const result = await assessGroup(request.model, apiKey, { ...group, items: batch }, groupMedia, errors);
+            const result = await assessGroupWithReviewLoop(request.model, apiKey, { ...group, items: batch }, groupMedia, {
+              browser,
+              baseUrl: target.baseUrl,
+              contextOptions,
+              artifactsDir,
+              errors,
+              budget: maxCalls - calls,
+            });
             Object.assign(verdicts, result.verdicts);
-            calls += 1;
+            groupMedia = result.media;
+            calls += result.calls;
             usage.prompt_tokens += result.usage?.prompt_tokens || 0;
             usage.completion_tokens += result.usage?.completion_tokens || 0;
           } catch (error) {
@@ -83,6 +93,7 @@ async function run(request) {
           errors.push(`model-call budget (${maxCalls}) exhausted before finishing ${group.kind} group`);
         }
       }
+      const reportMedia = groupMedia.filter((entry) => entry !== media.fullpage && !entry.modelOnly);
       for (const item of group.items) {
         const verdict = verdicts[item.obligation];
         // Never fabricate a pass/fail: a missing/unparseable verdict stays
@@ -128,13 +139,16 @@ async function run(request) {
 
 // --- evidence capture -------------------------------------------------------
 
-async function captureEvidence(browser, baseUrl, browserSettings, artifactsDir, errors) {
-  const contextOptions = {
+function browserContextOptions(browserSettings) {
+  return {
     viewport: browserSettings.viewport,
     colorScheme: browserSettings.color_scheme,
     reducedMotion: browserSettings.reduced_motion,
     locale: browserSettings.locale,
   };
+}
+
+async function captureEvidence(browser, baseUrl, contextOptions, artifactsDir, errors) {
   const media = { fullpage: null, focus: [], focusClip: null, motionClip: null, motionFrames: [] };
 
   // Full-page screenshot.
@@ -240,10 +254,98 @@ function mediaForGroup(kind, media) {
 
 // --- model boundary ---------------------------------------------------------
 
+async function assessGroupWithReviewLoop(model, apiKey, group, groupMedia, context) {
+  let media = groupMedia;
+  let finalResult = { verdicts: {}, usage: {}, actions: [] };
+  const usage = { prompt_tokens: 0, completion_tokens: 0 };
+  let calls = 0;
+
+  for (let attempt = 0; attempt < 2 && calls < context.budget; attempt += 1) {
+    const result = await assessGroup(model, apiKey, { ...group, rejudge_attempt: attempt }, media, context.errors);
+    calls += 1;
+    finalResult = result;
+    usage.prompt_tokens += result.usage?.prompt_tokens || 0;
+    usage.completion_tokens += result.usage?.completion_tokens || 0;
+
+    const requestedActionCount = Array.isArray(result.actions) ? result.actions.length : 0;
+    const actions = safeReviewActions(result.actions);
+    if (requestedActionCount > 0 && actions.length === 0) {
+      context.errors.push(`model requested unsupported review actions for ${group.kind}; ignored`);
+    }
+    if (attempt === 0 && actions.length > 0 && calls >= context.budget) {
+      context.errors.push(`model requested review actions for ${group.kind}, but model-call budget was exhausted`);
+    }
+    if (attempt === 0 && actions.length > 0 && calls < context.budget) {
+      const actionMedia = await captureReviewActionMedia({
+        ...context,
+        groupKind: group.kind,
+        attempt: attempt + 1,
+        actions,
+      });
+      if (actionMedia.length > 0) {
+        media = [...media, ...actionMedia];
+        continue;
+      }
+    }
+    break;
+  }
+
+  return { verdicts: finalResult.verdicts, usage, calls, media };
+}
+
+async function captureReviewActionMedia({ browser, baseUrl, contextOptions, artifactsDir, errors, groupKind, attempt, actions }) {
+  let context = null;
+  try {
+    context = await browser.newContext(contextOptions);
+    const page = await context.newPage();
+    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    for (const action of actions) {
+      if (action.type === 'press_key') {
+        await page.keyboard.press(action.key);
+        await page.waitForTimeout(180);
+      } else if (action.type === 'wait_ms') {
+        await page.waitForTimeout(action.ms);
+      }
+    }
+    const actionPath = path.join(artifactsDir, `review-action-${groupKind}-${attempt}.png`);
+    await page.screenshot({ path: actionPath });
+    return [{
+      kind: 'screenshot',
+      caption: `Review action ${attempt}: ${actionSummary(actions)}`,
+      absPath: actionPath,
+    }];
+  } catch (error) {
+    errors.push(`review action for ${groupKind} failed: ${error.message}`);
+    return [];
+  } finally {
+    if (context) await context.close().catch(() => {});
+  }
+}
+
+function safeReviewActions(actions) {
+  if (!Array.isArray(actions)) return [];
+  const safe = [];
+  for (const action of actions) {
+    if (safe.length >= MAX_REVIEW_ACTIONS) break;
+    if (action?.type === 'press_key' && ALLOWED_REVIEW_KEYS.has(action.key)) {
+      safe.push({ type: 'press_key', key: action.key, reason: String(action.reason || '').slice(0, 120) });
+    } else if (action?.type === 'wait_ms' && Number.isFinite(action.ms)) {
+      safe.push({ type: 'wait_ms', ms: Math.max(100, Math.min(2000, Math.trunc(action.ms))) });
+    }
+  }
+  return safe;
+}
+
+function actionSummary(actions) {
+  return actions
+    .map((action) => (action.type === 'press_key' ? `press ${action.key}` : `wait ${action.ms}ms`))
+    .join(', ');
+}
+
 async function assessGroup(model, apiKey, group, groupMedia, errors) {
-  const imageMedia = groupMedia.filter((entry) => entry.kind === 'screenshot').slice(0, 4);
+  const imageMedia = modelImageMedia(groupMedia);
   const videoMedia = groupMedia.filter(isVideoMedia).slice(0, 2);
-  const content = [{ type: 'text', text: buildPrompt(group) }];
+  const content = [{ type: 'text', text: buildPrompt(group, [...imageMedia, ...videoMedia]) }];
   for (const entry of imageMedia) {
     content.push({
       type: 'image_url',
@@ -291,7 +393,14 @@ async function assessGroup(model, apiKey, group, groupMedia, errors) {
   if (Object.keys(verdicts).length === 0) {
     errors.push(`model returned no parseable assessments for ${group.kind}`);
   }
-  return { verdicts, usage: json.usage };
+  return { verdicts, actions: parsed?.actions || [], usage: json.usage };
+}
+
+function modelImageMedia(groupMedia) {
+  const screenshots = groupMedia.filter((entry) => entry.kind === 'screenshot');
+  const actionScreenshots = screenshots.filter((entry) => entry.caption.startsWith('Review action'));
+  const baselineScreenshots = screenshots.filter((entry) => !entry.caption.startsWith('Review action'));
+  return [...actionScreenshots, ...baselineScreenshots].slice(0, 4);
 }
 
 async function mediaDataUrl(absPath, mimeType) {
@@ -310,9 +419,12 @@ function videoMimeType(absPath) {
   return 'video/webm';
 }
 
-function buildPrompt(group) {
+function buildPrompt(group, media = []) {
   const list = group.items
     .map((item) => `- ${item.obligation} | ${item.num} ${item.handle} (Level ${item.level}, ${item.principle})`)
+    .join('\n');
+  const mediaList = media
+    .map((entry, index) => `- media ${index + 1}: ${entry.kind} | ${entry.caption}`)
     .join('\n');
   return [
     'You are an expert WCAG 2.2 AA accessibility auditor. You are doing the job a trained human reviewer does: looking at the captured visual evidence and rendering a DEFINITIVE judgment for each success criterion.',
@@ -322,13 +434,17 @@ function buildPrompt(group) {
     '- confidence: "high" | "medium" | "low" — be honest. Low confidence is fine and is exactly how we mark a judgment call; it does NOT mean refuse to decide.',
     '- rationale: one to two sentences grounded in what you actually see.',
     '- reviewer_guidance: the exact thing a human should do to confirm or refute your verdict.',
+    'If a small browser observation would let you make a better judgment, you may request at most three review actions before the final verdict. Allowed action shapes are {"type":"press_key","key":"Tab|Escape|Enter|Space|ArrowDown|ArrowUp","reason":"..."} and {"type":"wait_ms","ms":100-2000}. Do not request clicks, typing, form submission, navigation, or mutation.',
     'Do not claim legal compliance. Be specific and visual.',
     '',
     'Criteria:',
     list,
     '',
+    'Media supplied:',
+    mediaList || '- none',
+    '',
     'Respond with ONLY a JSON object, no prose, of the form:',
-    '{"assessments":[{"obligation":"<id>","verdict":"pass|fail|inconclusive","confidence":"high|medium|low","rationale":"...","reviewer_guidance":"..."}]}',
+    '{"actions":[{"type":"press_key","key":"Tab","reason":"optional bounded observation"}],"assessments":[{"obligation":"<id>","verdict":"pass|fail|inconclusive","confidence":"high|medium|low","rationale":"...","reviewer_guidance":"..."}]}',
   ].join('\n');
 }
 
