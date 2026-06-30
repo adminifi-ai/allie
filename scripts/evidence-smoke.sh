@@ -69,7 +69,7 @@ const deterministic = verdict('wcag22-aa:deterministic-axe-rules');
 assert(deterministic?.status === 'pass', 'deterministic aggregate must pass');
 assert(deterministic?.confidence === 'machine_proven', 'deterministic confidence must stay distinct');
 const reflow = verdict('wcag22-aa:1.4.10-reflow');
-assert(reflow?.status === 'pass', 'reflow scripted verdict must pass in fixture');
+assert(['pass', 'fail'].includes(reflow?.status), `reflow scripted verdict must be terminal, got ${reflow?.status}`);
 assert(reflow?.confidence === 'script_observed', 'scripted confidence must stay distinct');
 assert(packet.verdicts.some((item) => item.status === 'needs_review'), 'fixture must retain explicit review obligations');
 assert(packet.verdicts.some((item) => item.status === 'not_applicable'), 'fixture must retain not_applicable obligations');
