@@ -2831,6 +2831,81 @@ mod tests {
     }
 
     #[test]
+    fn auth_discovery_does_not_promote_bootstrap_route_as_a_gated_state() {
+        let temp = tempdir().unwrap();
+        let discovery_dir = temp.path().join("discovery");
+        let generated_manifest = temp.path().join("generated.yml");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_cli_with_io(
+            vec![
+                "discover".to_string(),
+                "--manifest".to_string(),
+                "examples/auth-fixture-flow.yml".to_string(),
+                "--out".to_string(),
+                discovery_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let flow_plan_path = discovery_dir.join("flow-plan.json");
+        let flow_plan: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&flow_plan_path).unwrap()).unwrap();
+        let candidates = flow_plan["candidates"].as_array().unwrap();
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate["id"] == "dashboard"),
+            "discovery must keep the operator-declared gated state"
+        );
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate["path"] != "/login.html"),
+            "auth bootstrap route must not be promoted as gated coverage"
+        );
+
+        stdout.clear();
+        stderr.clear();
+        let code = run_cli_with_io(
+            vec![
+                "promote-flow".to_string(),
+                "--discovery".to_string(),
+                discovery_dir
+                    .join("discovery.json")
+                    .to_string_lossy()
+                    .to_string(),
+                "--flow-plan".to_string(),
+                flow_plan_path.to_string_lossy().to_string(),
+                "--out".to_string(),
+                generated_manifest.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let generated = FlowManifest::load(&generated_manifest).unwrap();
+        assert!(
+            generated
+                .flow
+                .states
+                .iter()
+                .any(|state| state.path == "/dashboard.html")
+        );
+        assert!(
+            generated
+                .flow
+                .states
+                .iter()
+                .all(|state| state.path != "/login.html")
+        );
+    }
+
+    #[test]
     fn discovery_and_map_cli_crawl_live_base_url_same_origin_routes() {
         let site = start_live_discovery_site();
         let temp = tempdir().unwrap();

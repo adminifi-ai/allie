@@ -96,6 +96,26 @@ control where a missing action selector records `state-step-failed` and blocks:
 .allie/runs/action-steps-negative-smoke/evidence.json
 ```
 
+`npm run auth:smoke` proves authenticated coverage through both `allie run` and
+the composed `allie verify` pipeline. It logs into the local auth fixture with
+env-sourced credentials, reaches the gated dashboard without writing the
+credential value to artifacts, proves the storageState hatch reaches the same
+route without writing the storageState path to artifacts, and runs negative
+controls that block on `auth-lost` instead of treating the HTTP-200 login wall
+as covered app content:
+
+```text
+.allie/runs/auth-smoke/evidence.json
+.allie/runs/auth-smoke-storage-state/evidence.json
+.allie/runs/auth-smoke-neg/evidence.json
+.allie/verify/auth-smoke/run/evidence.json
+.allie/verify/auth-smoke/reporters/allie-report.json
+.allie/verify/auth-smoke-storage-state/run/evidence.json
+.allie/verify/auth-smoke-storage-state/reporters/allie-report.json
+.allie/verify/auth-smoke-neg/run/evidence.json
+.allie/verify/auth-smoke-neg/reporters/allie-report.json
+```
+
 `npm run consumer:smoke` proves the portable consuming-app contract. It
 scaffolds a manifest with `allie init`, runs `allie verify` over the same
 manifest, checks that GitHub and Azure examples call the same CLI command, and

@@ -312,9 +312,11 @@ cargo run --locked -- release --packet .allie/runs/latest/evidence.json --out .a
 The worker smoke proves Playwright plus axe can inspect the checked-in fixture.
 The evidence smoke leaves a stable receipt under `.allie/runs/v0-smoke/`. The
 auth smoke logs into the local auth fixture, proves the gated route is reached
-with no credential value on disk, and proves a session-less run blocks instead
-of auditing the login wall (`.allie/runs/auth-smoke{,-neg}/`). The
-consumer smoke proves `allie init` and `allie verify` produce JSON, HTML,
+with no credential value on disk through both `allie run` and `allie verify`,
+proves storageState reaches the same gated route, and proves session-less runs
+and verifies block instead of auditing the login wall
+(`.allie/runs/auth-smoke*` and `.allie/verify/auth-smoke*`). The consumer smoke
+proves `allie init` and `allie verify` produce JSON, HTML,
 Markdown, JUnit, and SARIF reporters from the same local manifest contract. The
 release smoke projects that packet into `.allie/releases/v0-smoke/`. The final
 two commands are the V0 live oracle and release projection, leaving inspectable

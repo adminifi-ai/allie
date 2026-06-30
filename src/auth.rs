@@ -23,7 +23,9 @@ use serde::{Deserialize, Serialize};
 /// Optional authentication recipe attached to a `FlowManifest`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct AuthFlow {
-    /// Route the login recipe starts on (e.g. `/login.html`). Worker-only.
+    /// Route the login recipe starts on (e.g. `/login.html`). Discovery also
+    /// treats this as bootstrap chrome rather than an audit surface unless the
+    /// operator explicitly lists it in `flow.states`.
     #[serde(default)]
     pub start_path: Option<String>,
     /// Ordered login steps. Empty is only valid alongside `storage_state_env`.
@@ -88,6 +90,12 @@ impl AuthAssert {
 }
 
 impl AuthFlow {
+    /// Returns true when `route` is the authentication bootstrap route, not an
+    /// application surface that discovery should promote by itself.
+    pub(crate) fn is_bootstrap_route(&self, route: &str) -> bool {
+        self.start_path.as_deref().is_some_and(|path| path == route)
+    }
+
     /// Env-var names referenced by `fill` steps (the credentials this flow needs
     /// in the environment). Never includes any value.
     pub fn referenced_value_envs(&self) -> Vec<&str> {

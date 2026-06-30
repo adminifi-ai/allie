@@ -1,7 +1,8 @@
 #!/bin/sh
-# Authenticated-audit smoke (ticket 023, epic 015 slice 1).
+# Authenticated-audit smoke (epic 015 / ticket 023).
 #
-# Proves three things, with no real secret on disk:
+# Proves the same auth contract through both `allie run` and `allie verify`,
+# with no real secret on disk:
 #   POSITIVE  — log into the fixture, reach the gated /dashboard.html, record the
 #               per-state auth assertion as satisfied (final URL is the gated
 #               route AND #dashboard present), packet passes.
@@ -20,11 +21,66 @@ POS_DIR=.allie/runs/auth-smoke
 STATE_DIR=.allie/runs/auth-smoke-storage-state
 STATE_FILE=.allie/runs/auth-smoke-storage-state.json
 NEG_DIR=.allie/runs/auth-smoke-neg
+VERIFY_POS_DIR=.allie/verify/auth-smoke
+VERIFY_STATE_DIR=.allie/verify/auth-smoke-storage-state
+VERIFY_NEG_DIR=.allie/verify/auth-smoke-neg
 SECRET=allie-fixture-pass
 
-rm -rf "$POS_DIR" "$STATE_DIR" "$NEG_DIR"
+rm -rf "$POS_DIR" "$STATE_DIR" "$NEG_DIR" "$VERIFY_POS_DIR" "$VERIFY_STATE_DIR" "$VERIFY_NEG_DIR"
 rm -f "$STATE_FILE"
 trap 'rm -f "$STATE_FILE"' EXIT
+
+assert_dashboard_packet() {
+  PACKET_PATH="$1" LABEL="$2" node -e '
+const fs = require("fs");
+const p = JSON.parse(fs.readFileSync(process.env.PACKET_PATH, "utf8"));
+const label = process.env.LABEL;
+if (!["pass", "approved", "passed"].includes(p.summary.status)) {
+  throw new Error(`${label} packet status not approved/passed: ${p.summary.status}`);
+}
+const dashboard = p.coverage.state_metadata.find((s) => s.id === "dashboard");
+if (!dashboard) throw new Error(`${label} missing dashboard state`);
+if (!dashboard.url.endsWith("dashboard.html")) {
+  throw new Error(`${label} did not land on dashboard.html: ${dashboard.url}`);
+}
+if (dashboard.state_errors.length !== 0) {
+  throw new Error(`${label} dashboard state_errors not empty: ${JSON.stringify(dashboard.state_errors)}`);
+}
+'
+}
+
+assert_auth_block_packet() {
+  PACKET_PATH="$1" LABEL="$2" node -e '
+const fs = require("fs");
+const p = JSON.parse(fs.readFileSync(process.env.PACKET_PATH, "utf8"));
+const label = process.env.LABEL;
+if (["pass", "approved", "passed"].includes(p.summary.status)) {
+  throw new Error(`${label} must not pass: ${p.summary.status}`);
+}
+if (!p.summary.failure_class) throw new Error(`${label} failure_class not set`);
+const dashboard = p.coverage.state_metadata.find((s) => s.id === "dashboard");
+if (!dashboard) throw new Error(`${label} missing dashboard state`);
+if (!dashboard.state_errors.some((e) => e.includes("auth"))) {
+  throw new Error(`${label} dashboard missing an auth state_error: ${JSON.stringify(dashboard.state_errors)}`);
+}
+'
+}
+
+assert_verify_status() {
+  SUMMARY_PATH="$1" EXPECTED="$2" LABEL="$3" node -e '
+const fs = require("fs");
+const report = JSON.parse(fs.readFileSync(process.env.SUMMARY_PATH, "utf8"));
+const status = report.status;
+const label = process.env.LABEL;
+if (process.env.EXPECTED === "not_blocked") {
+  if (!["approved", "needs_review"].includes(status)) {
+    throw new Error(`${label} verify status should be approved/needs_review, got ${status}`);
+  }
+} else if (status !== "blocked") {
+  throw new Error(`${label} verify status should be blocked, got ${status}`);
+}
+'
+}
 
 # --- POSITIVE -------------------------------------------------------------
 ALLIE_AUTH_FIXTURE_USER=allie@example.com \
@@ -33,21 +89,7 @@ ALLIE_AUTH_FIXTURE_PASSWORD="$SECRET" \
     --manifest examples/auth-fixture-flow.yml \
     --out "$POS_DIR"
 
-POS_DIR="$POS_DIR" node -e "
-const fs = require('fs');
-const p = JSON.parse(fs.readFileSync(process.env.POS_DIR + '/evidence.json', 'utf8'));
-if (!['pass', 'approved', 'passed'].includes(p.summary.status)) {
-  throw new Error('positive packet status not approved/passed: ' + p.summary.status);
-}
-const dashboard = p.coverage.state_metadata.find((s) => s.id === 'dashboard');
-if (!dashboard) throw new Error('positive run missing dashboard state');
-if (!dashboard.url.endsWith('dashboard.html')) {
-  throw new Error('dashboard state did not land on dashboard.html: ' + dashboard.url);
-}
-if (dashboard.state_errors.length !== 0) {
-  throw new Error('dashboard state_errors not empty: ' + JSON.stringify(dashboard.state_errors));
-}
-"
+assert_dashboard_packet "$POS_DIR/evidence.json" "positive run"
 
 # --- SECRETS: the credential value must appear in NO file under POS_DIR ----
 # Scope: the positive run, where login succeeds and the audited DOM is the
@@ -90,21 +132,7 @@ ALLIE_AUTH_FIXTURE_STORAGE_STATE="$STATE_FILE" \
     --manifest examples/auth-fixture-storage-state-flow.yml \
     --out "$STATE_DIR"
 
-STATE_DIR="$STATE_DIR" node -e "
-const fs = require('fs');
-const p = JSON.parse(fs.readFileSync(process.env.STATE_DIR + '/evidence.json', 'utf8'));
-if (!['pass', 'approved', 'passed'].includes(p.summary.status)) {
-  throw new Error('storageState packet status not approved/passed: ' + p.summary.status);
-}
-const dashboard = p.coverage.state_metadata.find((s) => s.id === 'dashboard');
-if (!dashboard) throw new Error('storageState run missing dashboard state');
-if (!dashboard.url.endsWith('dashboard.html')) {
-  throw new Error('storageState dashboard did not land on dashboard.html: ' + dashboard.url);
-}
-if (dashboard.state_errors.length !== 0) {
-  throw new Error('storageState dashboard state_errors not empty: ' + JSON.stringify(dashboard.state_errors));
-}
-"
+assert_dashboard_packet "$STATE_DIR/evidence.json" "storageState run"
 grep -q "ALLIE_AUTH_FIXTURE_STORAGE_STATE" "$STATE_DIR/worker-request.json"
 if grep -rIn "$STATE_FILE" "$STATE_DIR" >/dev/null 2>&1; then
   echo "FAIL: storageState file path leaked into $STATE_DIR:"
@@ -129,21 +157,66 @@ if [ "$neg_status" -eq 0 ]; then
   exit 1
 fi
 
-NEG_DIR="$NEG_DIR" node -e "
-const fs = require('fs');
-const p = JSON.parse(fs.readFileSync(process.env.NEG_DIR + '/evidence.json', 'utf8'));
-if (['pass', 'approved', 'passed'].includes(p.summary.status)) {
-  throw new Error('negative control must not pass: ' + p.summary.status);
-}
-if (!p.summary.failure_class) throw new Error('negative control failure_class not set');
-const dashboard = p.coverage.state_metadata.find((s) => s.id === 'dashboard');
-if (!dashboard) throw new Error('negative run missing dashboard state');
-if (!dashboard.state_errors.some((e) => e.includes('auth'))) {
-  throw new Error('dashboard state missing an auth state_error: ' + JSON.stringify(dashboard.state_errors));
-}
-"
+assert_auth_block_packet "$NEG_DIR/evidence.json" "negative run"
+
+# --- VERIFY: POSITIVE -----------------------------------------------------
+ALLIE_AUTH_FIXTURE_USER=allie@example.com \
+ALLIE_AUTH_FIXTURE_PASSWORD="$SECRET" \
+  cargo run --locked -- verify \
+    --manifest examples/auth-fixture-flow.yml \
+    --out "$VERIFY_POS_DIR" \
+    --project-root fixtures/auth
+
+assert_dashboard_packet "$VERIFY_POS_DIR/run/evidence.json" "positive verify"
+assert_verify_status "$VERIFY_POS_DIR/reporters/allie-report.json" not_blocked "positive verify"
+grep -q "ALLIE_AUTH_FIXTURE_PASSWORD" "$VERIFY_POS_DIR/run/worker-request.json"
+if grep -rIn "$SECRET" "$VERIFY_POS_DIR" >/dev/null 2>&1; then
+  echo "FAIL: credential value leaked into $VERIFY_POS_DIR:"
+  grep -rIn "$SECRET" "$VERIFY_POS_DIR" || true
+  exit 1
+fi
+
+# --- VERIFY: STORAGESTATE -------------------------------------------------
+ALLIE_AUTH_FIXTURE_STORAGE_STATE="$STATE_FILE" \
+  cargo run --locked -- verify \
+    --manifest examples/auth-fixture-storage-state-flow.yml \
+    --out "$VERIFY_STATE_DIR" \
+    --project-root fixtures/auth
+
+assert_dashboard_packet "$VERIFY_STATE_DIR/run/evidence.json" "storageState verify"
+assert_verify_status "$VERIFY_STATE_DIR/reporters/allie-report.json" not_blocked "storageState verify"
+grep -q "ALLIE_AUTH_FIXTURE_STORAGE_STATE" "$VERIFY_STATE_DIR/run/worker-request.json"
+if grep -rIn "$STATE_FILE" "$VERIFY_STATE_DIR" >/dev/null 2>&1; then
+  echo "FAIL: storageState file path leaked into $VERIFY_STATE_DIR:"
+  grep -rIn "$STATE_FILE" "$VERIFY_STATE_DIR" || true
+  exit 1
+fi
+
+# --- VERIFY: NEGATIVE CONTROL --------------------------------------------
+set +e
+ALLIE_AUTH_FIXTURE_USER=allie@example.com \
+ALLIE_AUTH_FIXTURE_PASSWORD=wrong-pass \
+  cargo run --locked -- verify \
+    --manifest examples/auth-fixture-flow-negative.yml \
+    --out "$VERIFY_NEG_DIR" \
+    --project-root fixtures/auth
+verify_neg_status=$?
+set -e
+if [ "$verify_neg_status" -eq 0 ]; then
+  echo "FAIL: negative verify passed but must block (HTTP-200 login wall)."
+  exit 1
+fi
+
+assert_auth_block_packet "$VERIFY_NEG_DIR/run/evidence.json" "negative verify"
+assert_verify_status "$VERIFY_NEG_DIR/reporters/allie-report.json" blocked "negative verify"
 
 test -f "$POS_DIR/evidence.json"
 test -f "$STATE_DIR/evidence.json"
 test -f "$NEG_DIR/evidence.json"
-echo "auth smoke passed (positive reached gated route, storageState reached gated route, secrets clean, negative blocked)"
+test -f "$VERIFY_POS_DIR/run/evidence.json"
+test -f "$VERIFY_POS_DIR/reporters/allie-report.json"
+test -f "$VERIFY_STATE_DIR/run/evidence.json"
+test -f "$VERIFY_STATE_DIR/reporters/allie-report.json"
+test -f "$VERIFY_NEG_DIR/run/evidence.json"
+test -f "$VERIFY_NEG_DIR/reporters/allie-report.json"
+echo "auth smoke passed (run+verify reached gated route, storageState reached gated route, secrets clean, negatives blocked)"
