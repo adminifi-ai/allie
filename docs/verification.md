@@ -29,6 +29,10 @@ CI should archive the whole `.allie/verify/latest` directory, not just
 `reporters/`, because `reporters/allie-report.html` links to sibling map,
 evidence, WCAG report, and release artifacts.
 
+The repository CI workflow is intentionally thin: `.github/workflows/ci.yml`
+installs Rust, Node, npm dependencies, and Playwright, then calls the same
+repo-owned `npm run verify` contract operators run locally.
+
 ## Gate
 
 Run the full local gate:
@@ -42,6 +46,8 @@ Equivalent expanded commands:
 ```sh
 cargo fmt --check
 cargo test --locked
+cargo clippy --locked -- -D warnings
+npm run secrets:smoke
 npm run worker:smoke
 npm run evidence:smoke
 npm run action:smoke
@@ -57,6 +63,13 @@ npm run size:smoke
 ```
 
 ## Expected Evidence
+
+`cargo clippy --locked -- -D warnings` keeps the Rust-first core warning-free
+under the same lockfile as the tests.
+
+`npm run secrets:smoke` runs the repo-owned secret scan self-test and then scans
+tracked source, nonignored worktree files, the current commit message, and the
+GitHub event payload when present. Findings are printed with redacted matches.
 
 `npm run worker:smoke` proves the Node worker can run Playwright plus axe. It
 leaves:
@@ -81,6 +94,20 @@ writer work together. It leaves:
 The expected happy-path packet summary is `status: pass`, `exit_code: 0`,
 one captured state, and artifact types `axe_json`, `screenshot`, and
 `html_report`.
+
+`npm run visibility:smoke` proves a captured packet can be mapped and rendered
+into the product-map, surface-map, WCAG report, and markdown summary visibility
+artifacts:
+
+```text
+.allie/maps/v0-smoke/product-map.json
+.allie/maps/v0-smoke/surface-map.html
+.allie/maps/v0-smoke/agent-runner-receipt.json
+.allie/maps/v0-smoke/generated-flow.yml
+.allie/reports/v0-smoke/compliance-report.json
+.allie/reports/v0-smoke/compliance-report.html
+.allie/reports/v0-smoke/summary.md
+```
 
 `npm run action:smoke` proves manifest state setup actions execute before
 evidence capture. It clicks open the workbench fixture menu, waits for the panel,
@@ -116,6 +143,17 @@ as covered app content:
 .allie/verify/auth-smoke-neg/reporters/allie-report.json
 ```
 
+`npm run coverage:smoke` proves the WCAG 2.2 AA obligation ledger stays a
+55-success-criterion surface matrix, keeps supporting checks out of the
+denominator, and requires provenance on terminal cells:
+
+```text
+.allie/runs/coverage-matrix-smoke/evidence.json
+.allie/reports/coverage-matrix-smoke/compliance-report.json
+.allie/reports/coverage-matrix-smoke/compliance-report.html
+.allie/reports/coverage-matrix-smoke/summary.md
+```
+
 `npm run consumer:smoke` proves the portable consuming-app contract. It
 scaffolds a manifest with `allie init`, runs `allie verify` over the same
 manifest, checks that GitHub and Azure examples call the same CLI command, and
@@ -138,6 +176,12 @@ leaves:
 .allie/consumer-contract-smoke/reporters/allie.sarif
 ```
 
+`npm run consumer-cwd:smoke` proves the installed/debug binary can run from a
+foreign consumer repository working directory while still handing the browser
+worker absolute request, response, and artifact paths. It uses a temporary
+consumer checkout and expects one captured state with zero infrastructure
+failures.
+
 `npm run release:smoke` proves the packet can drive release decisions without a
 second status model. It reads `.allie/runs/v0-smoke/evidence.json` and leaves:
 
@@ -151,6 +195,11 @@ The expected V0 fixture decision is `needs_review` with a neutral GitHub check:
 deterministic evidence passed, but keyboard/focus/zoom/reduced-motion and human
 assistive-technology obligations are still marked `not_tested` or
 `needs_review`.
+
+`npm run agentic:smoke` proves the agentic review gateway launches the browser,
+captures media, and returns a well-formed inconclusive assessment when no model
+API key is present. This is the offline graceful-degradation guard; live model
+behavior is covered by real `verify` and workbench runs.
 
 `npm run autonomous:smoke` proves the autonomous workbench path. It leaves:
 
@@ -201,6 +250,10 @@ degraded `inconclusive` assessments without fabricating pass/fail verdicts. A
 separate synthetic worker-error path proves agentic worker infrastructure
 failures fail the `review` step before report/release instead of being recorded
 as completed advisory review.
+
+`npm run size:smoke` enforces the Rust module-size ratchet. No `src/*.rs` file
+may exceed the current cap; when the gate fails, extract a cohesive module
+instead of raising the cap.
 
 ## Failure Meanings
 
