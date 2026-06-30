@@ -19,7 +19,8 @@ import { chromium } from 'playwright';
 const REQUEST_SCHEMA = 'allie.agentic.request.v0';
 const RESPONSE_SCHEMA = 'allie.agentic.response.v0';
 const MAX_REVIEW_ACTIONS = 3;
-const ALLOWED_REVIEW_KEYS = new Set(['Tab', 'Escape', 'Enter', 'Space', 'ArrowDown', 'ArrowUp']);
+const MAX_MODEL_RETRIES = 1;
+const ALLOWED_REVIEW_KEYS = new Set(['Tab']);
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
 
@@ -49,71 +50,62 @@ async function run(request) {
     fixtureServer = target.server;
     browser = await chromium.launch({ headless: true });
 
-    // Capture the visual evidence the reviewer (and the model) will use.
     const contextOptions = browserContextOptions(request.browser);
-    const media = await captureEvidence(browser, target.baseUrl, contextOptions, artifactsDir, errors);
+    const surfaces = reviewSurfaces(request, target.baseUrl);
+    const surfaceEvidence = [];
+    for (const surface of surfaces) {
+      surfaceEvidence.push(await captureEvidenceWithRetry(browser, surface, contextOptions, artifactsDir, errors));
+    }
 
     const groups = groupCriteria(request.criteria || []);
     const maxCalls = request.model.max_calls ?? 4;
     let calls = 0;
     const usage = { prompt_tokens: 0, completion_tokens: 0 };
-    const assessments = [];
+    const assessmentResults = new Map();
 
     for (const group of groups) {
       if (group.items.length === 0) continue;
-      let groupMedia = mediaForGroup(group.kind, media);
-      // The model sees the full page plus criterion-specific screenshots/clips;
-      // the report attaches only criterion-specific media since the full page
-      // already shows once in the report's "what Allie inspected" gallery and
-      // motion frames are model-only (the clip is friendlier for a human) —
-      // avoids inlining the same or near-identical screenshots dozens of times.
-      const verdicts = {};
-      for (const batch of chunk(group.items, 8)) {
-        if (apiKey && calls < maxCalls) {
-          try {
-            const result = await assessGroupWithReviewLoop(request.model, apiKey, { ...group, items: batch }, groupMedia, {
-              browser,
-              baseUrl: target.baseUrl,
-              contextOptions,
-              artifactsDir,
-              errors,
-              budget: maxCalls - calls,
-            });
-            Object.assign(verdicts, result.verdicts);
-            groupMedia = result.media;
-            calls += result.calls;
-            usage.prompt_tokens += result.usage?.prompt_tokens || 0;
-            usage.completion_tokens += result.usage?.completion_tokens || 0;
-          } catch (error) {
-            errors.push(`model call for ${group.kind} failed: ${error.message}`);
+      for (const evidence of surfaceEvidence) {
+        let groupMedia = mediaForGroup(group.kind, evidence);
+        for (const batch of chunk(group.items, 8)) {
+          const verdicts = {};
+          if (apiKey && calls < maxCalls) {
+            try {
+              const result = await assessGroupWithReviewLoop(request.model, apiKey, { ...group, items: batch }, groupMedia, {
+                browser,
+                surface: evidence.surface,
+                contextOptions,
+                artifactsDir,
+                errors,
+                budget: maxCalls - calls,
+              });
+              Object.assign(verdicts, result.verdicts);
+              groupMedia = result.media;
+              calls += result.calls;
+              usage.prompt_tokens += result.usage?.prompt_tokens || 0;
+              usage.completion_tokens += result.usage?.completion_tokens || 0;
+            } catch (error) {
+              calls += error.modelCalls || 0;
+              errors.push(`model call for ${group.kind} on ${evidence.surface.id} failed: ${error.message}`);
+            }
+          } else if (!apiKey) {
+            errors.push(`no model API key configured; ${evidence.surface.id} criteria captured but not AI-assessed`);
+          } else {
+            errors.push(`model-call budget (${maxCalls}) exhausted before finishing ${group.kind} on ${evidence.surface.id}`);
           }
-        } else if (!apiKey) {
-          errors.push('no model API key configured; criteria captured but not AI-assessed');
-        } else {
-          errors.push(`model-call budget (${maxCalls}) exhausted before finishing ${group.kind} group`);
+          const reportMedia = groupMedia.filter((entry) => entry.role !== 'fullpage' && !entry.modelOnly);
+          for (const item of batch) {
+            recordSurfaceAssessment(assessmentResults, {
+              item,
+              surface: evidence.surface,
+              verdict: verdicts[item.obligation],
+              media: reportMedia,
+            });
+          }
         }
       }
-      const reportMedia = groupMedia.filter((entry) => entry !== media.fullpage && !entry.modelOnly);
-      for (const item of group.items) {
-        const verdict = verdicts[item.obligation];
-        // Never fabricate a pass/fail: a missing/unparseable verdict stays
-        // "inconclusive" so Rust keeps the criterion at needs_review.
-        const rawVerdict = (verdict?.verdict || '').toLowerCase();
-        const settled = rawVerdict === 'pass' || rawVerdict === 'fail';
-        assessments.push({
-          obligation: item.obligation,
-          verdict: settled ? rawVerdict : 'inconclusive',
-          confidence: settled ? (verdict?.confidence || 'low') : 'not_observed',
-          rationale: verdict?.rationale || 'Agentic review did not return a verdict for this criterion; the captured evidence is attached for human review.',
-          reviewer_guidance: verdict?.reviewer_guidance || 'Review the attached evidence manually against this criterion.',
-          media: reportMedia.map((entry) => ({
-            kind: entry.kind,
-            caption: entry.caption,
-            path: path.relative(artifactsDir, entry.absPath).split(path.sep).join('/'),
-          })),
-        });
-      }
     }
+    const assessments = finalizeAssessments(request.criteria || [], assessmentResults, artifactsDir);
 
     await browser.close();
     browser = null;
@@ -148,34 +140,89 @@ function browserContextOptions(browserSettings) {
   };
 }
 
-async function captureEvidence(browser, baseUrl, contextOptions, artifactsDir, errors) {
-  const media = { fullpage: null, focus: [], focusClip: null, motionClip: null, motionFrames: [] };
+function reviewSurfaces(request, baseUrl) {
+  const requested = Array.isArray(request.surfaces) ? request.surfaces : [];
+  const surfaces = requested
+    .map((surface, index) => normalizeSurface(surface, index, baseUrl))
+    .filter(Boolean);
+  if (surfaces.length > 0) return surfaces;
+  return [normalizeSurface({ id: 'target', route: '/', title: 'Target page' }, 0, baseUrl)];
+}
+
+function normalizeSurface(surface, index, baseUrl) {
+  const id = String(surface?.id || `surface-${index + 1}`).trim();
+  const explicitRoute = String(surface?.route || surface?.path || '').trim();
+  const rawUrl = String(surface?.url || explicitRoute || '/').trim();
+  const navigationTarget = explicitRoute || rawUrl || '/';
+  try {
+    const url = new URL(navigationTarget, baseUrl);
+    return {
+      id,
+      route: explicitRoute || url.pathname || '/',
+      title: String(surface?.title || id).trim() || id,
+      url: url.toString(),
+      slug: slugify(id || explicitRoute || `surface-${index + 1}`),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function slugify(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'surface';
+}
+
+function emptySurfaceEvidence(surface) {
+  return { surface, fullpage: null, focus: [], focusClip: null, motionClip: null, motionFrames: [] };
+}
+
+async function captureEvidenceWithRetry(browser, surface, contextOptions, artifactsDir, errors) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await captureEvidence(browser, surface, contextOptions, artifactsDir, errors);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) errors.push(`capture for ${surface.id} failed once; retrying: ${error.message}`);
+    }
+  }
+  errors.push(`capture for ${surface.id} failed after retry: ${lastError?.message || 'unknown error'}`);
+  return emptySurfaceEvidence(surface);
+}
+
+async function captureEvidence(browser, surface, contextOptions, artifactsDir, errors) {
+  const media = emptySurfaceEvidence(surface);
+  const prefix = `review-${surface.slug}`;
 
   // Full-page screenshot.
-  const context = await browser.newContext(contextOptions);
-  const page = await context.newPage();
-  await page.goto(baseUrl, { waitUntil: 'networkidle' });
-  const fullpagePath = path.join(artifactsDir, 'review-fullpage.png');
-  await page.screenshot({ path: fullpagePath, fullPage: true });
-  media.fullpage = { kind: 'screenshot', caption: 'Full page as the AI reviewer saw it', absPath: fullpagePath };
+  let context = null;
+  try {
+    context = await browser.newContext(contextOptions);
+    const page = await context.newPage();
+    await page.goto(surface.url, { waitUntil: 'networkidle' });
+    const fullpagePath = path.join(artifactsDir, `${prefix}-fullpage.png`);
+    await page.screenshot({ path: fullpagePath, fullPage: true });
+    media.fullpage = mediaEntry(surface, 'fullpage', 'screenshot', 'Full page as the AI reviewer saw it', fullpagePath);
 
-  // Focus-state montage: tab through and screenshot the focused viewport.
-  for (let i = 0; i < 6; i += 1) {
-    await page.keyboard.press('Tab');
-    const label = await page.evaluate(() => {
-      const el = document.activeElement;
-      if (!el || el === document.body) return 'body';
-      return (el.getAttribute('aria-label') || el.textContent || el.tagName || '').trim().replace(/\s+/g, ' ').slice(0, 40);
-    });
-    if (label === 'body') break;
-    const focusPath = path.join(artifactsDir, `review-focus-${i + 1}.png`);
-    await page.screenshot({ path: focusPath });
-    media.focus.push({ kind: 'screenshot', caption: `Keyboard focus on: ${label}`, absPath: focusPath });
+    // Focus-state montage: tab through and screenshot the focused viewport.
+    for (let i = 0; i < 6; i += 1) {
+      await page.keyboard.press('Tab');
+      const label = await page.evaluate(() => {
+        const el = document.activeElement;
+        if (!el || el === document.body) return 'body';
+        return (el.getAttribute('aria-label') || el.textContent || el.tagName || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+      });
+      if (label === 'body') break;
+      const focusPath = path.join(artifactsDir, `${prefix}-focus-${i + 1}.png`);
+      await page.screenshot({ path: focusPath });
+      media.focus.push(mediaEntry(surface, 'focus', 'screenshot', `Keyboard focus on: ${label}`, focusPath));
+    }
+  } finally {
+    if (context) await context.close().catch(() => {});
   }
-  await context.close();
 
   // Focus clip: record tabbing through the page.
-  media.focusClip = await recordClip(browser, baseUrl, contextOptions, artifactsDir, 'review-focus-clip', async (clipPage) => {
+  media.focusClip = await recordClip(browser, surface, contextOptions, artifactsDir, `${prefix}-focus-clip`, async (clipPage) => {
     for (let i = 0; i < 8; i += 1) {
       await clipPage.keyboard.press('Tab');
       await clipPage.waitForTimeout(220);
@@ -183,7 +230,7 @@ async function captureEvidence(browser, baseUrl, contextOptions, artifactsDir, e
   }, 'Keyboard focus moving through the page', errors);
 
   // Motion clip: let the page sit so any animation/auto-updating content plays.
-  media.motionClip = await recordClip(browser, baseUrl, contextOptions, artifactsDir, 'review-motion-clip', async (clipPage) => {
+  media.motionClip = await recordClip(browser, surface, contextOptions, artifactsDir, `${prefix}-motion-clip`, async (clipPage) => {
     await clipPage.waitForTimeout(2600);
   }, 'The page over ~2.5s (motion / auto-updating content)', errors);
 
@@ -194,49 +241,61 @@ async function captureEvidence(browser, baseUrl, contextOptions, artifactsDir, e
   // model-only; the report keeps the clip (better for a human than four stills).
   // Note: this DELIBERATELY overrides the manifest's reduced_motion (which the
   // motion clip above honors) — judging 2.2.x needs motion present to observe.
+  let motionContext = null;
   try {
-    const motionContext = await browser.newContext({ ...contextOptions, reducedMotion: 'no-preference' });
+    motionContext = await browser.newContext({ ...contextOptions, reducedMotion: 'no-preference' });
     const motionPage = await motionContext.newPage();
-    await motionPage.goto(baseUrl, { waitUntil: 'networkidle' });
+    await motionPage.goto(surface.url, { waitUntil: 'networkidle' });
     for (let i = 0; i < 4; i += 1) {
-      const framePath = path.join(artifactsDir, `review-motion-frame-${i + 1}.png`);
+      const framePath = path.join(artifactsDir, `${prefix}-motion-frame-${i + 1}.png`);
       await motionPage.screenshot({ path: framePath });
-      media.motionFrames.push({
-        kind: 'screenshot',
-        caption: `Motion frame ${i + 1} (t≈${(i * 0.8).toFixed(1)}s)`,
-        absPath: framePath,
-        modelOnly: true,
-      });
+      media.motionFrames.push(mediaEntry(surface, 'motion_frame', 'screenshot', `Motion frame ${i + 1} (t≈${(i * 0.8).toFixed(1)}s)`, framePath, { modelOnly: true }));
       if (i < 3) await motionPage.waitForTimeout(800);
     }
-    await motionContext.close();
   } catch (error) {
-    errors.push(`motion montage failed: ${error.message}`);
+    errors.push(`motion montage for ${surface.id} failed: ${error.message}`);
+  } finally {
+    if (motionContext) await motionContext.close().catch(() => {});
   }
 
   return media;
 }
 
-async function recordClip(browser, baseUrl, contextOptions, artifactsDir, name, actions, caption, errors) {
+function mediaEntry(surface, role, kind, caption, absPath, extra = {}) {
+  return {
+    surface_id: surface.id,
+    role,
+    kind,
+    caption: `${surface.id} (${surface.route}) - ${caption}`,
+    absPath,
+    ...extra,
+  };
+}
+
+async function recordClip(browser, surface, contextOptions, artifactsDir, name, actions, caption, errors) {
+  let context = null;
   try {
-    const context = await browser.newContext({
+    context = await browser.newContext({
       ...contextOptions,
       recordVideo: { dir: artifactsDir, size: contextOptions.viewport },
     });
     const page = await context.newPage();
-    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    await page.goto(surface.url, { waitUntil: 'networkidle' });
     await actions(page);
     const video = page.video();
     await context.close();
+    context = null;
     if (!video) return null;
     const src = await video.path();
     const dest = path.join(artifactsDir, `${name}.webm`);
     await fs.copyFile(src, dest);
     await fs.rm(src, { force: true }).catch(() => {});
-    return { kind: 'clip', caption, absPath: dest };
+    return mediaEntry(surface, 'clip', 'clip', caption, dest);
   } catch (error) {
     errors.push(`clip ${name} failed: ${error.message}`);
     return null;
+  } finally {
+    if (context) await context.close().catch(() => {});
   }
 }
 
@@ -252,6 +311,92 @@ function mediaForGroup(kind, media) {
   return [media.fullpage].filter(Boolean);
 }
 
+function recordSurfaceAssessment(results, { item, surface, verdict, media }) {
+  const rawVerdict = (verdict?.verdict || '').toLowerCase();
+  const settled = rawVerdict === 'pass' || rawVerdict === 'fail';
+  const result = {
+    surface,
+    verdict: settled ? rawVerdict : 'inconclusive',
+    confidence: settled ? (verdict?.confidence || 'low') : 'not_observed',
+    rationale: verdict?.rationale || `Agentic review did not return a verdict for ${surface.id}; the captured evidence is attached for human review.`,
+    reviewer_guidance: verdict?.reviewer_guidance || `Review the attached ${surface.id} evidence manually against this criterion.`,
+    media,
+  };
+  if (!results.has(item.obligation)) results.set(item.obligation, []);
+  results.get(item.obligation).push(result);
+}
+
+function finalizeAssessments(criteria, results, artifactsDir) {
+  const seen = new Set();
+  const assessments = [];
+  for (const item of criteria) {
+    if (seen.has(item.obligation)) continue;
+    seen.add(item.obligation);
+    assessments.push(finalizeAssessment(item.obligation, results.get(item.obligation) || [], artifactsDir));
+  }
+  return assessments;
+}
+
+function finalizeAssessment(obligation, surfaceResults, artifactsDir) {
+  const failing = surfaceResults.find((result) => result.verdict === 'fail');
+  const inconclusive = surfaceResults.find((result) => result.verdict !== 'pass');
+  const reviewedSurfaces = surfaceResults.map((result) => result.surface.id).join(', ') || 'none';
+  if (failing) {
+    return {
+      obligation,
+      verdict: 'fail',
+      confidence: failing.confidence,
+      rationale: `Surface ${failing.surface.id} failed: ${failing.rationale}`,
+      reviewer_guidance: failing.reviewer_guidance,
+      media: assessmentMedia(surfaceResults, artifactsDir),
+    };
+  }
+  if (inconclusive || surfaceResults.length === 0) {
+    return {
+      obligation,
+      verdict: 'inconclusive',
+      confidence: 'not_observed',
+      rationale: inconclusive
+        ? `Surface ${inconclusive.surface.id} was inconclusive: ${inconclusive.rationale}`
+        : 'Agentic review did not return a surface verdict for this criterion; captured evidence is attached where available.',
+      reviewer_guidance: inconclusive?.reviewer_guidance || 'Review the attached surface evidence manually against this criterion.',
+      media: assessmentMedia(surfaceResults, artifactsDir),
+    };
+  }
+  return {
+    obligation,
+    verdict: 'pass',
+    confidence: weakestConfidence(surfaceResults.map((result) => result.confidence)),
+    rationale: `All reviewed surfaces passed (${reviewedSurfaces}).`,
+    reviewer_guidance: surfaceResults[0]?.reviewer_guidance || 'Spot-check the attached surface evidence manually.',
+    media: assessmentMedia(surfaceResults, artifactsDir),
+  };
+}
+
+function assessmentMedia(surfaceResults, artifactsDir) {
+  const seen = new Set();
+  const out = [];
+  for (const result of surfaceResults) {
+    for (const entry of result.media) {
+      if (!entry?.absPath || seen.has(entry.absPath)) continue;
+      seen.add(entry.absPath);
+      out.push({
+        kind: entry.kind,
+        caption: entry.caption,
+        path: path.relative(artifactsDir, entry.absPath).split(path.sep).join('/'),
+      });
+    }
+  }
+  return out;
+}
+
+function weakestConfidence(values) {
+  if (values.includes('low')) return 'low';
+  if (values.includes('medium')) return 'medium';
+  if (values.includes('high')) return 'high';
+  return 'not_observed';
+}
+
 // --- model boundary ---------------------------------------------------------
 
 async function assessGroupWithReviewLoop(model, apiKey, group, groupMedia, context) {
@@ -261,8 +406,15 @@ async function assessGroupWithReviewLoop(model, apiKey, group, groupMedia, conte
   let calls = 0;
 
   for (let attempt = 0; attempt < 2 && calls < context.budget; attempt += 1) {
-    const result = await assessGroup(model, apiKey, { ...group, rejudge_attempt: attempt }, media, context.errors);
-    calls += 1;
+    let result;
+    try {
+      result = await assessGroup(model, apiKey, { ...group, rejudge_attempt: attempt }, media, context);
+    } catch (error) {
+      calls += error.modelCalls || 0;
+      error.modelCalls = calls;
+      throw error;
+    }
+    calls += result.calls;
     finalResult = result;
     usage.prompt_tokens += result.usage?.prompt_tokens || 0;
     usage.completion_tokens += result.usage?.completion_tokens || 0;
@@ -293,12 +445,12 @@ async function assessGroupWithReviewLoop(model, apiKey, group, groupMedia, conte
   return { verdicts: finalResult.verdicts, usage, calls, media };
 }
 
-async function captureReviewActionMedia({ browser, baseUrl, contextOptions, artifactsDir, errors, groupKind, attempt, actions }) {
+async function captureReviewActionMedia({ browser, surface, contextOptions, artifactsDir, errors, groupKind, attempt, actions }) {
   let context = null;
   try {
     context = await browser.newContext(contextOptions);
     const page = await context.newPage();
-    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    await page.goto(surface.url, { waitUntil: 'networkidle' });
     for (const action of actions) {
       if (action.type === 'press_key') {
         await page.keyboard.press(action.key);
@@ -307,15 +459,11 @@ async function captureReviewActionMedia({ browser, baseUrl, contextOptions, arti
         await page.waitForTimeout(action.ms);
       }
     }
-    const actionPath = path.join(artifactsDir, `review-action-${groupKind}-${attempt}.png`);
+    const actionPath = path.join(artifactsDir, `review-${surface.slug}-action-${groupKind}-${attempt}.png`);
     await page.screenshot({ path: actionPath });
-    return [{
-      kind: 'screenshot',
-      caption: `Review action ${attempt}: ${actionSummary(actions)}`,
-      absPath: actionPath,
-    }];
+    return [mediaEntry(surface, 'review_action', 'screenshot', `Review action ${attempt}: ${actionSummary(actions)}`, actionPath)];
   } catch (error) {
-    errors.push(`review action for ${groupKind} failed: ${error.message}`);
+    errors.push(`review action for ${groupKind} on ${surface.id} failed: ${error.message}`);
     return [];
   } finally {
     if (context) await context.close().catch(() => {});
@@ -342,10 +490,10 @@ function actionSummary(actions) {
     .join(', ');
 }
 
-async function assessGroup(model, apiKey, group, groupMedia, errors) {
+async function assessGroup(model, apiKey, group, groupMedia, context) {
   const imageMedia = modelImageMedia(groupMedia);
   const videoMedia = groupMedia.filter(isVideoMedia).slice(0, 2);
-  const content = [{ type: 'text', text: buildPrompt(group, [...imageMedia, ...videoMedia]) }];
+  const content = [{ type: 'text', text: buildPrompt(group, [...imageMedia, ...videoMedia], context.surface) }];
   for (const entry of imageMedia) {
     content.push({
       type: 'image_url',
@@ -369,21 +517,7 @@ async function assessGroup(model, apiKey, group, groupMedia, errors) {
   // full coverage and decisive verdicts.
   if (model.reasoning_effort) body.reasoning = { effort: model.reasoning_effort };
   const base = model.base_url || 'https://openrouter.ai/api/v1';
-  const res = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://github.com/adminifi-ai/allie',
-      'X-Title': 'Allie accessibility review',
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-  }
-  const json = await res.json();
+  const { json, calls } = await fetchModelJsonWithRetry(base, apiKey, body, context.budget);
   const text = json.choices?.[0]?.message?.content || '';
   const parsed = parseModelJson(text);
   const verdicts = {};
@@ -391,15 +525,60 @@ async function assessGroup(model, apiKey, group, groupMedia, errors) {
     if (entry.obligation) verdicts[entry.obligation] = entry;
   }
   if (Object.keys(verdicts).length === 0) {
-    errors.push(`model returned no parseable assessments for ${group.kind}`);
+    context.errors.push(`model returned no parseable assessments for ${group.kind} on ${context.surface.id}`);
   }
-  return { verdicts, actions: parsed?.actions || [], usage: json.usage };
+  return { verdicts, actions: parsed?.actions || [], usage: json.usage, calls };
+}
+
+async function fetchModelJsonWithRetry(base, apiKey, body, budget) {
+  const maxAttempts = Math.max(1, Math.min(1 + MAX_MODEL_RETRIES, budget));
+  let calls = 0;
+  let lastError = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    calls += 1;
+    try {
+      const res = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/adminifi-ai/allie',
+          'X-Title': 'Allie accessibility review',
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        const error = new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+        if (isTransientModelFailure(res.status) && attempt + 1 < maxAttempts) {
+          lastError = error;
+          continue;
+        }
+        error.modelCalls = calls;
+        throw error;
+      }
+      return { json: await res.json(), calls };
+    } catch (error) {
+      if (error.modelCalls) throw error;
+      lastError = error;
+      if (attempt + 1 < maxAttempts) continue;
+      error.modelCalls = calls;
+      throw error;
+    }
+  }
+  const error = lastError || new Error('model call failed without response');
+  error.modelCalls = calls;
+  throw error;
+}
+
+function isTransientModelFailure(status) {
+  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
 }
 
 function modelImageMedia(groupMedia) {
   const screenshots = groupMedia.filter((entry) => entry.kind === 'screenshot');
-  const actionScreenshots = screenshots.filter((entry) => entry.caption.startsWith('Review action'));
-  const baselineScreenshots = screenshots.filter((entry) => !entry.caption.startsWith('Review action'));
+  const actionScreenshots = screenshots.filter((entry) => entry.role === 'review_action');
+  const baselineScreenshots = screenshots.filter((entry) => entry.role !== 'review_action');
   return [...actionScreenshots, ...baselineScreenshots].slice(0, 4);
 }
 
@@ -419,22 +598,24 @@ function videoMimeType(absPath) {
   return 'video/webm';
 }
 
-function buildPrompt(group, media = []) {
+function buildPrompt(group, media = [], surface = null) {
   const list = group.items
     .map((item) => `- ${item.obligation} | ${item.num} ${item.handle} (Level ${item.level}, ${item.principle})`)
     .join('\n');
   const mediaList = media
     .map((entry, index) => `- media ${index + 1}: ${entry.kind} | ${entry.caption}`)
     .join('\n');
+  const allowedKeys = Array.from(ALLOWED_REVIEW_KEYS).join('|');
   return [
     'You are an expert WCAG 2.2 AA accessibility auditor. You are doing the job a trained human reviewer does: looking at the captured visual evidence and rendering a DEFINITIVE judgment for each success criterion.',
+    surface ? `Surface: ${surface.id} | route ${surface.route} | title ${surface.title}` : 'Surface: target',
     `Focus area for this batch: ${group.guidance}`,
     'For each criterion, make the same call a human expert would make from this evidence:',
     '- verdict: "pass" or "fail". You MUST commit to one. Use "inconclusive" ONLY when even an expert genuinely cannot judge from any amount of looking (e.g. a precise color-contrast ratio that requires a measurement tool). Do not hide behind "inconclusive" to avoid deciding.',
     '- confidence: "high" | "medium" | "low" — be honest. Low confidence is fine and is exactly how we mark a judgment call; it does NOT mean refuse to decide.',
     '- rationale: one to two sentences grounded in what you actually see.',
     '- reviewer_guidance: the exact thing a human should do to confirm or refute your verdict.',
-    'If a small browser observation would let you make a better judgment, you may request at most three review actions before the final verdict. Allowed action shapes are {"type":"press_key","key":"Tab|Escape|Enter|Space|ArrowDown|ArrowUp","reason":"..."} and {"type":"wait_ms","ms":100-2000}. Do not request clicks, typing, form submission, navigation, or mutation.',
+    `If a small browser observation would let you make a better judgment, you may request at most three review actions before the final verdict. Allowed action shapes are {"type":"press_key","key":"${allowedKeys}","reason":"..."} and {"type":"wait_ms","ms":100-2000}. Do not request clicks, typing, form submission, navigation, activation keys, or mutation.`,
     'Do not claim legal compliance. Be specific and visual.',
     '',
     'Criteria:',

@@ -53,3 +53,14 @@ flow:
       keyboard: true
       video: true
       trace: true
+    - id: settings
+      path: /settings.html
+      description: Discoverable settings surface.
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+      accessibility_tree: true
+      keyboard: true
+      video: true
+      trace: true

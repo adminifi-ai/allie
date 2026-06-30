@@ -53,6 +53,28 @@ fn agentic_model_setting(value: &Option<String>, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
+#[derive(serde::Serialize)]
+struct AgenticReviewSurface {
+    id: String,
+    route: String,
+    url: String,
+    title: String,
+}
+
+fn agentic_review_surfaces(packet: &EvidencePacket) -> Vec<AgenticReviewSurface> {
+    packet
+        .coverage
+        .state_metadata
+        .iter()
+        .map(|state| AgenticReviewSurface {
+            id: state.id.clone(),
+            route: state.route.clone(),
+            url: state.url.clone(),
+            title: state.title.clone(),
+        })
+        .collect()
+}
+
 /// Run the agentic (vision-model) review over the criteria a run left as
 /// needs_review, fold the model's assessments + captured media into the
 /// evidence packet, and promote each committed verdict to the criterion's
@@ -151,6 +173,7 @@ fn run_agentic_review_with_timeout(
             "reasoning_effort": manifest.model.reasoning_effort.clone(),
         },
         "artifacts_dir": artifacts_dir.to_string_lossy(),
+        "surfaces": agentic_review_surfaces(&packet),
         "criteria": criteria,
     });
 
@@ -425,6 +448,46 @@ mod tests {
         let unknown = serde_json::json!({ "status": "maybe" });
         let error = agentic_response_outcome(&unknown, true).unwrap_err();
         assert!(error.to_string().contains("unknown response status maybe"));
+    }
+
+    #[test]
+    fn agentic_review_request_includes_packet_review_surfaces() {
+        let mut packet = minimal_agentic_packet();
+        packet["coverage"]["state_metadata"] = serde_json::json!([
+            {
+                "id": "home",
+                "route": "/",
+                "url": "http://127.0.0.1:1234/",
+                "title": "Home",
+                "http_status": 200,
+                "keyboard_focus_order": ["Home", "Settings"],
+                "console_errors": [],
+                "network_errors": [],
+                "state_errors": [],
+                "features": null
+            },
+            {
+                "id": "settings",
+                "route": "/settings.html",
+                "url": "http://127.0.0.1:1234/settings.html",
+                "title": "Settings",
+                "http_status": 200,
+                "keyboard_focus_order": ["Email", "Save settings"],
+                "console_errors": [],
+                "network_errors": [],
+                "state_errors": [],
+                "features": null
+            }
+        ]);
+        let packet: EvidencePacket = serde_json::from_value(packet).unwrap();
+
+        let surfaces = agentic_review_surfaces(&packet);
+
+        assert_eq!(surfaces.len(), 2);
+        assert_eq!(surfaces[0].id, "home");
+        assert_eq!(surfaces[0].route, "/");
+        assert_eq!(surfaces[1].id, "settings");
+        assert_eq!(surfaces[1].route, "/settings.html");
     }
 
     #[test]

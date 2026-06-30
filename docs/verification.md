@@ -213,11 +213,14 @@ assistive-technology obligations are still marked `not_tested` or
 captures media, and returns a well-formed inconclusive assessment when no model
 API key is present. It also starts a local fake OpenRouter endpoint and verifies
 that a model request includes both screenshot `image_url` parts and captured
-WebM walkthrough clips as `video_url` parts. The fake endpoint first requests a
-bounded `press_key` review action, then verifies the gateway captures new
-action evidence and re-judges with a second model call. This keeps the smoke
-offline while locking the provider payload shape and observe-act-rejudge loop;
-live model behavior is covered by real `verify` and workbench runs.
+WebM walkthrough clips as `video_url` parts. The fake endpoint reviews the
+workbench home and settings surfaces, first requests a bounded `press_key`
+observation on home, then forces a transient settings model failure so the
+gateway must retry inside the same call budget. The final fake verdict fails
+because settings fails, proving fail precedence across surfaces. This keeps the
+smoke offline while locking the provider payload shape, observe-act-rejudge
+loop, multi-surface fan-out, and retry behavior; live model behavior is covered
+by real `verify` and workbench runs.
 
 `npm run autonomous:smoke` proves the autonomous workbench path. It leaves:
 
@@ -271,10 +274,13 @@ that non-local advisory agent modes stay on the one-shot `map` path until
 durable session adapters exist, and that a `model.enabled` workbench job runs
 the live agentic gateway before report/release. The model-enabled smoke unsets
 the configured API key, so the gateway must still capture media and write
-degraded `inconclusive` assessments without fabricating pass/fail verdicts. A
-separate synthetic worker-error path proves agentic worker infrastructure
-failures fail the `review` step before report/release instead of being recorded
-as completed advisory review.
+degraded `inconclusive` assessments without fabricating pass/fail verdicts. It
+also inspects `agentic-request.json` to prove the live request carries both
+home and settings review surfaces from the evidence packet, and checks that the
+resulting agentic assessment retains settings-surface media. A separate
+synthetic worker-error path proves agentic worker infrastructure failures fail
+the `review` step before report/release instead of being recorded as completed
+advisory review.
 
 `npm run size:smoke` enforces the Rust module-size ratchet. No `src/*.rs` file
 may exceed the current cap; when the gate fails, extract a cohesive module
