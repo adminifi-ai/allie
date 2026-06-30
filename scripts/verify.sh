@@ -15,6 +15,7 @@ npm run consumer:smoke
 npm run consumer-cwd:smoke
 npm run distribution:smoke
 npm run agentic:smoke
+npm run agentic:precision
 npm run release:smoke
 npm run autonomous:smoke
 npm run size:smoke

@@ -1,6 +1,6 @@
 # Deepen audit autonomy depth
 
-Priority: P1 · Status: pending · Estimate: XL
+Priority: P1 · Status: done · Estimate: XL
 
 ## Goal
 The audit Allie autonomously produces is genuinely deep and precise — multi-step
@@ -12,7 +12,7 @@ a zero-false-positive ceiling on vision failures.
 - [x] Vision model receives video walkthroughs, not only sampled stills (workers/agentic/review.mjs:244 filters to screenshots).
 - [x] Agentic loop iterates (observe → act → re-judge), not single-shot (review.mjs:59-105).
 - [x] Agentic review fans out across all discovered surfaces with retries (review.mjs:51, agentic.rs:95-117).
-- [ ] Vision FAIL verdicts enforce a zero-false-positive ceiling, benchmarked against a labeled set.
+- [x] Vision FAIL verdicts enforce a zero-false-positive ceiling, benchmarked against a labeled set.
 
 ## Children
 1. Generate multi-step interaction flows, not per-route state stubs.
@@ -50,3 +50,11 @@ a zero-false-positive ceiling on vision failures.
   `npm run autonomous:smoke` proves the integrated workbench request carries
   both home and settings surfaces and retains settings media under no-key
   degradation.
+- 2026-06-30: Vision FAIL promotion now requires a passing labeled precision
+  gate. The worker emits `precision_gate` when labels are supplied and counts
+  false-positive FAILs against expected-pass cases; Rust promotes agentic FAIL
+  verdicts only when that gate passed with at least one expected-pass labeled
+  case and zero false positives. `npm run agentic:precision` proves both the intentional
+  false-positive failure and the zero-FP pass case offline; focused Rust tests
+  prove uncalibrated FAILs stay `needs_review` while PASS promotion remains
+  allowed.

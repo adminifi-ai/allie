@@ -63,6 +63,7 @@ npm run consumer:smoke
 npm run consumer-cwd:smoke
 npm run distribution:smoke
 npm run agentic:smoke
+npm run agentic:precision
 npm run release:smoke
 npm run autonomous:smoke
 npm run size:smoke
@@ -221,6 +222,18 @@ because settings fails, proving fail precedence across surfaces. This keeps the
 smoke offline while locking the provider payload shape, observe-act-rejudge
 loop, multi-surface fan-out, and retry behavior; live model behavior is covered
 by real `verify` and workbench runs.
+
+`npm run agentic:precision` proves vision FAIL promotion has a zero-false-
+positive ceiling. It runs the agentic worker against labeled workbench surfaces
+through a fake OpenRouter endpoint. One scenario intentionally labels both
+surfaces as expected pass while the fake model returns a settings FAIL; the
+worker must emit `precision_gate.status: fail` with one false-positive FAIL. A
+second scenario labels settings as expected fail and home as expected pass; the
+worker must emit `precision_gate.status: pass` with zero false positives. Rust
+uses that gate when ingesting live agentic responses: PASS can promote, but
+FAIL promotes only when `precision_gate` passed with at least one expected-pass
+labeled case and zero false-positive FAILs. Without that proof, the FAIL stays
+attached as review context and the criterion remains `needs_review`.
 
 `npm run autonomous:smoke` proves the autonomous workbench path. It leaves:
 
