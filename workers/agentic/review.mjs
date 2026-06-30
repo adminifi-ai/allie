@@ -59,9 +59,9 @@ async function run(request) {
     for (const group of groups) {
       if (group.items.length === 0) continue;
       const groupMedia = mediaForGroup(group.kind, media);
-      // The model sees the full page (and motion frames); the report attaches
-      // only criterion-specific media (focus montage, clips) since the full page
-      // already shows once in the report's "what Allie inspected" gallery and the
+      // The model sees the full page plus criterion-specific screenshots/clips;
+      // the report attaches only criterion-specific media since the full page
+      // already shows once in the report's "what Allie inspected" gallery and
       // motion frames are model-only (the clip is friendlier for a human) —
       // avoids inlining the same or near-identical screenshots dozens of times.
       const reportMedia = groupMedia.filter((entry) => entry !== media.fullpage && !entry.modelOnly);
@@ -217,7 +217,7 @@ async function recordClip(browser, baseUrl, contextOptions, artifactsDir, name, 
     if (!video) return null;
     const src = await video.path();
     const dest = path.join(artifactsDir, `${name}.webm`);
-    await fs.copyFile(src, dest).catch(() => {});
+    await fs.copyFile(src, dest);
     await fs.rm(src, { force: true }).catch(() => {});
     return { kind: 'clip', caption, absPath: dest };
   } catch (error) {
@@ -231,8 +231,8 @@ function mediaForGroup(kind, media) {
     return [media.fullpage, ...media.focus.slice(0, 3), media.focusClip].filter(Boolean);
   }
   if (kind === 'motion') {
-    // Frames first (the model judges motion from them); the clip rides along for
-    // the report but is filtered out of the model's image set as a non-screenshot.
+    // Frames first for broad compatibility, with the clip included for
+    // video-capable models and for the human report.
     return [...media.motionFrames, media.motionClip].filter(Boolean);
   }
   return [media.fullpage].filter(Boolean);
@@ -242,10 +242,19 @@ function mediaForGroup(kind, media) {
 
 async function assessGroup(model, apiKey, group, groupMedia, errors) {
   const imageMedia = groupMedia.filter((entry) => entry.kind === 'screenshot').slice(0, 4);
+  const videoMedia = groupMedia.filter(isVideoMedia).slice(0, 2);
   const content = [{ type: 'text', text: buildPrompt(group) }];
   for (const entry of imageMedia) {
-    const bytes = await fs.readFile(entry.absPath);
-    content.push({ type: 'image_url', image_url: { url: `data:image/png;base64,${bytes.toString('base64')}` } });
+    content.push({
+      type: 'image_url',
+      image_url: { url: await mediaDataUrl(entry.absPath, 'image/png') },
+    });
+  }
+  for (const entry of videoMedia) {
+    content.push({
+      type: 'video_url',
+      video_url: { url: await mediaDataUrl(entry.absPath, videoMimeType(entry.absPath)) },
+    });
   }
   const body = {
     model: model.model,
@@ -283,6 +292,22 @@ async function assessGroup(model, apiKey, group, groupMedia, errors) {
     errors.push(`model returned no parseable assessments for ${group.kind}`);
   }
   return { verdicts, usage: json.usage };
+}
+
+async function mediaDataUrl(absPath, mimeType) {
+  const bytes = await fs.readFile(absPath);
+  return `data:${mimeType};base64,${bytes.toString('base64')}`;
+}
+
+function isVideoMedia(entry) {
+  return ['clip', 'video', 'video_clip'].includes(entry.kind);
+}
+
+function videoMimeType(absPath) {
+  const ext = path.extname(absPath).toLowerCase();
+  if (ext === '.mp4') return 'video/mp4';
+  if (ext === '.mov') return 'video/quicktime';
+  return 'video/webm';
 }
 
 function buildPrompt(group) {
@@ -347,8 +372,8 @@ function groupCriteria(criteria) {
   }
   return [
     { kind: 'general', guidance: 'General perceivable/operable/understandable/robust review from the page screenshot.', items: general },
-    { kind: 'focus', guidance: 'Keyboard focus visibility and order, using the focus montage and focus clip.', items: focus },
-    { kind: 'motion', guidance: 'Motion, animation, timing and auto-updating content. You are shown several still frames captured over ~2.5 seconds — compare them: if they are identical there is no moving/auto-updating/flashing content (these criteria pass); if they differ, judge whether the motion can be paused, stopped, or hidden and whether it flashes more than three times per second.', items: motion },
+    { kind: 'focus', guidance: 'Keyboard focus visibility and order, using the focus montage and focus walkthrough clip.', items: focus },
+    { kind: 'motion', guidance: 'Motion, animation, timing and auto-updating content. You are shown several still frames plus a short walkthrough video captured over ~2.5 seconds. Compare the frames and video: if they are static there is no moving/auto-updating/flashing content; if they differ, judge whether the motion can be paused, stopped, or hidden and whether it flashes more than three times per second.', items: motion },
   ];
 }
 

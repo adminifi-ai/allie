@@ -1,12 +1,10 @@
 #!/bin/sh
 # Deterministic guard for the agentic review gateway.
 #
-# Runs the gateway against the bundled login fixture with NO model API key, so
-# there is no network call: it must still launch the browser, capture the
-# evidence (screenshots), and return a well-formed response that marks the
-# criteria "inconclusive" (never a fabricated pass/fail) so Rust keeps them at
-# needs_review. This locks the gateway's capture + graceful-degradation path;
-# the live model path is exercised by real verify runs, not the offline gate.
+# Runs the gateway against the bundled login fixture in two offline modes:
+# first with NO model API key to prove graceful degradation, then with a local
+# fake OpenRouter endpoint to prove the model payload includes screenshots and
+# captured video clips without touching the network.
 set -eu
 
 ALLIE_REPO="$(pwd)"
@@ -50,5 +48,7 @@ if (!assessment.media.some((entry) => entry.kind === 'screenshot')) {
 }
 console.log(`agentic smoke ok: captured ${assessment.media.length} media item(s), status ${response.status}`);
 NODE
+
+node scripts/agentic-video-payload-smoke.mjs "$WORK" "$ALLIE_REPO"
 
 echo "agentic smoke passed"
