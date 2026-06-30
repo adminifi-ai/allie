@@ -213,9 +213,11 @@ assistive-technology obligations are still marked `not_tested` or
 captures media, and returns a well-formed inconclusive assessment when no model
 API key is present. It also starts a local fake OpenRouter endpoint and verifies
 that a model request includes both screenshot `image_url` parts and captured
-WebM walkthrough clips as `video_url` parts. This keeps the smoke offline while
-locking the provider payload shape; live model behavior is covered by real
-`verify` and workbench runs.
+WebM walkthrough clips as `video_url` parts. The fake endpoint first requests a
+bounded `press_key` review action, then verifies the gateway captures new
+action evidence and re-judges with a second model call. This keeps the smoke
+offline while locking the provider payload shape and observe-act-rejudge loop;
+live model behavior is covered by real `verify` and workbench runs.
 
 `npm run autonomous:smoke` proves the autonomous workbench path. It leaves:
 
