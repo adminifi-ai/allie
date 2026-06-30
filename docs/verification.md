@@ -82,7 +82,13 @@ leaves:
 ```
 
 `npm run evidence:smoke` proves the Rust CLI, worker, packet writer, and report
-writer work together. It leaves:
+writer work together. The smoke freezes the run clock with `SOURCE_DATE_EPOCH`,
+sets an explicit fixture port for the local fixture server, runs the fixture
+twice, and byte-compares the resulting `evidence.json` and `report.html`. It
+also asserts the packet schema, pass summary, non-empty Git provenance, stable
+fixture URL, captured state metadata, artifact hashes, distinct confidence
+classes, explicit `needs_review` and `not_applicable` verdicts, and the report's
+status/replay sections. It leaves:
 
 ```text
 .allie/runs/v0-smoke/evidence.json
@@ -179,8 +185,9 @@ leaves:
 `npm run consumer-cwd:smoke` proves the installed/debug binary can run from a
 foreign consumer repository working directory while still handing the browser
 worker absolute request, response, and artifact paths. It uses a temporary
-consumer checkout and expects one captured state with zero infrastructure
-failures.
+consumer Git checkout and expects one captured state, zero infrastructure
+failures, and non-empty packet provenance from that checkout instead of the
+Allie tool checkout.
 
 `npm run release:smoke` proves the packet can drive release decisions without a
 second status model. It reads `.allie/runs/v0-smoke/evidence.json` and leaves:

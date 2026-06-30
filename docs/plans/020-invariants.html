@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en" data-ae-mode="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plan 020: Enforce Evidence Invariants</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Geist+Mono:wght@100..900&amp;display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/misty-step/aesthetic@v2.5.1/aesthetic.css">
+  <style>
+    .plan .ae-bar,
+    .plan .ae-stage { width: min(92rem, 100% - 4rem); }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(24rem, 0.72fr); gap: 3rem; align-items: end; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--ae-line); margin-top: 2rem; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--ae-line); margin-top: 1px; }
+    .cell { background: var(--ae-surface); padding: 1.2rem 1.35rem; min-width: 0; }
+    .wash { background: var(--ae-wash); }
+    .rule { border-top: 1px solid var(--ae-line); margin: 1.2rem 0; }
+    @media (max-width: 900px) {
+      .plan .ae-bar,
+      .plan .ae-stage { width: min(100% - 2rem, 92rem); }
+      .hero,
+      .grid,
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="ae-screen plan">
+  <header class="ae-bar">
+    <a class="ae-name" href="../roadmap.md">ALLIE / BACKLOG 020</a>
+    <p class="ae-chrome">executor handoff - invariant gates before larger autonomy work</p>
+  </header>
+
+  <main class="ae-stage ae-stage-scroll">
+    <article class="ae-view">
+      <section class="hero">
+        <div>
+          <p class="ae-chrome">P1 / MAKE THE VISION INVARIANTS TRUE</p>
+          <h1 class="ae-strong">Turn replay, provenance, and no-silent-gap claims into executable gates.</h1>
+          <p class="ae-lede">The chosen slice is not a broad report rewrite. It makes Allie's current evidence contract harder to lie about: freeze run clocks, require non-empty Git provenance, expose uncovered cells as <code>not_tested</code>, and make the V0 smoke assert packet contents.</p>
+        </div>
+        <aside class="ae-panel">
+          <h2 class="ae-h">CHOSEN DESIGN</h2>
+          <p>Inject deterministic time with <code>SOURCE_DATE_EPOCH</code>, keep provenance in the run packet, fix the cell-status fallback, and ratchet <code>evidence:smoke</code> from file-existence to content assertions.</p>
+          <div class="rule"></div>
+          <h2 class="ae-h">QUALITY SYSTEM</h2>
+          <p>Proof is the repo-owned <code>npm run verify</code>, focused Rust tests for each invariant, and a harsh diff review for hidden fallback or schema drift.</p>
+        </aside>
+      </section>
+
+      <section class="grid">
+        <article class="cell">
+          <h2 class="ae-h">STANDARDS</h2>
+          <p>No silent gaps, replayable evidence, stable provenance, and deterministic gates. No weakened release semantics.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">ACCEPTANCE</h2>
+          <p>020 backlog checkboxes pass from source tests and smoke content assertions, then the item moves to <code>_done</code>.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">VERIFY</h2>
+          <p><code>cargo test --locked</code>, <code>npm run evidence:smoke</code>, <code>npm run verify</code>, doc freshness, and diff whitespace.</p>
+        </article>
+        <article class="cell wash">
+          <h2 class="ae-h">STOP IF</h2>
+          <p>Byte stability requires changing artifact hashing semantics, Git metadata cannot be proven locally, or <code>not_tested</code> breaks the report contract.</p>
+        </article>
+      </section>
+
+      <section class="grid-2">
+        <article class="cell">
+          <h2 class="ae-h">IN SCOPE</h2>
+          <p><code>src/lib.rs</code> clock and provenance helpers, <code>src/compliance.rs</code> cell fallback, <code>scripts/verify.sh</code> evidence smoke assertions, and operator docs/backlog state.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">OUT OF SCOPE</h2>
+          <p>Full byte-stable HTML asset normalization, hosted release history, broader workbench determinism, new standards profiles, or agentic precision benchmarks.</p>
+        </article>
+      </section>
+    </article>
+  </main>
+</div>
+</body>
+</html>

@@ -62,7 +62,8 @@ async function runWorker(request) {
     const artifactsDir = path.resolve(repoRoot, request.artifacts_dir);
     await fs.mkdir(artifactsDir, { recursive: true });
 
-    const target = await resolveTarget(request.target);
+    const determinism = normalizeDeterminism(request.determinism);
+    const target = await resolveTarget(request.target, determinism);
     fixtureServer = target.server;
 
     browser = await chromium.launch({ headless: true });
@@ -99,7 +100,7 @@ async function runWorker(request) {
 
     const states = [];
     for (const state of request.states) {
-      states.push(await inspectState(context, target.baseUrl, state, artifactsDir, request.browser.zoom, auth?.authenticated_marker ?? null));
+      states.push(await inspectState(context, target.baseUrl, state, artifactsDir, request.browser.zoom, auth?.authenticated_marker ?? null, determinism));
     }
 
     await context.close();
@@ -181,7 +182,7 @@ async function performLogin(context, baseUrl, auth) {
   }
 }
 
-async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMarker) {
+async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMarker, determinism) {
   const page = await context.newPage();
   const pageVideo = page.video();
   const consoleErrors = [];
@@ -276,6 +277,9 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
   let axeViolations = [];
   if (state.axe) {
     const axeResult = await new AxeBuilder({ page }).analyze();
+    if (determinism?.timestamp) {
+      axeResult.timestamp = determinism.timestamp;
+    }
     axeJsonPath = path.join(artifactsDir, `axe-${state.id}.json`);
     await fs.writeFile(axeJsonPath, `${JSON.stringify(axeResult, null, 2)}\n`);
     axeViolations = axeResult.violations.map((violation) => ({
@@ -437,13 +441,13 @@ async function captureKeyboardFocusOrder(page) {
   return [...new Set(seen)];
 }
 
-async function resolveTarget(target) {
+async function resolveTarget(target, determinism) {
   if (target.kind === 'local_fixture') {
     if (!target.fixture_dir) {
       throw new Error('local_fixture target requires fixture_dir');
     }
     const fixtureDir = path.resolve(repoRoot, target.fixture_dir);
-    const server = await startFixtureServer(fixtureDir);
+    const server = await startFixtureServer(fixtureDir, determinism?.fixture_port ?? 0);
     const { port } = server.address();
     return {
       baseUrl: `http://127.0.0.1:${port}/`,
@@ -461,7 +465,7 @@ async function resolveTarget(target) {
   };
 }
 
-async function startFixtureServer(fixtureDir) {
+async function startFixtureServer(fixtureDir, fixturePort) {
   const root = await fs.realpath(fixtureDir);
   const rootWithSeparator = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
 
@@ -490,10 +494,27 @@ async function startFixtureServer(fixtureDir) {
 
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
+    server.listen(fixturePort, '127.0.0.1', resolve);
   });
 
   return server;
+}
+
+function normalizeDeterminism(value) {
+  if (!value) {
+    return null;
+  }
+  const timestamp = typeof value.timestamp === 'string' && value.timestamp.length > 0
+    ? value.timestamp
+    : null;
+  const fixturePort = value.fixture_port ?? 0;
+  if (!Number.isInteger(fixturePort) || fixturePort < 0 || fixturePort > 65535) {
+    throw new Error(`determinism.fixture_port must be an integer from 0 to 65535, got ${JSON.stringify(value.fixture_port)}`);
+  }
+  return {
+    timestamp,
+    fixture_port: fixturePort,
+  };
 }
 
 function contentType(filePath) {

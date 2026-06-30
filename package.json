@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "worker:smoke": "node workers/browser/run.mjs --smoke .allie/worker-smoke",
-    "evidence:smoke": "cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/v0-smoke",
+    "evidence:smoke": "scripts/evidence-smoke.sh",
     "action:smoke": "scripts/action-steps-smoke.sh",
     "auth:smoke": "scripts/auth-smoke.sh",
     "secrets:smoke": "scripts/secret-scan.sh --self-test && scripts/secret-scan.sh",
