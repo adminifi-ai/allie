@@ -361,9 +361,6 @@ fn run_workbench_start_with_job(
         Ok(receipt) => receipt,
         Err(error) => return workbench_step_error(&options.out_dir, job, "review", error),
     };
-    if let Some(warning) = &review.warning {
-        job.warnings.push(warning.clone());
-    }
     job.pointers.reviewed_packet = Some(path_relative_to(&options.out_dir, &review.packet_path));
     if let Some(report_path) = &review.report_path {
         job.pointers.review_report = Some(path_relative_to(&options.out_dir, report_path));
@@ -512,7 +509,6 @@ struct WorkbenchReviewStepReceipt {
     packet_path: PathBuf,
     report_path: Option<PathBuf>,
     message: String,
-    warning: Option<String>,
 }
 
 fn run_workbench_review(
@@ -521,27 +517,15 @@ fn run_workbench_review(
     review_dir: &Path,
 ) -> Result<WorkbenchReviewStepReceipt> {
     if manifest.model.enabled {
-        return match crate::agentic::run_agentic_review(manifest, packet_path) {
-            Ok(summary) => Ok(WorkbenchReviewStepReceipt {
-                packet_path: packet_path.to_path_buf(),
-                report_path: None,
-                message: format!(
-                    "live agentic review completed: {} criteria, {} model call(s), status {}",
-                    summary.criteria, summary.calls, summary.status
-                ),
-                warning: None,
-            }),
-            Err(error) => {
-                let warning =
-                    format!("agentic review skipped (criteria stay needs_review): {error}");
-                Ok(WorkbenchReviewStepReceipt {
-                    packet_path: packet_path.to_path_buf(),
-                    report_path: None,
-                    message: warning.clone(),
-                    warning: Some(warning),
-                })
-            }
-        };
+        let summary = crate::agentic::run_agentic_review(manifest, packet_path)?;
+        return Ok(WorkbenchReviewStepReceipt {
+            packet_path: packet_path.to_path_buf(),
+            report_path: None,
+            message: format!(
+                "live agentic review completed: {} criteria, {} model call(s), status {}",
+                summary.criteria, summary.calls, summary.status
+            ),
+        });
     }
 
     let review = run_review(ReviewOptions {
@@ -552,7 +536,6 @@ fn run_workbench_review(
         packet_path: review.packet_path,
         report_path: Some(review.report_path),
         message: "offline agentic review context written".to_string(),
-        warning: None,
     })
 }
 

@@ -353,13 +353,11 @@ fn run_verify_pipeline(options: &VerifyOptions) -> Result<VerifyPipelineReceipts
     })?;
     let promoted_manifest = FlowManifest::load(&promoted.manifest_path)?;
     if promoted_manifest.model.enabled {
-        match crate::agentic::run_agentic_review(&promoted_manifest, &run.evidence_path) {
-            Ok(summary) => eprintln!(
-                "Agentic review: {} criteria, {} model call(s), status {}",
-                summary.criteria, summary.calls, summary.status
-            ),
-            Err(error) => eprintln!("Agentic review skipped (criteria stay needs_review): {error}"),
-        }
+        let summary = crate::agentic::run_agentic_review(&promoted_manifest, &run.evidence_path)?;
+        eprintln!(
+            "Agentic review: {} criteria, {} model call(s), status {}",
+            summary.criteria, summary.calls, summary.status
+        );
     }
     let report = run_compliance_report(ReportOptions {
         map_path: map.map_path.clone(),

@@ -7,9 +7,12 @@ REVIEW_DIR=.allie/reviews/autonomous-smoke
 RELEASE_DIR=.allie/releases/autonomous-smoke
 JOB_DIR=.allie/jobs/autonomous-smoke
 AGENTIC_JOB_DIR=.allie/jobs/autonomous-agentic-smoke
+AGENTIC_ERROR_JOB_DIR=.allie/jobs/autonomous-agentic-error-smoke
+AGENTIC_ERROR_WORKER=.allie/jobs/autonomous-agentic-error-worker.cjs
 LEGACY_REMEDIATION_DIR=.allie/remediation/autonomous-smoke
 
-rm -rf "$DISCOVERY_DIR" "$RUN_DIR" "$REVIEW_DIR" "$RELEASE_DIR" "$JOB_DIR" "$AGENTIC_JOB_DIR" "$LEGACY_REMEDIATION_DIR"
+rm -rf "$DISCOVERY_DIR" "$RUN_DIR" "$REVIEW_DIR" "$RELEASE_DIR" "$JOB_DIR" "$AGENTIC_JOB_DIR" "$AGENTIC_ERROR_JOB_DIR" "$LEGACY_REMEDIATION_DIR"
+rm -f "$AGENTIC_ERROR_WORKER"
 
 cargo run --locked -- discover \
   --manifest examples/autonomous-workbench.yml \
@@ -110,6 +113,51 @@ if (!packet.agentic_assessments.length) {
 }
 if (!packet.agentic_assessments.some((assessment) => assessment.assessment === 'inconclusive' && assessment.media.length > 0)) {
   throw new Error('missing degraded live-gateway assessment with captured media');
+}
+NODE
+
+mkdir -p "$(dirname "$AGENTIC_ERROR_WORKER")"
+cat > "$AGENTIC_ERROR_WORKER" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const responseIndex = process.argv.indexOf('--response');
+if (responseIndex === -1) process.exit(2);
+const responsePath = process.argv[responseIndex + 1];
+fs.mkdirSync(path.dirname(responsePath), { recursive: true });
+fs.writeFileSync(responsePath, `${JSON.stringify({
+  schema: 'allie.agentic.response.v0',
+  status: 'error',
+  errors: ['synthetic agentic worker failure'],
+}, null, 2)}\n`);
+process.exit(1);
+NODE
+
+set +e
+ALLIE_AGENTIC_WORKER="$PWD/$AGENTIC_ERROR_WORKER" cargo run --locked -- workbench start \
+  --manifest examples/autonomous-workbench-agentic.yml \
+  --out "$AGENTIC_ERROR_JOB_DIR"
+agentic_error_status=$?
+set -e
+test "$agentic_error_status" -eq 2
+
+node - "$AGENTIC_ERROR_JOB_DIR" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const jobDir = process.argv[2];
+const job = JSON.parse(fs.readFileSync(path.join(jobDir, 'job.json'), 'utf8'));
+if (job.status !== 'failed') throw new Error(`expected failed job, got ${job.status}`);
+const review = job.steps.find((step) => step.id === 'review');
+if (!review) throw new Error('missing review step');
+if (review.status !== 'failed') throw new Error(`review step should fail, got ${review.status}`);
+if (!review.message.includes('synthetic agentic worker failure')) {
+  throw new Error(`review failure did not preserve worker error: ${review.message}`);
+}
+if (job.pointers.compliance_report || job.pointers.release_summary) {
+  throw new Error('report/release should not run after agentic worker infrastructure failure');
+}
+const events = fs.readFileSync(path.join(jobDir, 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+if (!events.some((event) => event.event === 'step_completed' && event.step === 'review' && event.status === 'failed')) {
+  throw new Error('missing failed review event');
 }
 NODE
 
