@@ -2,7 +2,8 @@ use crate::model::*;
 use crate::standards::standards_profile_summary;
 use crate::{
     AgentRunnerKind, AllieError, FlowManifest, ManifestState, PRODUCT_MAP_SCHEMA, Result,
-    new_run_id, now_utc, path_relative_to, read_json_file, write_json_pretty, write_string,
+    StateStep, new_run_id, now_utc, path_relative_to, read_json_file, write_json_pretty,
+    write_string,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,9 +15,11 @@ use wait_timeout::ChildExt;
 
 mod live;
 mod render;
+mod steps;
 
 use live::discover_live_base_url_surfaces;
 use render::{render_discovery_report, render_product_surface_map};
+use steps::{generated_steps_for_surface, manifest_steps_for_route};
 
 const DEFAULT_AGENT_TIMEOUT_MS: u64 = 120_000;
 
@@ -83,6 +86,8 @@ pub(crate) struct FlowCandidate {
     pub(crate) keyboard: bool,
     pub(crate) video: bool,
     pub(crate) trace: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) steps: Vec<StateStep>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -176,20 +181,7 @@ pub(crate) fn run_discovery(options: DiscoveryOptions) -> Result<DiscoveryReceip
         flow_id: "autonomous-discovered-flow".to_string(),
         candidates: surfaces
             .iter()
-            .map(|surface| FlowCandidate {
-                id: surface.id.clone(),
-                path: surface.route.clone(),
-                description: format!("Generated coverage candidate for {}", surface.title),
-                promotion_state: "generated_candidate".to_string(),
-                required: true,
-                axe: true,
-                screenshot: true,
-                dom_snapshot: true,
-                accessibility_tree: true,
-                keyboard: true,
-                video: true,
-                trace: true,
-            })
+            .map(|surface| flow_candidate_for_surface(&manifest, &options.manifest_path, surface))
             .collect(),
     };
 
@@ -243,7 +235,7 @@ pub(crate) fn run_promote_flow(options: PromoteFlowOptions) -> Result<PromoteFlo
             path: candidate.path.clone(),
             description: candidate.description.clone(),
             required: candidate.required,
-            steps: Vec::new(),
+            steps: candidate.steps.clone(),
             axe: candidate.axe,
             screenshot: candidate.screenshot,
             dom_snapshot: candidate.dom_snapshot,
@@ -254,6 +246,7 @@ pub(crate) fn run_promote_flow(options: PromoteFlowOptions) -> Result<PromoteFlo
             promotion_state: Some("verified_flow".to_string()),
         })
         .collect();
+    manifest.validate()?;
 
     let yaml = serde_yaml::to_string(&manifest).map_err(|source| AllieError::Yaml {
         context: format!(
@@ -826,7 +819,7 @@ fn generated_flow_manifest(manifest: &FlowManifest, surfaces: &[ProductSurface])
                 path: route.clone(),
                 description: surface.title.clone(),
                 required: true,
-                steps: Vec::new(),
+                steps: manifest_steps_for_route(manifest, route),
                 axe: true,
                 screenshot: true,
                 dom_snapshot: true,
@@ -839,6 +832,28 @@ fn generated_flow_manifest(manifest: &FlowManifest, surfaces: &[ProductSurface])
         })
         .collect();
     generated
+}
+
+fn flow_candidate_for_surface(
+    manifest: &FlowManifest,
+    manifest_path: &Path,
+    surface: &DiscoveredSurface,
+) -> FlowCandidate {
+    FlowCandidate {
+        id: surface.id.clone(),
+        path: surface.route.clone(),
+        description: format!("Generated coverage candidate for {}", surface.title),
+        promotion_state: "generated_candidate".to_string(),
+        required: true,
+        axe: true,
+        screenshot: true,
+        dom_snapshot: true,
+        accessibility_tree: true,
+        keyboard: true,
+        video: true,
+        trace: true,
+        steps: generated_steps_for_surface(manifest, manifest_path, surface),
+    }
 }
 
 fn discover_surfaces(manifest: &FlowManifest, manifest_path: &Path) -> Result<SurfaceDiscovery> {

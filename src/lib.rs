@@ -1173,7 +1173,7 @@ struct ManifestState {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
-enum StateStep {
+pub(crate) enum StateStep {
     Fill { fill: StateFill },
     Type { r#type: StateType },
     Click { click: StateClick },
@@ -1207,28 +1207,28 @@ impl StateStep {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct StateFill {
-    selector: String,
-    value: String,
+pub(crate) struct StateFill {
+    pub(crate) selector: String,
+    pub(crate) value: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct StateType {
-    selector: String,
-    text: String,
+pub(crate) struct StateType {
+    pub(crate) selector: String,
+    pub(crate) text: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct StateClick {
-    selector: String,
+pub(crate) struct StateClick {
+    pub(crate) selector: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct StateWaitFor {
+pub(crate) struct StateWaitFor {
     #[serde(default)]
-    selector: Option<String>,
+    pub(crate) selector: Option<String>,
     #[serde(default)]
-    url_contains: Option<String>,
+    pub(crate) url_contains: Option<String>,
 }
 
 impl StateWaitFor {
@@ -2948,6 +2948,29 @@ mod tests {
                 .any(|surface| surface["id"] == "settings")
         );
         assert_eq!(packet["promotion"]["default_state"], "generated_candidate");
+        let flow_plan: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&flow_plan_path).unwrap()).unwrap();
+        let candidates = flow_plan["candidates"].as_array().unwrap();
+        let home = candidates
+            .iter()
+            .find(|candidate| candidate["id"] == "home")
+            .expect("home candidate present");
+        assert!(
+            home["steps"]
+                .as_array()
+                .is_some_and(|steps| steps.len() >= 2),
+            "generated home candidate should include click/wait steps for the menu"
+        );
+        let settings = candidates
+            .iter()
+            .find(|candidate| candidate["id"] == "settings")
+            .expect("settings candidate present");
+        assert!(
+            settings["steps"]
+                .as_array()
+                .is_some_and(|steps| steps.len() >= 3),
+            "generated settings candidate should include fill/type/wait steps for the email form"
+        );
 
         stdout.clear();
         stderr.clear();
@@ -2970,6 +2993,68 @@ mod tests {
         assert!(generated.contains("promotion_state: verified_flow"));
         assert!(generated.contains("accessibility_tree: true"));
         assert!(generated.contains("keyboard: true"));
+        assert!(generated.contains("steps:"));
+        assert!(generated.contains("click:"));
+        assert!(generated.contains("wait_for:"));
+        assert!(generated.contains("qa@example.test"));
+    }
+
+    #[test]
+    fn promote_flow_rejects_invalid_candidate_steps() {
+        let temp = tempdir().unwrap();
+        let discovery_dir = temp.path().join("discovery");
+        let generated_manifest = temp.path().join("generated.yml");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_cli_with_io(
+            vec![
+                "discover".to_string(),
+                "--manifest".to_string(),
+                "examples/autonomous-workbench.yml".to_string(),
+                "--out".to_string(),
+                discovery_dir.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let packet_path = discovery_dir.join("discovery.json");
+        let flow_plan_path = discovery_dir.join("flow-plan.json");
+        let mut flow_plan: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&flow_plan_path).unwrap()).unwrap();
+        flow_plan["candidates"][0]["steps"] = serde_json::json!([{ "wait_for": {} }]);
+        fs::write(
+            &flow_plan_path,
+            serde_json::to_string_pretty(&flow_plan).unwrap(),
+        )
+        .unwrap();
+
+        stdout.clear();
+        stderr.clear();
+        let code = run_cli_with_io(
+            vec![
+                "promote-flow".to_string(),
+                "--discovery".to_string(),
+                packet_path.to_string_lossy().to_string(),
+                "--flow-plan".to_string(),
+                flow_plan_path.to_string_lossy().to_string(),
+                "--out".to_string(),
+                generated_manifest.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_ne!(code, 0, "promote-flow must reject invalid candidate steps");
+        assert!(
+            String::from_utf8_lossy(&stderr)
+                .contains("wait_for requires a selector or url_contains"),
+            "stderr={}",
+            String::from_utf8_lossy(&stderr)
+        );
+        assert!(!generated_manifest.exists());
     }
 
     #[test]
