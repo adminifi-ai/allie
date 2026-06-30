@@ -7,6 +7,7 @@ contract:
 
 ```sh
 allie init --manifest .allie/manifest.yml --app-name "My App"
+allie doctor --manifest .allie/manifest.yml --out .allie/doctor
 allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
 ```
 

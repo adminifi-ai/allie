@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" data-ae-mode="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Plan 018 - Adoption Trivial</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/misty-step/aesthetic@v2.5.1/aesthetic.css">
+  <style>
+    :root { --ae-accent: #2557a7; }
+    .plan-wide .ae-bar, .plan-wide .ae-stage { width: min(92rem, 100% - 4rem); }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(24em, .72fr); gap: 3em; align-items: end; }
+    .grid-5, .grid-3, .grid-2 { display: grid; gap: 1px; background: var(--ae-line); }
+    .grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cell { min-width: 0; background: var(--ae-surface); padding: 1.15em 1.3em; }
+    .wash { background: var(--ae-wash); }
+    .phase { display: grid; grid-template-columns: 8em minmax(0, 1fr) minmax(15em, .65fr); gap: 1.2em; border-top: 1px solid var(--ae-line); padding-top: 1em; margin-top: 1em; }
+    .phase:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+    .rule { border-top: 1px solid var(--ae-line); margin: 1.3em 0; }
+    @media (max-width: 980px) {
+      .plan-wide .ae-bar, .plan-wide .ae-stage { width: min(100% - 2rem, 92rem); }
+      .hero, .grid-5, .grid-3, .grid-2, .phase { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="ae-screen plan-wide">
+  <header class="ae-bar">
+    <a class="ae-name" href="../..">ALLIE / PLAN 018</a>
+    <p class="ae-chrome">adoption-trivial slice - rendered executor contract</p>
+  </header>
+
+  <main class="ae-stage ae-stage-scroll">
+    <article class="ae-view">
+      <section class="hero" aria-label="Plan contract">
+        <div>
+          <p class="ae-chrome">BACKLOG 018 - P1 - MAKE ADOPTION TRIVIAL</p>
+          <h1 class="ae-strong">A consumer repo can run Allie without exporting a browser-worker path.</h1>
+          <p class="ae-lede">The first adoption slice removes the most brittle setup step: `ALLIE_BROWSER_WORKER`. The Rust CLI should locate the bundled worker from the installed binary, an adjacent checkout, or the existing explicit env override, then tell the operator how to fix missing Node or Playwright prerequisites with `allie doctor`.</p>
+        </div>
+        <aside class="ae-panel">
+          <h2 class="ae-h">CHOSEN DESIGN</h2>
+          <p>Put worker discovery behind the browser-worker adapter, add `allie doctor` as the public preflight, and make consumer smoke fail if the env var is still needed.</p>
+          <div class="rule"></div>
+          <h2 class="ae-h">QUALITY SYSTEM</h2>
+          <p>Standards: no setup magic, no provider leakage, Rust-owned CLI contract, direct error messages, and no weakened gates.</p>
+          <p>Proof: focused Rust tests, `npm run consumer-cwd:smoke`, `npm run verify`, and thermo review on the public workflow.</p>
+          <div class="rule"></div>
+          <p class="ae-dim">Premise: `backlog.d/018-make-adoption-trivial.md`, `VISION.md`, `src/worker.rs`, `scripts/consumer-cwd-smoke.sh`.</p>
+        </aside>
+      </section>
+
+      <section class="grid-5" aria-label="Executive contract" style="margin-top: 2em">
+        <article class="cell"><h2 class="ae-h">STANDARDS</h2><p>Clone-or-install consumers run the same `allie verify` path locally and in CI without a hidden worker env var.</p></article>
+        <article class="cell"><h2 class="ae-h">ACCEPTANCE</h2><p>`allie run` from a temp consumer repo captures evidence with `ALLIE_BROWSER_WORKER` unset; `allie doctor` reports worker, Node, and Playwright readiness.</p></article>
+        <article class="cell"><h2 class="ae-h">VERIFY</h2><p>Consumer-CWD smoke, focused CLI tests, docs contract assertions, and full `npm run verify`.</p></article>
+        <article class="cell"><h2 class="ae-h">COMMUNICATE</h2><p>Report the resolved behavior, commands run, CI wrapper changes, and residual packaging limits.</p></article>
+        <article class="cell wash"><h2 class="ae-h">STOP IF</h2><p>The worker cannot be found from an installed binary without a new packaging convention, or the smoke still requires env wiring.</p></article>
+      </section>
+
+      <section class="grid-3" aria-label="Current state" style="margin-top: 1px">
+        <article class="cell">
+          <h2 class="ae-h">CURRENT STATE</h2>
+          <p>`src/worker.rs` checks `ALLIE_BROWSER_WORKER`, then falls back to `env!("CARGO_MANIFEST_DIR")/workers/browser/run.mjs`. Consumer docs and CI examples export the env var.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">CHANGE SHAPE</h2>
+          <p>Add a small worker runtime module: resolve script candidates relative to env override, current executable, and checkout roots; expose diagnostics for `allie doctor`.</p>
+        </article>
+        <article class="cell wash">
+          <h2 class="ae-h">PROOF SURFACE</h2>
+          <p>`scripts/consumer-cwd-smoke.sh` must delete the env override and still capture one state with zero infrastructure failures and correct Git provenance.</p>
+        </article>
+      </section>
+
+      <section class="grid-2" aria-label="Scope" style="margin-top: 2em">
+        <article class="cell">
+          <h2 class="ae-h">SCOPE</h2>
+          <p><strong>Goal:</strong> make the normal consumer path self-locating and self-diagnosing.</p>
+          <p><strong>Non-goals:</strong> publishing a real release artifact, containers, package manager install, or solving agentic worker distribution.</p>
+          <p><strong>Invariants:</strong> local-first execution, evidence packet as core interface, no legal compliance claim, no hidden cloud or model dependency.</p>
+        </article>
+        <article class="cell">
+          <h2 class="ae-h">REPO ANCHORS</h2>
+          <p><code>src/worker.rs</code> - canonical browser worker adapter.</p>
+          <p><code>src/consumer.rs</code> and <code>src/cli.rs</code> - init, verify, and CLI usage.</p>
+          <p><code>scripts/consumer-cwd-smoke.sh</code> - live consumer proof.</p>
+          <p><code>README.md</code>, <code>docs/verification.md</code>, <code>docs/ci/*</code> - operator contract.</p>
+        </article>
+      </section>
+
+      <section class="ae-panel" aria-label="Verification system" style="margin-top: 2em">
+        <h2 class="ae-h">VERIFICATION SYSTEM</h2>
+        <p><strong>Claim:</strong> a consumer repo can run Allie without manually exporting the browser-worker path.</p>
+        <p><strong>Falsifier:</strong> with `ALLIE_BROWSER_WORKER` unset, a foreign-CWD run records zero states or a worker infrastructure failure.</p>
+        <p><strong>Driver:</strong> `npm run consumer-cwd:smoke` and `cargo run --locked -- doctor`.</p>
+        <p><strong>Grader:</strong> evidence JSON has `states_captured >= 1`, `infrastructure_failures == 0`, and doctor reports actionable readiness.</p>
+        <p><strong>Evidence packet:</strong> `.allie/run/latest/evidence.json`, consumer smoke transcript, and reporter docs checks.</p>
+        <p><strong>Cadence:</strong> before implementation as red proof, after each fix, then full `npm run verify` before PR.</p>
+      </section>
+
+      <section class="ae-panel" aria-label="Execution plan" style="margin-top: 2em">
+        <h2 class="ae-h">EXECUTION PLAN</h2>
+        <div class="phase"><strong class="ae-accent">1 red</strong><p>Remove `ALLIE_BROWSER_WORKER` from consumer-CWD smoke and confirm it fails against current worker resolution.</p><p class="ae-dim">Evidence: failing smoke or focused unit test.</p></div>
+        <div class="phase"><strong class="ae-accent">2 build</strong><p>Implement explicit worker discovery and diagnostics in `src/worker.rs`; add `allie doctor` wiring through `src/cli.rs`.</p><p class="ae-dim">Evidence: focused Rust tests for candidate order and doctor summaries.</p></div>
+        <div class="phase"><strong class="ae-accent">3 docs</strong><p>Rewrite quickstart, verification runbook, and CI examples so the env var disappears from normal setup.</p><p class="ae-dim">Evidence: smoke assertions that CI docs call the portable command without worker env.</p></div>
+        <div class="phase"><strong class="ae-accent">4 review</strong><p>Run thermo against the diff with a public-workflow lens: no magic fallback, no shallow wrapper, no doc/runtime drift.</p><p class="ae-dim">Evidence: blockers fixed or explicitly rejected.</p></div>
+        <div class="phase"><strong class="ae-accent">5 close</strong><p>Run `npm run consumer-cwd:smoke`, `cargo test --locked`, and `npm run verify`; push PR only with clean status.</p><p class="ae-dim">Evidence: final gate output and clean `git status`.</p></div>
+      </section>
+
+      <section class="grid-2" aria-label="Alternatives and risks" style="margin-top: 2em">
+        <article class="cell">
+          <h2 class="ae-h">ALTERNATIVES</h2>
+          <p><strong>Env var forever:</strong> simplest implementation, but it preserves the adoption footgun the ticket exists to remove.</p>
+          <p><strong>Container first:</strong> good eventual distribution, but over-scopes this slice and delays the local contract.</p>
+          <p><strong>Node rewrite in Rust:</strong> violates the narrow Playwright boundary and is not needed for adoption.</p>
+        </article>
+        <article class="cell wash">
+          <h2 class="ae-h">RISKS</h2>
+          <p>Installed binaries do not always know where bundled JS lives. The resolver should be explicit about searched paths and doctor should turn that into a fix, not a raw spawn failure.</p>
+          <p>Playwright dependencies still require Node setup. This slice improves discovery and guidance; it does not pretend packaging is finished.</p>
+        </article>
+      </section>
+    </article>
+  </main>
+</div>
+</body>
+</html>

@@ -1,10 +1,10 @@
 use crate::{
-    ExitClass, NEXT_STEP, PRODUCT_LINE, parse_discovery_options, parse_map_options,
-    parse_promote_flow_options, parse_release_options, parse_report_options, parse_review_options,
-    parse_run_options, run_compliance_report, run_discovery, run_map, run_promote_flow,
-    run_release, run_review, run_v0,
+    ExitClass, NEXT_STEP, PRODUCT_LINE, parse_discovery_options, parse_doctor_options,
+    parse_map_options, parse_promote_flow_options, parse_release_options, parse_report_options,
+    parse_review_options, parse_run_options, run_compliance_report, run_discovery, run_map,
+    run_promote_flow, run_release, run_review, run_v0,
 };
-use crate::{consumer, workbench};
+use crate::{consumer, workbench, worker_runtime};
 use std::fmt::Display;
 use std::io::{self, Write};
 
@@ -39,6 +39,7 @@ pub(crate) fn run_cli_with_io(
     match args.first().map(String::as_str) {
         Some("init") => handle_init(&args[1..], stdout, stderr),
         Some("verify") => handle_verify(&args[1..], stdout, stderr),
+        Some("doctor") => handle_doctor(&args[1..], stdout, stderr),
         Some("run") => handle_run(&args[1..], stdout, stderr),
         Some("discover") => handle_discover(&args[1..], stdout, stderr),
         Some("promote-flow") => handle_promote_flow(&args[1..], stdout, stderr),
@@ -55,6 +56,30 @@ pub(crate) fn run_cli_with_io(
     }
 }
 
+fn handle_doctor(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    match parse_doctor_options(args) {
+        Ok(options) => {
+            let receipt = worker_runtime::run_doctor(worker_runtime::DoctorOptions {
+                manifest_path: options.manifest_path,
+                out_dir: options.out_dir,
+            });
+            let _ = writeln!(stdout, "Allie doctor status: {}", receipt.status);
+            for check in receipt.checks {
+                let _ = writeln!(
+                    stdout,
+                    "{}: {} - {}",
+                    check.name, check.status, check.detail
+                );
+                if let Some(fix) = check.fix {
+                    let _ = writeln!(stdout, "  fix: {fix}");
+                }
+            }
+            receipt.exit_class.code()
+        }
+        Err(error) => usage_error(error, stderr),
+    }
+}
+
 fn handle_init(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
     match consumer::parse_init_options(args) {
         Ok(options) => match consumer::run_init(options) {
@@ -64,6 +89,10 @@ fn handle_init(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) 
                     "Allie manifest: {}",
                     receipt.manifest_path.display()
                 );
+                let _ = writeln!(stdout, "Setup checklist:");
+                for step in receipt.setup_steps {
+                    let _ = writeln!(stdout, "  - {step}");
+                }
                 let _ = writeln!(stdout, "Next: {}", receipt.next_command);
                 ExitClass::Success.code()
             }
@@ -279,7 +308,7 @@ fn usage_error(error: impl Display, stderr: &mut dyn Write) -> i32 {
 fn print_usage(writer: &mut dyn Write) {
     let _ = writeln!(
         writer,
-        "Usage:\n  allie init [--manifest .allie/manifest.yml] [--app-name <name>] [--base-url <url> | --fixture-dir <dir>] [--force]\n  allie verify [--manifest .allie/manifest.yml] [--out .allie/verify/latest] [--project-root <dir>] [--changed-surface <id>] [--agent local|opencode|omp] [--stale-after-days <days>]\n  allie run --manifest <flow.yml> --out <output-dir> [--project-root <dir>]\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
+        "Usage:\n  allie init [--manifest .allie/manifest.yml] [--app-name <name>] [--base-url <url> | --fixture-dir <dir>] [--force]\n  allie doctor [--manifest .allie/manifest.yml | --no-manifest] [--out .allie/doctor]\n  allie verify [--manifest .allie/manifest.yml] [--out .allie/verify/latest] [--project-root <dir>] [--changed-surface <id>] [--agent local|opencode|omp] [--stale-after-days <days>]\n  allie run --manifest <flow.yml> --out <output-dir> [--project-root <dir>]\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
     );
 }
 
@@ -311,5 +340,18 @@ mod tests {
         let stderr = String::from_utf8(stderr).unwrap();
         assert!(stderr.contains("--packet is required"));
         assert!(stderr.contains("allie release --packet"));
+    }
+
+    #[test]
+    fn doctor_handler_reports_usage_for_unexpected_args() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = handle_doctor(&["--wat".to_string()], &mut stdout, &mut stderr);
+
+        assert_eq!(code, ExitClass::Usage.code());
+        let stderr = String::from_utf8(stderr).unwrap();
+        assert!(stderr.contains("unexpected argument: --wat"));
+        assert!(stderr.contains("allie doctor"));
     }
 }

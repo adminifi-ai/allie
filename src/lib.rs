@@ -25,6 +25,7 @@ mod standards;
 mod test_support;
 mod workbench;
 mod worker;
+mod worker_runtime;
 
 use crate::auth::AuthFlow;
 pub(crate) use crate::discovery::{
@@ -142,6 +143,12 @@ struct RunOptions {
     manifest_path: PathBuf,
     out_dir: PathBuf,
     project_root: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+struct DoctorOptions {
+    manifest_path: Option<PathBuf>,
+    out_dir: PathBuf,
 }
 
 #[derive(Debug)]
@@ -265,6 +272,41 @@ fn parse_run_options(args: &[String]) -> std::result::Result<RunOptions, String>
         manifest_path: manifest_path.ok_or_else(|| "--manifest is required".to_string())?,
         out_dir: out_dir.ok_or_else(|| "--out is required".to_string())?,
         project_root,
+    })
+}
+
+fn parse_doctor_options(args: &[String]) -> std::result::Result<DoctorOptions, String> {
+    let mut manifest_path = Some(PathBuf::from(".allie/manifest.yml"));
+    let mut out_dir = PathBuf::from(".allie/doctor");
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--manifest" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--manifest requires a path".to_string())?;
+                manifest_path = Some(PathBuf::from(value));
+            }
+            "--no-manifest" => {
+                manifest_path = None;
+            }
+            "--out" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--out requires a directory".to_string())?;
+                out_dir = PathBuf::from(value);
+            }
+            unexpected => return Err(format!("unexpected argument: {unexpected}")),
+        }
+        index += 1;
+    }
+
+    Ok(DoctorOptions {
+        manifest_path,
+        out_dir,
     })
 }
 
@@ -2348,6 +2390,9 @@ mod tests {
 
         assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
         let stdout = String::from_utf8(stdout).unwrap();
+        assert!(stdout.contains("Setup checklist:"));
+        assert!(stdout.contains("allie doctor --manifest"));
+        assert!(stdout.contains("npx playwright install chromium"));
         assert!(stdout.contains("allie verify --manifest"));
         assert!(!stdout.to_lowercase().contains("github"));
         let manifest = FlowManifest::load(&manifest_path).unwrap();

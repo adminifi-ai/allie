@@ -11,19 +11,24 @@ npm ci
 npx playwright install chromium
 ```
 
-In a consuming repository that does not vendor Allie's worker yet, install the
-Rust binary and browser worker checkout together:
+In a consuming repository, install the release bundle and put its `bin`
+directory on `PATH`. The bundle keeps the Rust binary and browser worker assets
+together, so the CLI resolves the worker automatically.
 
 ```sh
-git clone --depth 1 https://github.com/adminifi-ai/allie .allie/tooling/allie
-cargo install --path .allie/tooling/allie --locked
-cd .allie/tooling/allie
-npm ci
-npx playwright install chromium
-cd -
-ALLIE_BROWSER_WORKER=.allie/tooling/allie/workers/browser/run.mjs \
-  allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
+mkdir -p .allie/tooling
+curl -fsSL https://github.com/adminifi-ai/allie/releases/latest/download/allie-linux-x64.tar.gz \
+  | tar -xz -C .allie/tooling
+export PATH="$PWD/.allie/tooling/allie/bin:$PATH"
+allie doctor --manifest .allie/manifest.yml --out .allie/doctor
+allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
 ```
+
+For source-checkout development, run `npm ci` and `npx playwright install
+chromium` in the Allie checkout once. `ALLIE_BROWSER_WORKER` is still an
+explicit override for nonstandard layouts, not part of the normal consumer path.
+Release bundles are built with `npm run package:release`; tag pushes publish the
+Linux bundle consumed by the CI examples.
 
 CI should archive the whole `.allie/verify/latest` directory, not just
 `reporters/`, because `reporters/allie-report.html` links to sibling map,
@@ -56,6 +61,7 @@ npm run visibility:smoke
 npm run coverage:smoke
 npm run consumer:smoke
 npm run consumer-cwd:smoke
+npm run distribution:smoke
 npm run agentic:smoke
 npm run release:smoke
 npm run autonomous:smoke
