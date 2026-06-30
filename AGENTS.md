@@ -9,6 +9,8 @@ Run before claiming repo changes are complete:
 ```sh
 cargo fmt --check
 cargo test --locked
+cargo clippy --locked -- -D warnings
+npm run secrets:smoke
 npm run worker:smoke
 npm run evidence:smoke
 npm run action:smoke

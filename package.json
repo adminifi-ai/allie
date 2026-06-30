@@ -8,6 +8,7 @@
     "evidence:smoke": "cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/v0-smoke",
     "action:smoke": "scripts/action-steps-smoke.sh",
     "auth:smoke": "scripts/auth-smoke.sh",
+    "secrets:smoke": "scripts/secret-scan.sh --self-test && scripts/secret-scan.sh",
     "visibility:smoke": "scripts/visibility-smoke.sh",
     "coverage:smoke": "scripts/coverage-matrix-smoke.sh",
     "landscape:smoke": "scripts/landscape-smoke.sh",
