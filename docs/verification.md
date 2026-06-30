@@ -163,6 +163,11 @@ assistive-technology obligations are still marked `not_tested` or
 .allie/jobs/autonomous-smoke/steps/report/compliance-report.json
 .allie/jobs/autonomous-smoke/steps/review/evidence-reviewed.json
 .allie/jobs/autonomous-smoke/steps/release/release-summary.json
+.allie/jobs/autonomous-agentic-smoke/steps/run/agentic-request.json
+.allie/jobs/autonomous-agentic-smoke/steps/run/agentic-response.json
+.allie/jobs/autonomous-agentic-smoke/steps/run/evidence.json
+.allie/jobs/autonomous-agentic-smoke/steps/report/compliance-report.json
+.allie/jobs/autonomous-agentic-smoke/steps/release/release-summary.json
 .allie/discovery/autonomous-smoke/discovery.json
 .allie/discovery/autonomous-smoke/flow-plan.json
 .allie/discovery/autonomous-smoke/generated-flow.yml
@@ -185,9 +190,12 @@ cargo run --locked -- workbench status --job .allie/jobs/autonomous-smoke
 The expected completed fixture job has `schema: allie.job.v0`, `status:
 blocked`, release status `blocked`, resumable state, and artifact pointers for
 map, evidence, compliance report, review, and release outputs. The smoke also
-verifies that `workbench start` refuses to reuse an existing job directory and
+verifies that `workbench start` refuses to reuse an existing job directory,
 that non-local advisory agent modes stay on the one-shot `map` path until
-durable session adapters exist.
+durable session adapters exist, and that a `model.enabled` workbench job runs
+the live agentic gateway before report/release. The model-enabled smoke unsets
+the configured API key, so the gateway must still capture media and write
+degraded `inconclusive` assessments without fabricating pass/fail verdicts.
 
 ## Failure Meanings
 

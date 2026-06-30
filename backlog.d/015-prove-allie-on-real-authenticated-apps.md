@@ -11,7 +11,7 @@ packet.
 - [x] Worker executes pre-state action steps (fill/click/type/waitFor), not just `goto`.
 - [x] BYO credentials reach the browser (env → login step → reused storageState); creds never written to packets (redaction holds).
 - [x] Discovery crawls a live `base_url` target (HTTP fetch + link graph), not only the fixture filesystem.
-- [ ] Live agentic review runs in the workbench loop (no `offline-recorded`/`allie-vision-fixture` hardcode) when `model.enabled`.
+- [x] Live agentic review runs in the workbench loop (no `offline-recorded`/`allie-vision-fixture` hardcode) when `model.enabled`.
 - [x] `verify` flags/refuses unauthenticated coverage when an auth profile implies a session (no false "no violations").
 - [ ] Dogfood receipt: a real authenticated app from a misty-step / adminifi-ai / personal repo audited end-to-end, receipt preserved.
 
@@ -55,5 +55,13 @@ auto-promoted generated coverage, so the login page does not masquerade as an
 authenticated app state. `npm run auth:smoke` proves form-login auth,
 storageState auth, secret/path non-leakage, and negative `auth-lost` blocking
 through both `allie run` and the composed verify pipeline.
+
+**Delivered slice 5:** Durable workbench jobs now run the live agentic gateway
+when `model.enabled`, then feed the same reviewed evidence packet into report
+and release. `npm run autonomous:smoke` proves this with
+`.allie/jobs/autonomous-agentic-smoke/`: the API key is intentionally unset, so
+the gateway captures media, writes degraded `inconclusive` assessments, and
+keeps model-only findings advisory instead of falling back to the offline review
+fixture path.
 
 **Why:** real-app-proving lane (auth preflight-only `lib.rs:2862`; worker goto-only `run.mjs:128`; no credential serialization `lib.rs:3029`) + autonomy-depth lane (discovery fixture-only `lib.rs:1915`; workbench review offline `workbench.rs:390`). Operator priority #1. Land the worker-adapter extraction (epic 019, child 1) first to give child 1 here a clean seam.

@@ -91,11 +91,20 @@ pub(crate) fn run_agentic_review(
         context: format!("create agentic artifacts dir {}", artifacts_dir.display()),
         source,
     })?;
+    let target_base_url = if manifest.target.kind == "local_fixture" {
+        manifest.target.base_url.clone()
+    } else {
+        packet
+            .target
+            .base_url
+            .clone()
+            .or_else(|| manifest.target.base_url.clone())
+    };
 
     let request = serde_json::json!({
         "schema": "allie.agentic.request.v0",
         "target": {
-            "base_url": packet.target.base_url.clone().or_else(|| manifest.target.base_url.clone()),
+            "base_url": target_base_url,
             "fixture_dir": manifest.target.fixture_dir.as_ref().map(|dir| dir.to_string_lossy().to_string()),
         },
         "browser": {

@@ -51,3 +51,8 @@ test -f .allie/jobs/autonomous-smoke/job.json
 test -f .allie/jobs/autonomous-smoke/events.jsonl
 test -f .allie/jobs/autonomous-smoke/steps/map/product-map.json
 test -f .allie/jobs/autonomous-smoke/steps/report/compliance-report.json
+test -f .allie/jobs/autonomous-agentic-smoke/steps/run/agentic-request.json
+test -f .allie/jobs/autonomous-agentic-smoke/steps/run/agentic-response.json
+test -f .allie/jobs/autonomous-agentic-smoke/steps/run/evidence.json
+test -f .allie/jobs/autonomous-agentic-smoke/steps/report/compliance-report.json
+test -f .allie/jobs/autonomous-agentic-smoke/steps/release/release-summary.json

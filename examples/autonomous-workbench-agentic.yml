@@ -1,0 +1,55 @@
+id: autonomous-workbench-agentic
+name: Local autonomous workbench fixture (agentic)
+app_name: Allie autonomous fixture app
+environment: local-fixture
+auth_profile: local-fixture-no-auth
+credentials:
+  profile: local-fixture-no-auth
+  provider: none
+  required: false
+target:
+  kind: local_fixture
+  fixture_dir: ../fixtures/workbench
+policy:
+  profile: wcag22-aa
+  blocking_classes:
+    - deterministic
+    - scripted_required
+  worker_timeout_ms: 30000
+artifacts:
+  redaction_status: not_redacted_local_fixture
+  retention_class: local_ephemeral
+model:
+  enabled: true
+  provider_allowlist:
+    - openrouter
+  zdr_required: true
+  provider: openrouter
+  model: offline-workbench-smoke
+  api_key_env: ALLIE_AGENTIC_WORKBENCH_SMOKE_KEY
+  base_url: https://openrouter.ai/api/v1
+  max_model_calls: 1
+known_nondeterminism: []
+browser:
+  viewport:
+    width: 1280
+    height: 900
+  color_scheme: light
+  reduced_motion: reduce
+  locale: en-US
+  zoom: 1.0
+flow:
+  id: autonomous-seed-flow-agentic
+  description: Seed route for autonomous discovery with live agentic review enabled.
+  states:
+    - id: home
+      path: /
+      description: Discoverable home surface.
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+      accessibility_tree: true
+      keyboard: true
+      video: true
+      trace: true
