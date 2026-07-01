@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" data-allie-design="clean-atomic">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Plan 024 - Misty Step Aesthetic</title>
+  <style>
+    :root{--ink:#111111;--paper:#f6efe1;--panel:#fff9ea;--blue:#0a5ea8;--accent:#ffd22e;--pass:#167a3a;--fail:#c21d1d}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+    main{width:min(100% - 32px,1120px);margin:0 auto;padding:32px 0 72px}
+    .tab{display:inline-block;background:var(--blue);color:#fff;border:2px solid var(--ink);padding:4px 9px;font:800 12px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase}
+    h1{font-size:38px;line-height:1.04;text-transform:uppercase;margin:16px 0 8px}
+    p{margin:0;color:#25231f}
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;border:2px solid var(--ink);background:var(--ink);margin-top:24px}
+    .cell{background:var(--panel);padding:16px;border-right:2px solid var(--ink);min-height:150px}
+    .cell:last-child{border-right:0}
+    .wide{grid-column:span 2;border-top:2px solid var(--ink)}
+    h2{font:900 12px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;margin:0 0 12px}
+    code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    .status{display:inline-block;border:2px solid var(--ink);padding:3px 8px;font:900 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;background:var(--accent)}
+    @media(max-width:860px){.grid{grid-template-columns:1fr}.cell{border-right:0;border-bottom:2px solid var(--ink)}.wide{grid-column:auto}.cell:last-child{border-bottom:0}}
+  </style>
+</head>
+<body>
+  <main>
+    <span class="tab">PLAN 024</span>
+    <h1>Adopt clean-atomic comic-ops for Allie evidence reports.</h1>
+    <p>The durable design baseline must make proof easier to inspect: hard panels,
+      blue section tabs, dense ledgers, status slabs, and proof strips. Decoration
+      loses to WCAG legibility and evidence clarity.</p>
+    <section class="grid" aria-label="Plan">
+      <div class="cell">
+        <h2>Chosen Surface</h2>
+        <p>The WCAG compliance report is the first representative adoption surface
+          because it carries the criterion ledger, proof counts, screenshots,
+          and residual review evidence.</p>
+      </div>
+      <div class="cell">
+        <h2>Design Contract</h2>
+        <p>Create <code>DESIGN.md</code> and <code>docs/design-contract.md</code>
+          with the clean-atomic token set, source provenance, and no-copy boundary
+          for the generated concept board.</p>
+      </div>
+      <div class="cell">
+        <h2>Implementation</h2>
+        <p>Embed a local Misty Step-inspired token subset in <code>src/report.rs</code>.
+          Generated reports stay offline and self-contained.</p>
+      </div>
+      <div class="cell">
+        <h2>Stop Rule</h2>
+        <p><span class="status">Review required</span> if the report loses evidence
+          clarity, horizontal mobile fit, WCAG status legibility, or the full gate.</p>
+      </div>
+      <div class="cell wide">
+        <h2>Verification System</h2>
+        <p>Claim: representative report output visibly uses the baseline.
+          Falsifier: no design marker, no proof strip, no hard panels, no ledger,
+          mobile overflow, or failed canonical gate. Driver: <code>npm run coverage:smoke</code>,
+          Playwright screenshots, design lint, slop detector, and <code>npm run verify</code>.</p>
+      </div>
+      <div class="cell wide">
+        <h2>Source Decision</h2>
+        <p><code>@misty-step/aesthetic</code> is not available on npm here, and the
+          exact <code>9bbe0f9</code> CSS URL returned 404. The reachable source is
+          <code>misty-step/aesthetic@v2.5.1</code>; Allie records a local-subset
+          adoption to protect offline report portability.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
