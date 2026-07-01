@@ -78,11 +78,11 @@ fn build_state_evidence(packet: &EvidencePacket, packet_path: &Path) -> Vec<Stat
                     artifact_data_uri(&run_dir.join(&artifact.path)).map(|uri| {
                         let caption = if artifact.id.starts_with("mobile-screenshot-") {
                             format!(
-                                "{} — mobile viewport full page as Allie captured it",
+                                "{} - mobile viewport full page as Allie captured it",
                                 state.id
                             )
                         } else {
-                            format!("{} — full page as Allie captured it", state.id)
+                            format!("{} - full page as Allie captured it", state.id)
                         };
                         EvidenceMedia {
                             kind: "screenshot".to_string(),

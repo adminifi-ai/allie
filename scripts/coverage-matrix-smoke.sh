@@ -56,6 +56,12 @@ for (const cell of report.criterion_coverage) {
 }
 if (!html.includes('WCAG 2.2 success criteria')) throw new Error('html missing criteria section');
 if (!html.includes('WCAG 2.1 AA view')) throw new Error('html missing WCAG 2.1 profile view');
+if (!html.includes('data-allie-design') || !html.includes('clean-atomic')) throw new Error('html missing clean-atomic design marker');
+if (!html.includes('data-allie-aesthetic') || !html.includes('misty-step-v2.5.1-local-subset')) throw new Error('html missing Misty Step adoption marker');
+if (!html.includes('proof-strip')) throw new Error('html missing proof-strip component');
+if (!html.includes('hard-panel')) throw new Error('html missing hard-panel component');
+if (!html.includes('ledger')) throw new Error('html missing ledger component');
+if (!html.includes(':focus-visible{outline:3px solid var(--ink)')) throw new Error('html missing high-contrast focus outline');
 if (!html.includes('Supporting checks')) throw new Error('html missing support section');
 if (!html.includes('Criterion coverage matrix')) throw new Error('html missing coverage matrix');
 if (!html.includes('not a legal compliance guarantee')) throw new Error('html missing no-legal-claim text');

@@ -5,79 +5,88 @@ use crate::model::{
 };
 
 pub(crate) const REPORT_CSS: &str = r#"
+/* Allie clean-atomic comic-ops report skin.
+   Source decision: Misty Step aesthetic v2.5.1 was reachable, while the npm
+   package and exact 9bbe0f9 CSS URL were not. Reports embed this local subset
+   so evidence artifacts remain offline and self-contained. */
+:root{color-scheme:light;--allie-aesthetic-source:"@misty-step/aesthetic@v2.5.1";--ink:#111111;--paper:#f6efe1;--panel:#fff9ea;--blue:#0a5ea8;--accent:#ffd22e;--pass:#167a3a;--fail:#c21d1d;--review:#ffd22e;--muted:#4c4a42;--line:#111111;--white:#ffffff;--black:#000000;--body:#25231f;--faint:#d8cfbd;--fail-wash:#fff1e8;--review-wash:#fff6c9;--pass-wash:#edfff3;--evidence-wash:#fbf4df;--neutral-wash:#eee4ce;--review-light:#fffbe2}
 *{box-sizing:border-box}
-body{margin:0;color:#1a1d24;background:#eef1f6;font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
-main{width:min(100% - 32px,1080px);margin:0 auto;padding:34px 0 90px}
-a{color:#3450c4;text-decoration:none}
+body{margin:0;color:var(--ink);background:var(--paper);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+main{width:min(100% - 32px,1160px);margin:0 auto;padding:34px 0 90px}
+a{color:var(--blue);text-decoration:none;font-weight:800}
 a:hover{text-decoration:underline}
-:focus-visible{outline:2px solid #3450c4;outline-offset:2px;border-radius:4px}
+:focus-visible{outline:3px solid var(--ink);outline-offset:3px;box-shadow:0 0 0 6px var(--accent);border-radius:0}
 code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}
-.eyebrow{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:#5a6473;font-weight:700;margin:0 0 8px}
-h1{margin:0;font-size:34px;line-height:1.08;letter-spacing:-.02em}
-.sub{color:#5a6473;margin:8px 0 0;font-size:13px}
-.banner{margin:24px 0 6px;padding:18px 22px;border-radius:16px;border:1px solid;display:flex;gap:15px;align-items:center}
-.banner .dot{width:13px;height:13px;border-radius:50%;flex:none}
-.banner h2{margin:0;font-size:18px;letter-spacing:-.01em}
-.banner p{margin:3px 0 0;font-size:13.5px;opacity:.88}
-.b-fail{background:#fbe9e7;border-color:#f3c8c2}
-.b-review{background:#fbf3e1;border-color:#efdcb0}
-.b-pass{background:#e6f4ec;border-color:#c2e3d0}
-.scorecard{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:20px 0 6px}
-.score{background:#fff;border:1px solid #e4e8ef;border-radius:13px;padding:14px 16px}
-.score .n{font-size:27px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.score .k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#5a6473;margin-top:3px}
-.score.zero .n{color:#1a9457}
-.bar{height:11px;border-radius:7px;overflow:hidden;display:flex;border:1px solid #e4e8ef;margin:8px 0 4px;background:#fff}
+.eyebrow{display:inline-block;background:var(--blue);color:var(--white);border:2px solid var(--ink);padding:4px 9px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;margin:0 0 12px}
+h1{margin:0;font-size:38px;line-height:1.02;letter-spacing:0;text-transform:uppercase;font-weight:900}
+.sub{color:var(--muted);margin:8px 0 0;font-size:13px}
+.hard-panel{background:var(--panel);border:2px solid var(--ink);border-radius:0}
+.proof-strip{border:2px solid var(--ink);background:var(--ink)}
+.banner{margin:24px 0 6px;padding:16px 18px;display:flex;gap:16px;align-items:center}
+.banner .dot{width:30px;height:30px;border-radius:0;flex:none;border:2px solid var(--ink)}
+.banner h2{margin:0;font-size:18px;letter-spacing:0;text-transform:uppercase}
+.banner p{margin:3px 0 0;font-size:13.5px}
+.b-fail{background:var(--fail-wash)}
+.b-review{background:var(--review-wash)}
+.b-pass{background:var(--pass-wash)}
+.scorecard{display:grid;grid-template-columns:repeat(6,1fr);gap:0;margin:20px 0 10px}
+.score{background:var(--panel);border:0;border-right:2px solid var(--ink);padding:13px 14px}
+.score:last-child{border-right:0}
+.score .n{font-size:27px;font-weight:900;letter-spacing:0;font-variant-numeric:tabular-nums}
+.score .k{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:3px}
+.score.zero .n{color:var(--pass)}
+.bar{height:14px;border-radius:0;overflow:hidden;display:flex;border:2px solid var(--ink);margin:8px 0 6px;background:var(--panel)}
 .bar i{display:block;height:100%}
-.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#5a6473;margin:0 0 6px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted);margin:0 0 6px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
-.legend b{width:10px;height:10px;border-radius:3px;display:inline-block}
+.legend b{width:12px;height:12px;border-radius:0;border:1px solid var(--ink);display:inline-block}
 section{margin:38px 0}
-.sh{font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:#5a6473;margin:0 0 16px;font-weight:700}
+.sh{display:inline-block;background:var(--blue);color:var(--white);border:2px solid var(--ink);padding:4px 9px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 16px;font-weight:900}
 .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
-figure{margin:0;background:#fff;border:1px solid #e4e8ef;border-radius:13px;overflow:hidden}
-figure img{display:block;width:100%;height:auto;border-bottom:1px solid #e4e8ef;background:#f4f5f8}
-figure video{display:block;width:100%;height:auto;border-bottom:1px solid #e4e8ef;background:#000}
-figcaption{padding:11px 13px;font-size:12.5px;color:#5a6473}
+figure{margin:0;overflow:hidden}
+figure img{display:block;width:100%;height:auto;border-bottom:2px solid var(--ink);background:var(--evidence-wash)}
+figure video{display:block;width:100%;height:auto;border-bottom:2px solid var(--ink);background:var(--black)}
+figcaption{padding:11px 13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
 .principle{margin:24px 0}
-.principle h3{font-size:19px;margin:0 0 2px;letter-spacing:-.01em}
-.principle .pmeta{color:#5a6473;font-size:12.5px;margin:0 0 14px}
-.crit{background:#fff;border:1px solid #e4e8ef;border-left:4px solid #c7ced9;border-radius:13px;padding:16px 18px;margin:11px 0}
-.crit.s-pass{border-left-color:#1a9457}
-.crit.s-fail{border-left-color:#d23b30}
-.crit.s-review{border-left-color:#d39a2a}
-.crit.s-na{border-left-color:#9aa6b6}
-.crit.s-nottested{border-left-color:#8b5cf6}
+.principle h3{font-size:19px;margin:0 0 2px;letter-spacing:0;text-transform:uppercase}
+.principle .pmeta{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:0 0 14px}
+.crit{padding:15px 17px;margin:10px 0;position:relative}
+.crit.s-pass{box-shadow:inset 8px 0 0 var(--pass)}
+.crit.s-fail{box-shadow:inset 8px 0 0 var(--fail)}
+.crit.s-review{box-shadow:inset 8px 0 0 var(--review)}
+.crit.s-na{box-shadow:inset 8px 0 0 var(--faint)}
+.crit.s-nottested{box-shadow:inset 8px 0 0 var(--blue)}
 .crit-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}
-.crit-id{font-weight:600;font-size:15.5px;letter-spacing:-.01em}
-.crit-id .num{color:#5a6473;font-variant-numeric:tabular-nums;margin-right:9px}
+.crit-id{font-weight:900;font-size:15.5px;letter-spacing:0}
+.crit-id .num{display:inline-block;background:var(--blue);color:var(--white);border:2px solid var(--ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;margin-right:9px;padding:0 5px}
 .chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.chip{font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;letter-spacing:.02em}
-.chip-pass{background:#e6f4ec;color:#0f6b3c}
-.chip-fail{background:#fbe9e7;color:#b3271d}
-.chip-review{background:#fbf0db;color:#875400}
-.chip-na{background:#eceff4;color:#4a5566}
-.chip-nottested{background:#efe6fb;color:#6d28b8}
-.chip-method{background:#eef1f7;color:#42506a}
-.chip-level{background:#eef1f7;color:#5a6473}
-.chip-ai{box-shadow:inset 0 0 0 1px rgba(0,0,0,.16)}
+.chip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;font-weight:900;padding:3px 8px;border-radius:0;border:2px solid var(--ink);white-space:nowrap;letter-spacing:.04em;text-transform:uppercase;color:var(--ink);background:var(--panel)}
+.chip-pass{background:var(--pass);color:var(--white)}
+.chip-fail{background:var(--fail);color:var(--white)}
+.chip-review{background:var(--review);color:var(--ink)}
+.chip-na{background:var(--neutral-wash);color:var(--ink)}
+.chip-nottested{background:var(--blue);color:var(--white)}
+.chip-method{background:var(--white);color:var(--ink)}
+.chip-level{background:var(--white);color:var(--ink)}
+.chip-ai{outline:2px solid var(--accent);outline-offset:2px}
 .chip sup{font-size:.72em;font-weight:800;margin-left:1px}
-.why{margin:11px 0 0;color:#39414f;font-size:14px}
-.crit-foot{margin-top:12px;display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:#5a6473;align-items:center}
-.ai{margin-top:13px;border:1px solid #e3e7f3;border-radius:11px;background:#f7f8fd;padding:13px 15px}
-.ai-h{display:flex;gap:8px;align-items:center;font-size:11.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#3f4b8a}
+.why{margin:11px 0 0;color:var(--body);font-size:14px}
+.crit-foot{margin-top:12px;display:flex;gap:18px;flex-wrap:wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted);align-items:center}
+.ai{margin-top:13px;background:var(--review-wash);padding:12px 14px}
+.ai-h{display:flex;gap:8px;align-items:center;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:var(--ink)}
 .ai-h .v{margin-left:auto;font-weight:700}
-.ai p{margin:8px 0 0;font-size:13.5px;color:#2c3340}
-.ai .guide{margin-top:9px;padding:10px 12px;background:#fff;border:1px solid #e7eaf2;border-radius:9px;font-size:13px}
-.ai .guide b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#5a6473;margin-bottom:3px}
+.ai p{margin:8px 0 0;font-size:13.5px;color:var(--body)}
+.ai .guide{margin-top:9px;padding:10px 12px;font-size:13px}
+.ai .guide b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}
 .ai-media{display:flex;gap:10px;flex-wrap:wrap;margin-top:11px}
 .ai-media figure{max-width:260px}
-.pending{margin-top:13px;border:1px dashed #d7deea;border-radius:11px;background:#fafbfd;padding:11px 14px;color:#6b7280;font-size:13px}
-.matrix-wrap>summary{cursor:pointer;font-weight:700;color:#3450c4;padding:10px 0;font-size:13.5px}
+.pending{margin-top:13px;border:2px dashed var(--ink);background:var(--review-light);padding:11px 14px;color:var(--muted);font-size:13px}
+.matrix-wrap>summary{cursor:pointer;font-weight:900;color:var(--blue);padding:10px 0;font-size:13.5px;text-transform:uppercase}
 table.matrix{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
-table.matrix th,table.matrix td{border-bottom:1px solid #e9edf3;padding:8px 10px;text-align:left;vertical-align:top}
-table.matrix th{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#5a6473;position:sticky;top:0;background:#fff}
-.foot{margin-top:46px;color:#5a6473;font-size:12.5px;border-top:1px solid #e1e6ef;padding-top:16px}
+table.ledger{border:2px solid var(--ink);background:var(--panel)}
+table.ledger th,table.ledger td{border:1px solid var(--ink);padding:8px 10px;text-align:left;vertical-align:top}
+table.ledger th{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--white);position:sticky;top:0;background:var(--blue)}
+.foot{margin-top:46px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;border-top:2px solid var(--ink);padding-top:16px}
 @media(max-width:840px){.scorecard{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:560px){.scorecard{grid-template-columns:repeat(2,1fr)}h1{font-size:27px}}
 "#;
@@ -142,7 +151,7 @@ pub(crate) fn is_agentic_verdict(obligation: &ComplianceObligation) -> bool {
 fn cr_status_chip_marked(obligation: &ComplianceObligation) -> String {
     if is_agentic_verdict(obligation) {
         format!(
-            "<span class=\"chip chip-{} chip-ai\" title=\"AI reviewer's determination from the visual evidence shown below — not a machine-proven check or a human sign-off\">{}<sup>*</sup></span>",
+            "<span class=\"chip chip-{} chip-ai\" title=\"AI reviewer's determination from the visual evidence shown below; not a machine-proven check or a human sign-off\">{}<sup>*</sup></span>",
             cr_status_suffix(&obligation.status),
             escape_html(&cr_status_label(&obligation.status)),
         )
@@ -193,7 +202,7 @@ fn cr_media(media: &[EvidenceMedia]) -> String {
                 )
             };
             Some(format!(
-                "<figure>{}<figcaption>{}</figcaption></figure>",
+                "<figure class=\"hard-panel\">{}<figcaption>{}</figcaption></figure>",
                 inner,
                 escape_html(&item.caption)
             ))
@@ -213,12 +222,12 @@ fn cr_agentic_block(obligation: &ComplianceObligation) -> String {
             String::new()
         } else {
             format!(
-                "<div class=\"guide\"><b>For the human reviewer</b>{}</div>",
+                "<div class=\"guide hard-panel\"><b>For the human reviewer</b>{}</div>",
                 escape_html(&review.reviewer_guidance)
             )
         };
         format!(
-            "<div class=\"ai\"><div class=\"ai-h\">AI reviewer verdict <span class=\"v\">{verdict} · {confidence} confidence</span></div><p>{rationale}</p>{guide}{media}<p class=\"sub\" style=\"margin-top:9px\">{provider} · {model}</p></div>",
+            "<div class=\"ai hard-panel\"><div class=\"ai-h\">AI reviewer verdict <span class=\"v\">{verdict} · {confidence} confidence</span></div><p>{rationale}</p>{guide}{media}<p class=\"sub\" style=\"margin-top:9px\">{provider} · {model}</p></div>",
             verdict = escape_html(&pretty_token(&review.assessment)),
             confidence = escape_html(&pretty_token(&review.confidence)),
             rationale = escape_html(&review.rationale),
@@ -230,7 +239,7 @@ fn cr_agentic_block(obligation: &ComplianceObligation) -> String {
     } else if matches!(obligation.evidence_class.as_str(), "human" | "agentic")
         || obligation.status == "needs_review"
     {
-        "<div class=\"pending\">Agentic review pending — this criterion needs visual or contextual judgment; the AI reviewer will attach a screenshot, assessment, and reviewer guidance here.</div>".to_string()
+        "<div class=\"pending hard-panel\">Agentic review pending; this criterion needs visual or contextual judgment. The AI reviewer will attach a screenshot, assessment, and reviewer guidance here.</div>".to_string()
     } else {
         String::new()
     }
@@ -257,7 +266,7 @@ fn cr_criterion_card(obligation: &ComplianceObligation) -> String {
         .unwrap_or_default();
     let (num, title) = split_criterion_title(&obligation.title);
     format!(
-        "<article class=\"crit s-{suffix}\"><div class=\"crit-head\"><div class=\"crit-id\"><span class=\"num\">{num}</span>{title}</div><div class=\"chips\">{level}{method}{status}</div></div><p class=\"why\">{why}</p>{ai}<div class=\"crit-foot\"><span>Confidence: {confidence}</span><span>{review}{source}</span></div></article>",
+        "<article class=\"crit hard-panel s-{suffix}\"><div class=\"crit-head\"><div class=\"crit-id\"><span class=\"num\">{num}</span>{title}</div><div class=\"chips\">{level}{method}{status}</div></div><p class=\"why\">{why}</p>{ai}<div class=\"crit-foot\"><span>Confidence: {confidence}</span><span>{review}{source}</span></div></article>",
         suffix = cr_status_suffix(&obligation.status),
         num = escape_html(&num),
         title = escape_html(&title),
@@ -319,7 +328,7 @@ fn cr_state_gallery(states: &[StateEvidence]) -> String {
             };
             rendered_media = true;
             figures.push(format!(
-                "<figure><img loading=\"lazy\" src=\"{uri}\" alt=\"{alt}\">{caption}</figure>",
+                "<figure class=\"hard-panel\"><img loading=\"lazy\" src=\"{uri}\" alt=\"{alt}\">{caption}</figure>",
                 uri = escape_html(uri),
                 alt = escape_html(&item.caption),
                 caption = cr_state_caption(state, Some(&item.caption)),
@@ -327,7 +336,7 @@ fn cr_state_gallery(states: &[StateEvidence]) -> String {
         }
         if !rendered_media {
             figures.push(format!(
-                "<figure>{caption}</figure>",
+                "<figure class=\"hard-panel\">{caption}</figure>",
                 caption = cr_state_caption(state, None),
             ));
         }
@@ -401,7 +410,7 @@ fn cr_supporting_checks(checks: &[ComplianceSupportingCheck]) -> String {
                 )
             };
             format!(
-                "<article class=\"crit s-{suffix}\"><div class=\"crit-head\"><div class=\"crit-id\">{title}<br><code style=\"font-size:11px;color:#5a6473\">{id}</code></div><div class=\"chips\">{method}{status}</div></div><p class=\"why\">{why}</p>{related}</article>",
+                "<article class=\"crit hard-panel s-{suffix}\"><div class=\"crit-head\"><div class=\"crit-id\">{title}<br><code style=\"font-size:11px;color:var(--muted)\">{id}</code></div><div class=\"chips\">{method}{status}</div></div><p class=\"why\">{why}</p>{related}</article>",
                 suffix = cr_status_suffix(&check.status),
                 title = escape_html(&check.title),
                 id = escape_html(&check.id),
@@ -453,7 +462,7 @@ fn cr_profile_views(views: &[ComplianceProfileView]) -> String {
                 format!("<ul class=\"sub\">{items}</ul>")
             };
             format!(
-                "<article class=\"crit s-review\"><div class=\"crit-head\"><div class=\"crit-id\">{label}<br><code style=\"font-size:11px;color:#5a6473\">{id}</code></div><div class=\"chips\"><span class=\"chip chip-method\">Profile view</span></div></div><p class=\"why\">{basis}</p><div class=\"crit-foot\"><span>{included} covered ledger criteria</span><span>{total} total WCAG 2.1 A/AA criteria</span><span>{pass} pass</span><span>{fail} fail</span><span>{review} need review</span><span>{nt} not tested</span></div>{missing}{excluded}{notes}</article>",
+                "<article class=\"crit hard-panel s-review\"><div class=\"crit-head\"><div class=\"crit-id\">{label}<br><code style=\"font-size:11px;color:var(--muted)\">{id}</code></div><div class=\"chips\"><span class=\"chip chip-method\">Profile view</span></div></div><p class=\"why\">{basis}</p><div class=\"crit-foot\"><span>{included} covered ledger criteria</span><span>{total} total WCAG 2.1 A/AA criteria</span><span>{pass} pass</span><span>{fail} fail</span><span>{review} need review</span><span>{nt} not tested</span></div>{missing}{excluded}{notes}</article>",
                 label = escape_html(&view.label),
                 id = escape_html(&view.id),
                 basis = escape_html(&view.basis),
@@ -500,11 +509,11 @@ pub(crate) fn render_compliance_report(report: &ComplianceReportPacket) -> Strin
     };
     let bar = format!(
         "{}{}{}{}{}",
-        seg(s.pass, "#1a9457"),
-        seg(s.fail, "#d23b30"),
-        seg(s.needs_review, "#d8a32f"),
-        seg(s.not_applicable, "#aab4c2"),
-        seg(s.not_tested, "#8b5cf6"),
+        seg(s.pass, "var(--pass)"),
+        seg(s.fail, "var(--fail)"),
+        seg(s.needs_review, "var(--review)"),
+        seg(s.not_applicable, "var(--faint)"),
+        seg(s.not_tested, "var(--blue)"),
     );
     let score = |n: usize, k: &str, zero_good: bool| -> String {
         let cls = if zero_good && n == 0 {
@@ -521,7 +530,7 @@ pub(crate) fn render_compliance_report(report: &ComplianceReportPacket) -> Strin
     };
 
     let mut html = String::new();
-    html.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Allie · ");
+    html.push_str("<!doctype html>\n<html lang=\"en\" data-allie-design=\"clean-atomic\" data-allie-aesthetic=\"misty-step-v2.5.1-local-subset\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Allie · ");
     html.push_str(&escape_html(&report.app_name));
     html.push_str(" accessibility evidence</title>\n<style>");
     html.push_str(REPORT_CSS);
@@ -532,9 +541,9 @@ pub(crate) fn render_compliance_report(report: &ComplianceReportPacket) -> Strin
         generated = escape_html(&report.generated_at),
     ));
     html.push_str(&format!(
-        "<div class=\"banner {bcls}\"><span class=\"dot\" style=\"background:{dot}\"></span><div><h2>Status: {status}</h2><p>{pass} passing · {fail} failing · {review} need review · {na} not applicable · {nt} not tested across {total} success criteria.</p>{aip}</div></div>",
+        "<div class=\"banner hard-panel {bcls}\"><span class=\"dot\" style=\"background:{dot}\"></span><div><h2>Status: {status}</h2><p>{pass} passing · {fail} failing · {review} need review · {na} not applicable · {nt} not tested across {total} success criteria.</p>{aip}</div></div>",
         bcls = banner_class,
-        dot = match s.status.as_str() { "fail" | "blocked" => "#d23b30", "pass" | "approved" => "#1a9457", _ => "#d8a32f" },
+        dot = match s.status.as_str() { "fail" | "blocked" => "var(--fail)", "pass" | "approved" => "var(--pass)", _ => "var(--review)" },
         status = escape_html(&cr_status_label(&s.status)),
         pass = s.pass, fail = s.fail, review = s.needs_review, na = s.not_applicable, nt = s.not_tested,
         total = s.total_obligations,
@@ -544,7 +553,7 @@ pub(crate) fn render_compliance_report(report: &ComplianceReportPacket) -> Strin
             String::new()
         },
     ));
-    html.push_str("<div class=\"scorecard\">");
+    html.push_str("<div class=\"scorecard proof-strip\">");
     html.push_str(&score(s.pass, "Pass", false));
     html.push_str(&score(s.fail, "Fail", false));
     html.push_str(&score(s.needs_review, "Needs review", false));
@@ -556,9 +565,9 @@ pub(crate) fn render_compliance_report(report: &ComplianceReportPacket) -> Strin
     html.push_str(&score(s.total_obligations, "Criteria", false));
     html.push_str("</div>");
     html.push_str(&format!("<div class=\"bar\">{bar}</div>"));
-    html.push_str("<div class=\"legend\"><span><b style=\"background:#1a9457\"></b>Pass</span><span><b style=\"background:#d23b30\"></b>Fail</span><span><b style=\"background:#d8a32f\"></b>Needs review</span><span><b style=\"background:#aab4c2\"></b>Not applicable</span><span><b style=\"background:#8b5cf6\"></b>Not tested</span></div>");
+    html.push_str("<div class=\"legend\"><span><b style=\"background:var(--pass)\"></b>Pass</span><span><b style=\"background:var(--fail)\"></b>Fail</span><span><b style=\"background:var(--review)\"></b>Needs review</span><span><b style=\"background:var(--faint)\"></b>Not applicable</span><span><b style=\"background:var(--blue)\"></b>Not tested</span></div>");
     if ai_total > 0 {
-        html.push_str("<p class=\"sub\" style=\"margin:10px 0 0\"><sup>*</sup> <b>AI-reviewed verdict</b>: the agentic vision reviewer's pass/fail call from the attached visual evidence, shown with its confidence — a judgment call, not a machine-proven check or a human sign-off. Screenshots and clips are inlined under each criterion so a human can confirm or override.</p>");
+        html.push_str("<p class=\"sub\" style=\"margin:10px 0 0\"><sup>*</sup> <b>AI-reviewed verdict</b>: the agentic vision reviewer's pass/fail call from the attached visual evidence, shown with its confidence; a judgment call, not a machine-proven check or a human sign-off. Screenshots and clips are inlined under each criterion so a human can confirm or override.</p>");
     }
 
     html.push_str(&cr_state_gallery(&report.state_evidence));
@@ -573,7 +582,7 @@ pub(crate) fn render_compliance_report(report: &ComplianceReportPacket) -> Strin
 
     if !report.criterion_coverage.is_empty() {
         html.push_str(&format!(
-            "<section><details class=\"matrix-wrap\"><summary>Criterion coverage matrix — {} cells (criterion · surface · state drilldown)</summary><table class=\"matrix\"><thead><tr><th>Criterion · surface · state</th><th>Status</th><th>Applicability</th><th>Method</th><th>Confidence</th><th>Residual review</th></tr></thead><tbody>{}</tbody></table></details></section>",
+            "<section><details class=\"matrix-wrap\"><summary>Criterion coverage matrix: {} cells (criterion · surface · state drilldown)</summary><table class=\"matrix ledger\"><thead><tr><th>Criterion · surface · state</th><th>Status</th><th>Applicability</th><th>Method</th><th>Confidence</th><th>Residual review</th></tr></thead><tbody>{}</tbody></table></details></section>",
             report.criterion_coverage.len(),
             cr_matrix_rows(&report.criterion_coverage),
         ));
@@ -593,7 +602,7 @@ pub(crate) fn render_compliance_report(report: &ComplianceReportPacket) -> Strin
         })
         .unwrap_or_default();
     html.push_str(&format!(
-        "<p class=\"foot\">{reproduce}Source packet <code>{packet}</code> · source map <code>{map}</code>. Allie reports evidence, status, confidence, and residual review needs. It does not claim legal compliance and is not a replacement for expert or lived accessibility review — evidence visibility, not a legal compliance guarantee.</p>",
+        "<p class=\"foot\">{reproduce}Source packet <code>{packet}</code> · source map <code>{map}</code>. Allie reports evidence, status, confidence, and residual review needs. It does not claim legal compliance and is not a replacement for expert or lived accessibility review; evidence visibility, not a legal compliance guarantee.</p>",
         reproduce = reproduce,
         packet = escape_html(&report.source_packet),
         map = escape_html(&report.source_map),
