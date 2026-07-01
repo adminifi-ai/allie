@@ -1,6 +1,6 @@
 # Prove Allie across the real-app dogfood ladder
 
-Priority: P0 · Status: ready · Estimate: XL
+Priority: P0 · Status: in-progress · Estimate: XL
 
 ## Goal
 Turn Vanity, Olympus, Habitat, and Linejam into a recurring real-app evidence ladder that proves Allie can produce comparable surface maps, browser evidence, WCAG reports, and release projections across public, authenticated, operational, and highly interactive apps.
@@ -38,3 +38,6 @@ Turn Vanity, Olympus, Habitat, and Linejam into a recurring real-app evidence la
 - Linejam is currently dirty in `/Users/phaedrus/Development/linejam`; treat all changes as user-owned.
 - Habitat was observed changing during this groom and ended on branch `refactor/ha-004-break-docs-bot-entanglements` with remote divergence; re-check live status before dogfood and treat all non-Allie changes as user-owned.
 - The point is not a pass/fail vanity metric. The product claim is that Allie can explain exactly what it saw, what failed, what was unverified, and what evidence backs the release decision.
+
+## Receipts
+- 2026-07-01: Olympus dashboard slice delivered in `docs/dogfood/olympus/025-olympus-dashboard-dogfood.md`. Allie captured the login page plus six authenticated dashboard states with zero infrastructure failures in the authenticated verify run; the release projection blocked on deterministic target findings.

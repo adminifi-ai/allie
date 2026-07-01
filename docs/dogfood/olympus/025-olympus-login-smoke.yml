@@ -1,0 +1,46 @@
+id: olympus-login-smoke
+name: Olympus dashboard login smoke
+app_name: Olympus
+environment: local-dogfood
+auth_profile: none
+credentials:
+  profile: none
+  provider: none
+  required: false
+target:
+  kind: url
+  base_url: http://127.0.0.1:56452
+policy:
+  profile: wcag22-aa
+  blocking_classes:
+    - deterministic
+    - scripted_required
+  worker_timeout_ms: 30000
+artifacts:
+  redaction_status: local_dogfood_no_customer_data
+  retention_class: local_ephemeral
+model:
+  enabled: false
+  provider_allowlist: []
+  zdr_required: true
+known_nondeterminism: []
+browser:
+  viewport:
+    width: 1280
+    height: 900
+  color_scheme: light
+  reduced_motion: reduce
+  locale: en-US
+  zoom: 1.0
+flow:
+  id: olympus-login-smoke
+  description: Capture the unauthenticated Olympus dashboard login page.
+  states:
+    - id: dashboard-login
+      path: /dashboard/login
+      description: Cookie-auth login form for the Olympus dashboard.
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+      trace: true
