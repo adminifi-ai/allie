@@ -168,6 +168,9 @@ The report includes:
 
 - `criteria`: one row per WCAG success criterion;
 - `criterion_coverage`: one cell per criterion, surface, and captured state;
+- `profile_views`: derived views over the same ledger, including the
+  `wcag21-aa` EAA-oriented projection with WCAG 2.2-only criteria excluded and
+  WCAG 2.1-only legacy gaps called out explicitly;
 - `supporting_checks`: deterministic, scripted, agentic, and human aggregate
   checks linked to affected WCAG criteria;
 - `surfaces`: product surface rollups with their cell refs and finding refs.
@@ -179,6 +182,19 @@ Each criterion coverage cell carries `status`, `applicability`, `method`,
 finding, artifact, or test refs; a replay command is drilldown context but is
 not enough by itself. Model-only findings remain review context until scripted
 or human-attested evidence promotes them.
+
+Captured web states include mobile-web viewport metadata when the worker can
+run it:
+
+- `coverage.state_metadata[].features.mobile_viewport_checked`;
+- `coverage.state_metadata[].features.mobile_viewport_width`;
+- `coverage.state_metadata[].features.mobile_viewport_height`.
+
+The worker writes mobile screenshot and mobile axe artifacts beside the primary
+state artifacts. Mobile-relevant WCAG criteria stay in the criterion matrix at
+mobile viewport evidence depth; criteria that still need visual, pointer,
+motion, or orientation judgment remain `needs_review` instead of being counted
+as pass.
 
 ## Verify Reporter Contract
 

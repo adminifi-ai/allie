@@ -1,8 +1,12 @@
 # Allie
 
-Allie is a Rust-first accessibility evidence harness and release intelligence system.
+Allie is a Rust-first accessibility evidence harness and release intelligence
+system.
 
-The product goal is not to be another accessibility scanner. Allie should map staged web applications and critical user flows, run deterministic accessibility checks, capture replayable evidence, enrich judgment-heavy criteria with multimodal agents, and make accessibility status visible in pull requests and release decisions.
+The product goal is not to be another accessibility scanner or an "AI fixes
+accessibility" overlay. Allie's moat is the artifact a release can carry: a
+replayable evidence packet, a complete WCAG obligation ledger, and a
+criterion-by-surface report tied to the code revision that produced it.
 
 Positioning:
 
@@ -17,8 +21,17 @@ Accessibility work is often split across manual expert review, browser extension
 - deterministic checks where machines can be certain;
 - scripted browser flows where interaction behavior matters;
 - screenshots, video, DOM, and accessibility tree artifacts where human or agent review needs context;
-- standards-mapped status across WCAG, ADA, Section 508, and client policy packs;
+- standards-mapped status across WCAG, ADA, Section 508, and client policy packs,
+  with WCAG results shown as an obligation ledger instead of a global score;
 - PR and release gates that block real regressions without pretending uncertain findings are certain.
+
+Why not an overlay? The FTC's April 2025 final accessiBe order required a
+$1 million payment and barred unsupported claims that automated products can
+make or keep websites WCAG-compliant. Allie takes the opposite trust posture:
+it reports evidence, status, confidence, replay commands, and residual review
+needs. It does not promise legal compliance, lawsuit protection, or automated
+remediation. Sources: [FTC final order](https://www.ftc.gov/news-events/news/press-releases/2025/04/ftc-approves-final-order-requiring-accessibe-pay-1-million)
+and [FTC case page](https://www.ftc.gov/legal-library/browse/cases-proceedings/2223156-accessibe-inc).
 
 ## Initial Shape
 
@@ -213,11 +226,28 @@ reduced-motion, agentic review, and human-review aggregate context are reported
 separately and linked into criterion cells as evidence; they are not counted as
 extra WCAG standards.
 
+The report also includes a `wcag21-aa` profile view for EAA/EN 301 549 readers.
+That view is derived from the same WCAG 2.2 ledger: WCAG 2.2-only criteria are
+excluded, while the WCAG 2.1-only `4.1.1 Parsing` criterion is exposed as an
+explicit legacy gap rather than silently counted as covered. The European
+Commission currently describes harmonized EN 301 549 v3.2.1 as WCAG 2.1-based
+and notes that later WCAG versions do not automatically become legally relevant
+until included in a harmonized standard referenced in the Official Journal:
+[EC standards and harmonisation](https://digital-strategy.ec.europa.eu/en/policies/web-accessibility-directive-standards-and-harmonisation).
+
 Each required product surface/state receives a criterion matrix cell with
 status, applicability, method, confidence, evidence refs, agentic refs, waiver
 refs, and residual review need. Terminal claims (`pass`, `fail`, `waived`, or
 `risk_accepted`) require provenance. Empty cells stay `not_tested` or
 `needs_review` instead of implying compliance.
+
+Mobile web is in scope. The browser worker records a mobile viewport evidence
+pass for captured web states, including mobile screenshot and axe artifacts.
+Mobile-relevant WCAG criteria such as 1.3.4 Orientation, 1.4.10 Reflow, 2.5.1
+Pointer Gestures, 2.5.4 Motion Actuation, and 2.5.8 Target Size remain in the
+ledger at mobile viewports; unresolved judgment stays `needs_review` with the
+mobile evidence attached. Native mobile apps are outside Allie's current V0 web
+target scope.
 
 ## Release Decision Projection
 

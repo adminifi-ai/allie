@@ -1,4 +1,4 @@
-use crate::model::{PageFeatures, StandardsProfileSummary};
+use crate::model::{ComplianceProfileView, PageFeatures, StandardsProfileSummary};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
@@ -143,6 +143,58 @@ pub(crate) fn wcag22_success_criterion_ids() -> BTreeSet<String> {
     wcag22_success_criteria()
         .into_iter()
         .filter_map(|criterion| criterion["obligation"].as_str().map(ToString::to_string))
+        .collect()
+}
+
+pub(crate) fn wcag21_aa_profile_view() -> ComplianceProfileView {
+    let wcag22_only = wcag22_only_success_criterion_numbers();
+    let mut included_criteria = Vec::new();
+    let mut excluded_criteria = Vec::new();
+    for criterion in wcag22_success_criteria() {
+        let Some(obligation) = criterion["obligation"].as_str() else {
+            continue;
+        };
+        let Some(num) = criterion["num"].as_str() else {
+            continue;
+        };
+        if wcag22_only.contains(num) {
+            excluded_criteria.push(obligation.to_string());
+        } else {
+            included_criteria.push(obligation.to_string());
+        }
+    }
+
+    ComplianceProfileView {
+        id: "wcag21-aa".to_string(),
+        label: "WCAG 2.1 AA view".to_string(),
+        basis: "Projection from the WCAG 2.2 A/AA ledger for EAA/EN 301 549 readers"
+            .to_string(),
+        source_urls: vec![
+            "https://digital-strategy.ec.europa.eu/en/policies/web-accessibility-directive-standards-and-harmonisation".to_string(),
+            "https://www.w3.org/WAI/news/2018-09-13/WCAG-21-EN301549/".to_string(),
+            "https://www.w3.org/TR/WCAG21/".to_string(),
+        ],
+        total_success_criteria: included_criteria.len() + 1,
+        included_criteria,
+        excluded_criteria,
+        missing_legacy_criteria: vec!["wcag21-aa:4.1.1-parsing".to_string()],
+        pass: 0,
+        fail: 0,
+        needs_review: 0,
+        not_tested: 0,
+        not_applicable: 0,
+        waived: 0,
+        risk_accepted: 0,
+        notes: vec![
+            "WCAG 2.2 removed WCAG 2.1 success criterion 4.1.1 Parsing, so Allie exposes that legacy criterion as an explicit gap instead of silently counting it as covered.".to_string(),
+            "WCAG 2.2-only criteria are excluded from this view; they remain visible in the primary WCAG 2.2 ledger.".to_string(),
+        ],
+    }
+}
+
+fn wcag22_only_success_criterion_numbers() -> BTreeSet<&'static str> {
+    ["2.4.11", "2.5.7", "2.5.8", "3.2.6", "3.3.7", "3.3.8"]
+        .into_iter()
         .collect()
 }
 
@@ -295,6 +347,14 @@ pub(crate) fn criterion_feature_verdict(
                 )
             };
         }
+        _ if features.mobile_viewport_checked && is_mobile_web_criterion(obligation) => {
+            return (
+                "needs_review",
+                "requires_human_or_agent_review",
+                "agentic",
+                "allie-mobile-web-viewport-audit",
+            );
+        }
         _ => {}
     }
     match method {
@@ -317,6 +377,16 @@ pub(crate) fn criterion_feature_verdict(
             "allie-agentic-review-queue",
         ),
     }
+}
+
+fn is_mobile_web_criterion(obligation: &str) -> bool {
+    matches!(
+        obligation,
+        "wcag22-aa:1.3.4-orientation"
+            | "wcag22-aa:2.5.1-pointer-gestures"
+            | "wcag22-aa:2.5.4-motion-actuation"
+            | "wcag22-aa:2.5.8-target-size-minimum"
+    )
 }
 
 pub(crate) fn supporting_check_related_criteria(obligation: &str) -> Vec<String> {

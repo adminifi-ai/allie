@@ -134,7 +134,36 @@ pub(crate) struct ComplianceReportPacket {
     pub(crate) obligations: Vec<ComplianceObligation>,
     pub(crate) surfaces: Vec<ComplianceSurfaceReport>,
     #[serde(default)]
+    pub(crate) profile_views: Vec<ComplianceProfileView>,
+    #[serde(default)]
     pub(crate) state_evidence: Vec<StateEvidence>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ComplianceProfileView {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) basis: String,
+    pub(crate) source_urls: Vec<String>,
+    pub(crate) total_success_criteria: usize,
+    pub(crate) included_criteria: Vec<String>,
+    pub(crate) excluded_criteria: Vec<String>,
+    pub(crate) missing_legacy_criteria: Vec<String>,
+    #[serde(default)]
+    pub(crate) pass: usize,
+    #[serde(default)]
+    pub(crate) fail: usize,
+    #[serde(default)]
+    pub(crate) needs_review: usize,
+    #[serde(default)]
+    pub(crate) not_tested: usize,
+    #[serde(default)]
+    pub(crate) not_applicable: usize,
+    #[serde(default)]
+    pub(crate) waived: usize,
+    #[serde(default)]
+    pub(crate) risk_accepted: usize,
+    pub(crate) notes: Vec<String>,
 }
 
 /// Per-state evidence surfaced once at the top of the report (the captured
@@ -310,6 +339,12 @@ pub(crate) struct PageFeatures {
     pub(crate) reflow_overflow: bool,
     #[serde(default)]
     pub(crate) reflow_checked: bool,
+    #[serde(default)]
+    pub(crate) mobile_viewport_checked: bool,
+    #[serde(default)]
+    pub(crate) mobile_viewport_width: u32,
+    #[serde(default)]
+    pub(crate) mobile_viewport_height: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

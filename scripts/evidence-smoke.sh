@@ -61,9 +61,14 @@ assert(packet.coverage.state_metadata.some((state) => (
   && state.url === `http://127.0.0.1:${freezePort}/`
   && state.http_status === 200
   && state.features?.reflow_checked === true
+  && state.features?.mobile_viewport_checked === true
+  && state.features?.mobile_viewport_width === 390
+  && state.features?.mobile_viewport_height === 844
 )), 'login-form state metadata must be contentful');
 assert(packet.artifacts.some((artifact) => artifact.id === 'axe-json-login-form' && artifact.hash?.startsWith('sha256:')), 'axe artifact hash missing');
 assert(packet.artifacts.some((artifact) => artifact.id === 'screenshot-login-form' && artifact.hash?.startsWith('sha256:')), 'screenshot artifact hash missing');
+assert(packet.artifacts.some((artifact) => artifact.id === 'mobile-axe-json-login-form' && artifact.hash?.startsWith('sha256:')), 'mobile axe artifact hash missing');
+assert(packet.artifacts.some((artifact) => artifact.id === 'mobile-screenshot-login-form' && artifact.hash?.startsWith('sha256:')), 'mobile screenshot artifact hash missing');
 
 const deterministic = verdict('wcag22-aa:deterministic-axe-rules');
 assert(deterministic?.status === 'pass', 'deterministic aggregate must pass');
@@ -76,6 +81,7 @@ assert(packet.verdicts.some((item) => item.status === 'not_applicable'), 'fixtur
 
 assert(report.includes('Allie evidence status'), 'report missing evidence status');
 assert(report.includes('No deterministic axe failures'), 'report missing deterministic pass summary');
+assert(report.includes('mobile viewport'), 'report missing mobile viewport evidence caption');
 assert(report.includes('<h2>Replay</h2>'), 'report missing replay section');
 NODE
 
@@ -83,4 +89,6 @@ test -f "$RUN_DIR/evidence.json"
 test -f "$RUN_DIR/report.html"
 test -f "$RUN_DIR/artifacts/axe-login-form.json"
 test -f "$RUN_DIR/artifacts/login-form.png"
+test -f "$RUN_DIR/artifacts/axe-mobile-login-form.json"
+test -f "$RUN_DIR/artifacts/mobile-login-form.png"
 echo "evidence smoke passed: byte-stable frozen packet/report with content assertions"

@@ -63,6 +63,11 @@ Initial profiles:
 - `ada-title-ii`
 - client-specific policy packs
 
+`wcag22-aa` is the primary V0 ledger. Reports may project that ledger into a
+`wcag21-aa` view for EAA/EN 301 549 consumers by excluding WCAG 2.2-only
+criteria and explicitly surfacing WCAG 2.1-only legacy gaps such as 4.1.1
+Parsing. That projection is evidence visibility, not a legal conformance claim.
+
 Evidence classes:
 
 - `deterministic`: axe, static DOM/CSS/AST, contrast math, labels, roles, headings, language, caption metadata.
@@ -116,8 +121,8 @@ Every run should produce an evidence packet with:
 
 - run id, tool version, git metadata, environment metadata, timestamp, and policy profile;
 - flow manifest id and route/surface coverage;
-- browser, viewport, color scheme, reduced-motion, zoom, and locale settings;
-- axe JSON and summarized deterministic findings;
+- browser, viewport, mobile-web viewport, color scheme, reduced-motion, zoom, and locale settings;
+- axe JSON and summarized deterministic findings for captured desktop and mobile-web passes where configured;
 - DOM and accessibility tree snapshots for inspected states;
 - screenshots and optional video/GIF clips;
 - console/network summaries with sensitive data redacted;

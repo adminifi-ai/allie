@@ -86,6 +86,8 @@ leaves:
 .allie/worker-smoke/worker-response.json
 .allie/worker-smoke/artifacts/axe-login-form.json
 .allie/worker-smoke/artifacts/login-form.png
+.allie/worker-smoke/artifacts/axe-mobile-login-form.json
+.allie/worker-smoke/artifacts/mobile-login-form.png
 ```
 
 `npm run evidence:smoke` proves the Rust CLI, worker, packet writer, and report
@@ -95,18 +97,22 @@ twice, and byte-compares the resulting `evidence.json` and `report.html`. It
 also asserts the packet schema, pass summary, non-empty Git provenance, stable
 fixture URL, captured state metadata, artifact hashes, distinct confidence
 classes, explicit `needs_review` and `not_applicable` verdicts, and the report's
-status/replay sections. It leaves:
+status/replay sections. It also asserts mobile-web viewport metadata plus
+mobile screenshot and axe artifacts for the captured state. It leaves:
 
 ```text
 .allie/runs/v0-smoke/evidence.json
 .allie/runs/v0-smoke/report.html
 .allie/runs/v0-smoke/artifacts/axe-login-form.json
 .allie/runs/v0-smoke/artifacts/login-form.png
+.allie/runs/v0-smoke/artifacts/axe-mobile-login-form.json
+.allie/runs/v0-smoke/artifacts/mobile-login-form.png
 ```
 
 The expected happy-path packet summary is `status: pass`, `exit_code: 0`,
 one captured state, and artifact types `axe_json`, `screenshot`, and
-`html_report`.
+`html_report`, with the mobile-web pass represented as additional `axe_json`
+and `screenshot` state artifacts.
 
 `npm run visibility:smoke` proves a captured packet can be mapped and rendered
 into the product-map, surface-map, WCAG report, and markdown summary visibility
@@ -158,7 +164,11 @@ as covered app content:
 
 `npm run coverage:smoke` proves the WCAG 2.2 AA obligation ledger stays a
 55-success-criterion surface matrix, keeps supporting checks out of the
-denominator, and requires provenance on terminal cells:
+denominator, exposes a `wcag21-aa` profile view for EAA/EN 301 549 consumers,
+and requires provenance on terminal cells. The `wcag21-aa` view has a
+50-criterion denominator, excludes WCAG 2.2-only criteria such as 2.5.8 Target
+Size (Minimum), and explicitly records the WCAG 2.1-only 4.1.1 Parsing legacy
+gap instead of silently counting it covered:
 
 ```text
 .allie/runs/coverage-matrix-smoke/evidence.json

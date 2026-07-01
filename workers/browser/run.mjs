@@ -10,6 +10,7 @@ import { chromium } from 'playwright';
 const WORKER_REQUEST_SCHEMA = 'allie.worker.request.v0';
 const WORKER_RESPONSE_SCHEMA = 'allie.worker.response.v0';
 const STATE_STEP_TIMEOUT_MS = 5000;
+const MOBILE_WEB_VIEWPORT = { width: 390, height: 844 };
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
 
@@ -292,6 +293,12 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
     }));
   }
 
+  const mobileAudit = await captureMobileWebAudit(page, state, artifactsDir, determinism);
+  if (mobileAudit.error) {
+    stateErrors.push(`mobile-web-audit-failed: ${mobileAudit.error}`);
+  }
+  axeViolations = axeViolations.concat(mobileAudit.axeViolations);
+
   const tracePath = state.trace ? path.join(artifactsDir, `trace-${state.id}.json`) : null;
   if (tracePath) {
     await fs.writeFile(tracePath, `${JSON.stringify({
@@ -305,7 +312,12 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
     }, null, 2)}\n`);
   }
 
-  const features = await captureFeatures(page);
+  const features = {
+    ...(await captureFeatures(page)),
+    mobile_viewport_checked: mobileAudit.checked,
+    mobile_viewport_width: mobileAudit.viewport.width,
+    mobile_viewport_height: mobileAudit.viewport.height,
+  };
 
   await page.close();
   let videoPath = null;
@@ -326,12 +338,14 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
     url: finalUrl,
     title,
     http_status: httpStatus,
-    screenshot_path: screenshotPath ? path.relative(path.resolve(repoRoot, path.dirname(path.dirname(screenshotPath))), screenshotPath) : null,
-    axe_json_path: axeJsonPath ? path.relative(path.resolve(repoRoot, path.dirname(path.dirname(axeJsonPath))), axeJsonPath) : null,
-    dom_snapshot_path: domSnapshotPath ? path.relative(path.resolve(repoRoot, path.dirname(path.dirname(domSnapshotPath))), domSnapshotPath) : null,
-    accessibility_tree_path: accessibilityTreePath ? path.relative(path.resolve(repoRoot, path.dirname(path.dirname(accessibilityTreePath))), accessibilityTreePath) : null,
-    video_path: videoPath ? path.relative(path.resolve(repoRoot, path.dirname(path.dirname(videoPath))), videoPath) : null,
-    trace_path: tracePath ? path.relative(path.resolve(repoRoot, path.dirname(path.dirname(tracePath))), tracePath) : null,
+    screenshot_path: runRelativePath(screenshotPath),
+    axe_json_path: runRelativePath(axeJsonPath),
+    mobile_screenshot_path: runRelativePath(mobileAudit.screenshotPath),
+    mobile_axe_json_path: runRelativePath(mobileAudit.axeJsonPath),
+    dom_snapshot_path: runRelativePath(domSnapshotPath),
+    accessibility_tree_path: runRelativePath(accessibilityTreePath),
+    video_path: runRelativePath(videoPath),
+    trace_path: runRelativePath(tracePath),
     keyboard_focus_order: keyboardFocusOrder,
     axe_violations: axeViolations,
     console_errors: consoleErrors,
@@ -339,6 +353,55 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
     state_errors: stateErrors,
     features,
   };
+}
+
+function runRelativePath(artifactPath) {
+  if (!artifactPath) return null;
+  return path.relative(path.resolve(repoRoot, path.dirname(path.dirname(artifactPath))), artifactPath);
+}
+
+async function captureMobileWebAudit(page, state, artifactsDir, determinism) {
+  const originalViewport = page.viewportSize();
+  const result = {
+    checked: false,
+    viewport: MOBILE_WEB_VIEWPORT,
+    screenshotPath: null,
+    axeJsonPath: null,
+    axeViolations: [],
+    error: null,
+  };
+  try {
+    await page.setViewportSize(MOBILE_WEB_VIEWPORT);
+    await page.waitForLoadState('networkidle', { timeout: 2500 }).catch(() => {});
+    if (state.screenshot) {
+      result.screenshotPath = path.join(artifactsDir, `mobile-${state.id}.png`);
+      await page.screenshot({ path: result.screenshotPath, fullPage: true });
+    }
+    if (state.axe) {
+      const axeResult = await new AxeBuilder({ page }).analyze();
+      if (determinism?.timestamp) {
+        axeResult.timestamp = determinism.timestamp;
+      }
+      result.axeJsonPath = path.join(artifactsDir, `axe-mobile-${state.id}.json`);
+      await fs.writeFile(result.axeJsonPath, `${JSON.stringify(axeResult, null, 2)}\n`);
+      result.axeViolations = axeResult.violations.map((violation) => ({
+        id: violation.id,
+        impact: violation.impact ?? null,
+        help: violation.help ?? null,
+        description: violation.description ?? null,
+        tags: violation.tags ?? [],
+        nodes: violation.nodes?.length ?? 0,
+      }));
+    }
+    result.checked = true;
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (originalViewport) {
+      await page.setViewportSize(originalViewport).catch(() => {});
+    }
+  }
+  return result;
 }
 
 async function performStateSteps(page, state, stateErrors) {

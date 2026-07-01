@@ -1,6 +1,6 @@
 # Sharpen positioning around the real moat
 
-Priority: P2 · Status: pending · Estimate: S
+Priority: P2 · Status: done · Estimate: S
 
 ## Goal
 Docs and positioning lead with Allie's true differentiation — replayable
@@ -8,10 +8,16 @@ evidence packet + complete WCAG obligation ledger tied to a code revision —
 contrast against overlays, and resolve scope edges honestly.
 
 ## Oracle
-- [ ] README/positioning lead with the evidence-packet + obligation-ledger + replay-to-revision moat, not "AI".
-- [ ] A "why not an overlay" + "no legal-compliance promise" trust contrast exists (cite FTC v. AccessiBe, $1M, Apr 2025).
-- [ ] Mobile-web coverage is real: WCAG 2.2 mobile-relevant criteria (1.4.10 reflow, 1.3.4 orientation, 2.5.1 pointer gestures, 2.5.4 motion actuation, 2.5.8 target size) are audited at mobile viewports — these are WCAG requirements, so in scope, not a non-goal. Only native (non-web) mobile apps get an explicit scope statement in VISION.md.
-- [ ] The 2.2-AA ledger cleanly degrades to a 2.1-AA view for EAA consumers (EAA's harmonized baseline is still WCAG 2.1 AA).
+- [x] README/positioning lead with the evidence-packet + obligation-ledger + replay-to-revision moat, not "AI".
+- [x] A "why not an overlay" + "no legal-compliance promise" trust contrast exists (cite FTC v. AccessiBe, $1M, Apr 2025).
+- [x] Mobile-web coverage is real: WCAG 2.2 mobile-relevant criteria (1.4.10 reflow, 1.3.4 orientation, 2.5.1 pointer gestures, 2.5.4 motion actuation, 2.5.8 target size) are audited at mobile viewports — these are WCAG requirements, so in scope, not a non-goal. Only native (non-web) mobile apps get an explicit scope statement in VISION.md.
+- [x] The 2.2-AA ledger cleanly degrades to a 2.1-AA view for EAA consumers (EAA's harmonized baseline is still WCAG 2.1 AA).
+
+## Receipts
+- `npm run verify` passed.
+- `npm run evidence:smoke` verifies 390x844 mobile-web metadata plus mobile axe/screenshot artifacts.
+- `npm run coverage:smoke` verifies the `wcag21-aa` profile view with a 50-criterion denominator, WCAG 2.2-only exclusions, and explicit `wcag21-aa:4.1.1-parsing` legacy gap.
+- Thermo review fixed the report gallery implementation before closeout.
 
 ## Children
 1. Reframe README/positioning around the ledger + provenance moat.
