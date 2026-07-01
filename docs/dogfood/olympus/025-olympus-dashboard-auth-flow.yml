@@ -1,0 +1,89 @@
+id: olympus-dashboard-auth-flow
+name: Olympus authenticated dashboard dogfood
+app_name: Olympus
+environment: local-dogfood
+auth_profile: olympus-dashboard-local
+credentials:
+  profile: olympus-dashboard-local
+  provider: env
+  env: DASHBOARD_SECRET
+  required: true
+target:
+  kind: url
+  base_url: http://127.0.0.1:56452
+auth:
+  start_path: /dashboard/login
+  steps:
+    - fill: { selector: "#password", value_env: DASHBOARD_SECRET }
+    - click: { selector: "button[type=submit]" }
+    - wait_for: { selector: 'a[href="/dashboard/agents"]' }
+  authenticated_marker: { selector: 'a[href="/dashboard/agents"]' }
+policy:
+  profile: wcag22-aa
+  blocking_classes:
+    - deterministic
+    - scripted_required
+  worker_timeout_ms: 30000
+artifacts:
+  redaction_status: local_dogfood_no_customer_data
+  retention_class: local_ephemeral
+model:
+  enabled: false
+  provider_allowlist: []
+  zdr_required: true
+known_nondeterminism: []
+browser:
+  viewport:
+    width: 1280
+    height: 900
+  color_scheme: light
+  reduced_motion: reduce
+  locale: en-US
+  zoom: 1.0
+flow:
+  id: olympus-dashboard-auth-flow
+  description: Log into the local Olympus dashboard harness and audit representative control-plane pages.
+  states:
+    - id: dashboard-home
+      path: /dashboard
+      description: Main operator dashboard and triage surface.
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+      trace: true
+    - id: dashboard-recorder
+      path: /dashboard/recorder
+      description: Recorder timeline, operational cards, charts, and recent jobs.
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+    - id: dashboard-agents
+      path: /dashboard/agents
+      description: Agent roster and lifecycle controls.
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+    - id: dashboard-observability
+      path: /dashboard/observability
+      description: Observability rollup for recent jobs.
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+    - id: dashboard-billing
+      path: /dashboard/billing
+      description: Cost watchdog and budget event ledger.
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+    - id: dashboard-dead-letters
+      path: /dashboard/dead-letters
+      description: Dead-letter queue and retry affordances.
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
