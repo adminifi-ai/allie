@@ -33,3 +33,12 @@ Make Allie's WCAG report more judgeable, comparable, and useful by improving cri
 - The current gate checks many report files exist; this epic raises the bar to content and usefulness.
 - Previous real-app receipts show high `needs_review` counts. That is honest uncertainty, but the report must make it operationally clear.
 - Allie still does not remediate. The report is the handoff artifact, not a fixing queue.
+
+## Dogfood findings (2026-07-01, Vanity vs Olympus)
+Source: `docs/dogfood/025-vanity-vs-olympus-cross-target.md`. The dogfood ladder surfaced concrete report-efficacy defects:
+- R1 (HIGH): With the model off, the report degrades to a wall of `needs_review`/`not_tested`. Model-enabled Vanity: pass 39 / needs_review 2 / not_tested 0. Model-disabled Olympus (ZDR): pass 0 / needs_review 44 / not_tested 8. Judgment-heavy criteria need deterministic heuristics, grouping, and calibration that work with the model **off** (child 4, scoped to the model-off path).
+- R2 (HIGH): Headline `not_tested` can hide obligation-grain gaps. Vanity's 55-criterion headline shows `not_tested: 0`, but the 60-obligation coverage ledger lists 4 untested (reflow, zoom-reflow, keyboard-traversal, reduced-motion) that roll up into passing criteria — a "no silent gaps" (VISION) risk. Reconcile obligation vs success-criterion grain (children 1, 4).
+- R3: At least three unreconciled "review" counts for one run — needs_review 2, review-needed 7 (printed in the same `allie-report.md`), requiring-human-review 46. Add one reconciled review view (child 4).
+- R4: Headline counts are not a safe cross-run diff signal — two identical Vanity runs gave pass 37 vs 39 / needs_review 4 vs 2 from agentic drift alone. The diff must classify deterministic vs agentic-advisory changes (child 3).
+- R5: `allie verify` does not clean/namespace `--out`; stale artifacts from a prior run (an obsolete `remediation/` stage the tool no longer emits) persisted and could appear to contradict the no-remediation invariant. Emit a per-run file manifest or clean/version the out-dir so the packet dir describes exactly one run.
+- R6 (minor): Manifests under-declare `known_nondeterminism` (`[]`) despite demonstrable agentic variance; fold into report-quality checks.

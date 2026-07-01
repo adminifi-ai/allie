@@ -33,3 +33,9 @@ Measure and improve Allie's autonomous product-surface mapping and generated a11
 - `docs/roadmap.md` still names authenticated staged-app discovery and changed-surface inference as future work.
 - Smoke tests prove the loop runs; this epic proves the loop covers what matters.
 - Do not turn the eval into model theater. Labels, replay artifacts, and comparable metrics are the product.
+
+## Dogfood findings (2026-07-01, Vanity vs Olympus)
+Source: `docs/dogfood/025-vanity-vs-olympus-cross-target.md`. The dogfood ladder surfaced concrete mapping misses this epic should grade:
+- E1: Fixture-dir discovery over-generates non-served surfaces — Vanity produced 15 synthetic surfaces via `init --fixture-dir` (014 receipt) vs 1 real served surface via the pinned manifest (025). A precision grader must penalize surfaces with no resolvable route (feeds child 4/6).
+- E2: Discovery recall is unmeasured on the manifest-pinned path — both slices hand-specify states (Vanity 1, Olympus 6), so nothing scores autonomous recall. A labeled corpus is the only fix (feeds children 1–4).
+- E3: Authenticated targets impose harness/integration friction worth scoring — Olympus needed a bespoke dashboard harness (no stable export, Sprite-lane boot); Vanity needed none. Track target-integration-friction / false-auth-wall-capture per fixture class (feeds the existing oracle metric).
