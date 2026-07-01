@@ -1,7 +1,7 @@
 use crate::escape_html;
 use crate::model::{
-    ComplianceObligation, ComplianceReportPacket, ComplianceSupportingCheck, CriterionCoverageCell,
-    EvidenceMedia, StateEvidence,
+    ComplianceObligation, ComplianceProfileView, ComplianceReportPacket, ComplianceSupportingCheck,
+    CriterionCoverageCell, EvidenceMedia, StateEvidence,
 };
 
 pub(crate) const REPORT_CSS: &str = r#"
@@ -310,40 +310,29 @@ fn cr_principle_sections(criteria: &[ComplianceObligation]) -> String {
 }
 
 fn cr_state_gallery(states: &[StateEvidence]) -> String {
-    let figures = states
-        .iter()
-        .map(|state| {
-            let img = state
-                .media
-                .iter()
-                .find_map(|item| item.data_uri.as_ref())
-                .map(|uri| {
-                    format!(
-                        "<img loading=\"lazy\" src=\"{}\" alt=\"Screenshot of {} state\">",
-                        escape_html(uri),
-                        escape_html(&state.id)
-                    )
-                })
-                .unwrap_or_default();
-            let focus = if state.keyboard_focus_order.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "<br>Tab order: {}",
-                    escape_html(&state.keyboard_focus_order.join(" → "))
-                )
+    let mut figures = Vec::new();
+    for state in states {
+        let mut rendered_media = false;
+        for item in &state.media {
+            let Some(uri) = item.data_uri.as_ref() else {
+                continue;
             };
-            format!(
-                "<figure>{img}<figcaption><strong>{id}</strong> · <code>{route}</code><br>{title}{focus}</figcaption></figure>",
-                img = img,
-                id = escape_html(&state.id),
-                route = escape_html(&state.route),
-                title = escape_html(&state.title),
-                focus = focus,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
+            rendered_media = true;
+            figures.push(format!(
+                "<figure><img loading=\"lazy\" src=\"{uri}\" alt=\"{alt}\">{caption}</figure>",
+                uri = escape_html(uri),
+                alt = escape_html(&item.caption),
+                caption = cr_state_caption(state, Some(&item.caption)),
+            ));
+        }
+        if !rendered_media {
+            figures.push(format!(
+                "<figure>{caption}</figure>",
+                caption = cr_state_caption(state, None),
+            ));
+        }
+    }
+    let figures = figures.join("");
     if figures.is_empty() {
         String::new()
     } else {
@@ -351,6 +340,28 @@ fn cr_state_gallery(states: &[StateEvidence]) -> String {
             "<section><h2 class=\"sh\">What Allie inspected</h2><div class=\"gallery\">{figures}</div></section>"
         )
     }
+}
+
+fn cr_state_caption(state: &StateEvidence, media_caption: Option<&str>) -> String {
+    let focus = if state.keyboard_focus_order.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<br>Tab order: {}",
+            escape_html(&state.keyboard_focus_order.join(" -> "))
+        )
+    };
+    let media_caption = media_caption
+        .map(|caption| format!("<br>{}", escape_html(caption)))
+        .unwrap_or_default();
+    format!(
+        "<figcaption><strong>{id}</strong> · <code>{route}</code><br>{title}{media_caption}{focus}</figcaption>",
+        id = escape_html(&state.id),
+        route = escape_html(&state.route),
+        title = escape_html(&state.title),
+        media_caption = media_caption,
+        focus = focus,
+    )
 }
 
 fn cr_matrix_rows(cells: &[CriterionCoverageCell]) -> String {
@@ -404,6 +415,63 @@ fn cr_supporting_checks(checks: &[ComplianceSupportingCheck]) -> String {
         .join("");
     format!(
         "<section><h2 class=\"sh\">Supporting checks</h2><p class=\"sub\" style=\"margin:0 0 14px\">Cross-cutting evidence passes that back the individual criteria above.</p>{cards}</section>"
+    )
+}
+
+fn cr_profile_views(views: &[ComplianceProfileView]) -> String {
+    if views.is_empty() {
+        return String::new();
+    }
+    let cards = views
+        .iter()
+        .map(|view| {
+            let missing = if view.missing_legacy_criteria.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<p class=\"sub\">Explicit legacy gap: <code>{}</code></p>",
+                    escape_html(&view.missing_legacy_criteria.join(", "))
+                )
+            };
+            let excluded = if view.excluded_criteria.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<p class=\"sub\">Excluded from this view: <code>{}</code></p>",
+                    escape_html(&view.excluded_criteria.join(", "))
+                )
+            };
+            let notes = if view.notes.is_empty() {
+                String::new()
+            } else {
+                let items = view
+                    .notes
+                    .iter()
+                    .map(|note| format!("<li>{}</li>", escape_html(note)))
+                    .collect::<Vec<_>>()
+                    .join("");
+                format!("<ul class=\"sub\">{items}</ul>")
+            };
+            format!(
+                "<article class=\"crit s-review\"><div class=\"crit-head\"><div class=\"crit-id\">{label}<br><code style=\"font-size:11px;color:#5a6473\">{id}</code></div><div class=\"chips\"><span class=\"chip chip-method\">Profile view</span></div></div><p class=\"why\">{basis}</p><div class=\"crit-foot\"><span>{included} covered ledger criteria</span><span>{total} total WCAG 2.1 A/AA criteria</span><span>{pass} pass</span><span>{fail} fail</span><span>{review} need review</span><span>{nt} not tested</span></div>{missing}{excluded}{notes}</article>",
+                label = escape_html(&view.label),
+                id = escape_html(&view.id),
+                basis = escape_html(&view.basis),
+                included = view.included_criteria.len(),
+                total = view.total_success_criteria,
+                pass = view.pass,
+                fail = view.fail,
+                review = view.needs_review,
+                nt = view.not_tested,
+                missing = missing,
+                excluded = excluded,
+                notes = notes,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        "<section><h2 class=\"sh\">WCAG profile views</h2><p class=\"sub\" style=\"margin:0 0 14px\">Derived views over the same evidence ledger for standards consumers.</p>{cards}</section>"
     )
 }
 
@@ -498,6 +566,8 @@ pub(crate) fn render_compliance_report(report: &ComplianceReportPacket) -> Strin
     html.push_str("<section><h2 class=\"sh\">WCAG 2.2 success criteria</h2>");
     html.push_str(&cr_principle_sections(&report.criteria));
     html.push_str("</section>");
+
+    html.push_str(&cr_profile_views(&report.profile_views));
 
     html.push_str(&cr_supporting_checks(&report.supporting_checks));
 

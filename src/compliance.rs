@@ -1,14 +1,15 @@
 use crate::model::{
-    AgenticAssessment, ArtifactMetadata, ComplianceObligation, ComplianceReportPacket,
-    ComplianceSummary, ComplianceSupportingCheck, ComplianceSurfaceReport, CriterionCoverageCell,
-    EvidenceMedia, EvidencePacket, Finding, ProductMapPacket, ProductSurface, StateEvidence,
-    Verdict,
+    AgenticAssessment, ArtifactMetadata, ComplianceObligation, ComplianceProfileView,
+    ComplianceReportPacket, ComplianceSummary, ComplianceSupportingCheck, ComplianceSurfaceReport,
+    CriterionCoverageCell, EvidenceMedia, EvidencePacket, Finding, ProductMapPacket,
+    ProductSurface, StateEvidence, Verdict,
 };
 use crate::report;
 use crate::standards::{
     applicability_reason, criterion_level, criterion_principle, criterion_source_url,
     criterion_title, deterministic_pass_obligation, profile_obligation_list, residual_review_need,
-    supporting_check_related_criteria, wcag22_success_criteria, wcag22_success_criterion_ids,
+    supporting_check_related_criteria, wcag21_aa_profile_view, wcag22_success_criteria,
+    wcag22_success_criterion_ids,
 };
 use crate::{COMPLIANCE_REPORT_SCHEMA, now_utc, unique_strings};
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,6 +34,7 @@ pub(crate) fn build_compliance_report(
     let criteria = aggregate_criteria_from_cells(base_criteria, &criterion_coverage);
     let criteria = attach_agentic_reviews(criteria, packet, packet_path);
     let summary = compliance_summary(packet, &criteria, supporting_checks.len());
+    let profile_views = compliance_profile_views(&map.policy_profile, &criteria);
     let surfaces = map
         .surfaces
         .iter()
@@ -50,6 +52,7 @@ pub(crate) fn build_compliance_report(
         supporting_checks,
         obligations: criteria,
         surfaces,
+        profile_views,
         state_evidence: build_state_evidence(packet, packet_path),
     }
 }
@@ -72,11 +75,21 @@ fn build_state_evidence(packet: &EvidencePacket, packet_path: &Path) -> Vec<Stat
                         && is_safe_run_relative(&artifact.path)
                 })
                 .filter_map(|artifact| {
-                    artifact_data_uri(&run_dir.join(&artifact.path)).map(|uri| EvidenceMedia {
-                        kind: "screenshot".to_string(),
-                        caption: format!("{} — full page as Allie captured it", state.id),
-                        data_uri: Some(uri),
-                        artifact_ref: Some(artifact.id.clone()),
+                    artifact_data_uri(&run_dir.join(&artifact.path)).map(|uri| {
+                        let caption = if artifact.id.starts_with("mobile-screenshot-") {
+                            format!(
+                                "{} — mobile viewport full page as Allie captured it",
+                                state.id
+                            )
+                        } else {
+                            format!("{} — full page as Allie captured it", state.id)
+                        };
+                        EvidenceMedia {
+                            kind: "screenshot".to_string(),
+                            caption,
+                            data_uri: Some(uri),
+                            artifact_ref: Some(artifact.id.clone()),
+                        }
                     })
                 })
                 .collect();
@@ -237,6 +250,38 @@ fn compliance_criterion_order(policy_profile: &str, packet: &EvidencePacket) -> 
         }
     }
     obligations
+}
+
+fn compliance_profile_views(
+    policy_profile: &str,
+    criteria: &[ComplianceObligation],
+) -> Vec<ComplianceProfileView> {
+    if policy_profile != "wcag22-aa" {
+        return Vec::new();
+    }
+
+    let by_id = criteria
+        .iter()
+        .map(|criterion| (criterion.id.as_str(), criterion))
+        .collect::<BTreeMap<_, _>>();
+    let mut view = wcag21_aa_profile_view();
+    for criterion_id in &view.included_criteria {
+        match by_id
+            .get(criterion_id.as_str())
+            .map(|criterion| criterion.status.as_str())
+        {
+            Some("pass") => view.pass += 1,
+            Some("fail") => view.fail += 1,
+            Some("needs_review") => view.needs_review += 1,
+            Some("not_applicable") => view.not_applicable += 1,
+            Some("waived") => view.waived += 1,
+            Some("risk_accepted") => view.risk_accepted += 1,
+            Some("not_tested") | None => view.not_tested += 1,
+            Some(_) => view.needs_review += 1,
+        }
+    }
+    view.not_tested += view.missing_legacy_criteria.len();
+    vec![view]
 }
 
 fn supporting_check_order(policy_profile: &str, packet: &EvidencePacket) -> Vec<String> {

@@ -1923,8 +1923,21 @@ fn render_report(packet: &EvidencePacket) -> String {
         .state_metadata
         .iter()
         .map(|state| {
+            let mobile = state.features.as_ref().map_or_else(
+                || "mobile viewport: not recorded".to_string(),
+                |features| {
+                    if features.mobile_viewport_checked {
+                        format!(
+                            "mobile viewport: {}x{} checked",
+                            features.mobile_viewport_width, features.mobile_viewport_height
+                        )
+                    } else {
+                        "mobile viewport: not checked".to_string()
+                    }
+                },
+            );
             format!(
-                "<li><strong>{}</strong> <span>{}</span><br><code>{}</code><br><span>HTTP status: {}; console errors: {}; network errors: {}; state errors: {}; keyboard stops: {}</span></li>",
+                "<li><strong>{}</strong> <span>{}</span><br><code>{}</code><br><span>HTTP status: {}; console errors: {}; network errors: {}; state errors: {}; keyboard stops: {}; {}</span></li>",
                 escape_html(&state.id),
                 escape_html(&state.title),
                 escape_html(&state.url),
@@ -1934,7 +1947,8 @@ fn render_report(packet: &EvidencePacket) -> String {
                 state.console_errors.len(),
                 state.network_errors.len(),
                 state.state_errors.len(),
-                state.keyboard_focus_order.len()
+                state.keyboard_focus_order.len(),
+                escape_html(&mobile)
             )
         })
         .collect::<Vec<_>>()
@@ -2910,6 +2924,41 @@ mod tests {
                 .as_str()
                 .is_some_and(|value| value.starts_with("wcag22-aa:"))
         }));
+    }
+
+    #[test]
+    fn wcag22_ledger_projects_to_eaa_wcag21_aa_view_without_overclaiming() {
+        let projection = standards::wcag21_aa_profile_view();
+
+        assert_eq!(projection.id, "wcag21-aa");
+        assert_eq!(projection.total_success_criteria, 50);
+        assert_eq!(projection.included_criteria.len(), 49);
+        assert!(
+            projection
+                .included_criteria
+                .contains(&"wcag22-aa:1.4.10-reflow".to_string())
+        );
+        assert!(
+            projection
+                .included_criteria
+                .contains(&"wcag22-aa:2.5.1-pointer-gestures".to_string())
+        );
+        assert!(
+            projection
+                .included_criteria
+                .contains(&"wcag22-aa:2.5.4-motion-actuation".to_string())
+        );
+        assert!(
+            !projection
+                .included_criteria
+                .contains(&"wcag22-aa:2.5.8-target-size-minimum".to_string()),
+            "WCAG 2.2-only target-size-minimum must not inflate the EAA/WCAG 2.1 view"
+        );
+        assert_eq!(
+            projection.missing_legacy_criteria,
+            vec!["wcag21-aa:4.1.1-parsing".to_string()],
+            "the WCAG 2.1-only Parsing criterion must be explicit, not silently dropped"
+        );
     }
 
     #[test]
@@ -4644,6 +4693,8 @@ flow:
                 http_status: Some(200),
                 screenshot_path: Some("artifacts/login-form.png".to_string()),
                 axe_json_path: Some("artifacts/axe-login-form.json".to_string()),
+                mobile_screenshot_path: None,
+                mobile_axe_json_path: None,
                 dom_snapshot_path: None,
                 accessibility_tree_path: None,
                 video_path: None,
@@ -4662,6 +4713,9 @@ flow:
                     lang_value: "en".to_string(),
                     reflow_checked: true,
                     reflow_overflow: false,
+                    mobile_viewport_checked: true,
+                    mobile_viewport_width: 390,
+                    mobile_viewport_height: 844,
                     ..Default::default()
                 }),
             }],

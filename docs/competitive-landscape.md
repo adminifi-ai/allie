@@ -1,6 +1,6 @@
 # Competitive Landscape
 
-Last reviewed: 2026-06-20
+Last reviewed: 2026-06-30
 
 ## Positioning Thesis
 
@@ -14,6 +14,13 @@ Competitors prove the market wants automation, guided manual review, dashboards,
 AI assistance, and enterprise audit workflows. Allie should use those lessons
 while staying sharper about local reproducibility, privacy policy, provenance,
 and host-agnostic CI/release contracts.
+
+The overlay trust gap is now part of the category context. In April 2025, the
+FTC approved a final order requiring accessiBe to pay $1 million and barring
+unsupported claims that automated products can make or keep websites
+WCAG-compliant. Allie should not answer that market scar with stronger AI
+claims. It should answer with owned evidence packets, criterion ledgers,
+replay-to-revision provenance, and explicit residual review needs.
 
 Each entry records the same fields so roadmap discussions can compare Allie
 against scanner, dashboard, manual-audit, browser-cloud, design, and AI-assisted
@@ -47,6 +54,30 @@ agent review of vendor claims.
   richer packet, not as the whole product surface, story map, or release policy.
 - **Sources:** [axe-core GitHub](https://github.com/dequelabs/axe-core),
   [Deque axe-core](https://www.deque.com/axe/axe-core/)
+
+### accessiBe and accessibility overlays
+
+- **Category:** Accessibility overlay/widget vendor.
+- **Automation depth:** Automated website modifications and AI-assisted
+  accessibility claims around a plug-in overlay.
+- **Standards claims:** The FTC alleged accessiBe claimed its plug-in could make
+  any website WCAG-compliant; the final order bars unsupported automated
+  WCAG-compliance and continuing-compliance representations.
+- **CI/PR integration:** Overlay installed into the site experience rather than
+  a repo-owned CI evidence loop.
+- **Evidence artifacts and replay:** Public trust issue is the opposite of
+  Allie's wedge: the FTC action centered on unsupported automated compliance
+  claims, not replayable per-revision evidence packets.
+- **Manual review workflow:** Not the primary trust contract in the FTC case.
+- **AI/agentic claims:** AI-powered accessibility tool claims were central to
+  the FTC's January 2025 complaint and April 2025 final order.
+- **Privacy/governance posture:** Third-party overlay posture; Allie should keep
+  local-first artifacts and provider routing explicit.
+- **Allie differentiation:** Lead with evidence, status, confidence, residual
+  review needs, and replay commands. Never promise legal compliance or automated
+  remediation.
+- **Sources:** [FTC final order](https://www.ftc.gov/news-events/news/press-releases/2025/04/ftc-approves-final-order-requiring-accessibe-pay-1-million),
+  [FTC accessiBe case page](https://www.ftc.gov/legal-library/browse/cases-proceedings/2223156-accessibe-inc)
 
 ### Deque axe DevTools and axe Platform
 

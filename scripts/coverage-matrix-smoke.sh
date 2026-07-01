@@ -30,6 +30,15 @@ if (report.summary.total_success_criteria !== 55) throw new Error('expected 55 s
 if (report.summary.total_supporting_checks !== 6) throw new Error('expected 6 supporting checks');
 if (report.criteria.length !== 55) throw new Error('criteria length must be 55');
 if (report.criterion_coverage.length !== 55) throw new Error('coverage matrix length must be 55 for one fixture state');
+const wcag21 = report.profile_views?.find((view) => view.id === 'wcag21-aa');
+if (!wcag21) throw new Error('missing WCAG 2.1 AA profile view');
+if (wcag21.total_success_criteria !== 50) throw new Error('WCAG 2.1 AA view must have 50 criteria');
+if (!wcag21.missing_legacy_criteria?.includes('wcag21-aa:4.1.1-parsing')) {
+  throw new Error('WCAG 2.1 Parsing criterion must be explicit in the EAA view');
+}
+if (wcag21.included_criteria?.includes('wcag22-aa:2.5.8-target-size-minimum')) {
+  throw new Error('WCAG 2.2-only 2.5.8 must not count in the WCAG 2.1 AA view');
+}
 const criterionIds = new Set(report.criteria.map((criterion) => criterion.id));
 for (const id of supportIds) {
   if (criterionIds.has(id)) throw new Error(id + ' leaked into WCAG denominator');
@@ -46,6 +55,7 @@ for (const cell of report.criterion_coverage) {
   }
 }
 if (!html.includes('WCAG 2.2 success criteria')) throw new Error('html missing criteria section');
+if (!html.includes('WCAG 2.1 AA view')) throw new Error('html missing WCAG 2.1 profile view');
 if (!html.includes('Supporting checks')) throw new Error('html missing support section');
 if (!html.includes('Criterion coverage matrix')) throw new Error('html missing coverage matrix');
 if (!html.includes('not a legal compliance guarantee')) throw new Error('html missing no-legal-claim text');

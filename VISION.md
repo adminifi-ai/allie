@@ -60,6 +60,13 @@ The output is the product. It is deep and comprehensive by default, generated
 automatically, and structured so the next agent — or the next human — can trust
 it.
 
+The V0 target is web content and web applications. Mobile web is not a separate
+non-goal: WCAG applies across responsive web variations, so Allie captures
+mobile viewport evidence for web states and keeps mobile-relevant WCAG criteria
+in the ledger. Native mobile apps (iOS/Android apps that are not web content)
+are outside the current product scope until Allie has a native-app runner and
+standard-specific evidence model.
+
 ## What Must Stay True
 
 These are invariants, not features. They define what Allie *is*; if a change

@@ -122,10 +122,34 @@ pub(crate) fn artifacts(
                 timestamp,
             )?);
         }
+        if let Some(path) = &state.mobile_screenshot_path {
+            artifacts.push(artifact_for_path(
+                &format!("mobile-screenshot-{}", state.id),
+                "screenshot",
+                out_dir,
+                &out_dir.join(path),
+                Some(state.id.clone()),
+                WORKER_CREATION_TOOL,
+                artifact_policy,
+                timestamp,
+            )?);
+        }
         if let Some(path) = &state.dom_snapshot_path {
             artifacts.push(artifact_for_path(
                 &format!("dom-snapshot-{}", state.id),
                 "dom_snapshot",
+                out_dir,
+                &out_dir.join(path),
+                Some(state.id.clone()),
+                WORKER_CREATION_TOOL,
+                artifact_policy,
+                timestamp,
+            )?);
+        }
+        if let Some(path) = &state.mobile_axe_json_path {
+            artifacts.push(artifact_for_path(
+                &format!("mobile-axe-json-{}", state.id),
+                "axe_json",
                 out_dir,
                 &out_dir.join(path),
                 Some(state.id.clone()),
@@ -282,6 +306,10 @@ pub(crate) struct WorkerStateResult {
     pub(crate) http_status: Option<u16>,
     pub(crate) screenshot_path: Option<String>,
     pub(crate) axe_json_path: Option<String>,
+    #[serde(default)]
+    pub(crate) mobile_screenshot_path: Option<String>,
+    #[serde(default)]
+    pub(crate) mobile_axe_json_path: Option<String>,
     #[serde(default)]
     pub(crate) dom_snapshot_path: Option<String>,
     #[serde(default)]

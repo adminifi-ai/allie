@@ -29,6 +29,8 @@ const linkPattern = /\[[^\]]+\]\(https?:\/\/[^)]+\)/g;
 const allowedSourceUrls = new Set([
   'https://github.com/dequelabs/axe-core',
   'https://www.deque.com/axe/axe-core/',
+  'https://www.ftc.gov/news-events/news/press-releases/2025/04/ftc-approves-final-order-requiring-accessibe-pay-1-million',
+  'https://www.ftc.gov/legal-library/browse/cases-proceedings/2223156-accessibe-inc',
   'https://www.deque.com/axe/',
   'https://www.deque.com/axe/devtools/extension/',
   'https://docs.deque.com/devtools-for-web/4/en/devtools-igt/',
