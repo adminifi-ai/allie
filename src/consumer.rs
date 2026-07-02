@@ -1,5 +1,10 @@
 use super::*;
 use crate::model::{ArtifactPolicy, BrowserSettings, ManifestTarget, Viewport};
+use crate::pipeline::{
+    DisabledModelReview, PipelineCheckpoint, PipelineOptions, PipelinePaths, PipelineReceipts,
+    PipelineRunResult, PipelineStepComplete, run_pipeline,
+};
+use std::convert::Infallible;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -46,17 +51,7 @@ pub(super) struct VerifyOptions {
     stale_after_days: i64,
 }
 
-#[derive(Debug)]
-struct VerifyPipelineReceipts {
-    discovery: DiscoveryReceipt,
-    promoted: PromoteFlowReceipt,
-    map: MapReceipt,
-    run: RunReceipt,
-    report: ComplianceReportReceipt,
-    release: ReleaseReceipt,
-    project_root: PathBuf,
-    changed_surfaces: Vec<String>,
-}
+type VerifyPipelineReceipts = PipelineReceipts;
 
 #[derive(Debug)]
 struct VerifyReporterReceipt {
@@ -326,65 +321,37 @@ fn scaffold_manifest(options: &InitOptions) -> FlowManifest {
 }
 
 fn run_verify_pipeline(options: &VerifyOptions) -> Result<VerifyPipelineReceipts> {
-    let manifest = FlowManifest::load(&options.manifest_path)?;
-    manifest.validate()?;
-    let project_root = options
-        .project_root
-        .clone()
-        .unwrap_or_else(|| default_project_root_for_manifest(&options.manifest_path, &manifest));
-    let project_root = fs::canonicalize(&project_root).unwrap_or(project_root);
+    let result = run_pipeline(
+        PipelineOptions {
+            manifest_path: options.manifest_path.clone(),
+            project_root: options.project_root.clone(),
+            agent_runner: options.agent_runner,
+            paths: PipelinePaths::verify(&options.out_dir),
+            disabled_model_review: DisabledModelReview::KeepRunPacket,
+            stale_after_days: options.stale_after_days,
+        },
+        |checkpoint| {
+            let agentic_summary = match checkpoint {
+                PipelineCheckpoint::StepCompleted(PipelineStepComplete::Review(review)) => {
+                    review.agentic_summary.as_ref()
+                }
+                _ => None,
+            };
+            if let Some(summary) = agentic_summary {
+                eprintln!(
+                    "Agentic review: {} criteria, {} model call(s), status {}",
+                    summary.criteria, summary.calls, summary.status
+                );
+            }
+            Ok(None::<Infallible>)
+        },
+        |discovery| verify_changed_surfaces(discovery, &options.changed_surfaces),
+    )?;
 
-    let discovery = run_discovery(DiscoveryOptions {
-        manifest_path: options.manifest_path.clone(),
-        out_dir: options.out_dir.join("discovery"),
-    })?;
-    let promoted = run_promote_flow(PromoteFlowOptions {
-        discovery_path: discovery.discovery_path.clone(),
-        flow_plan_path: discovery.flow_plan_path.clone(),
-        out_path: options.out_dir.join("flow/generated-flow.yml"),
-    })?;
-    let map = run_map(MapOptions {
-        manifest_path: options.manifest_path.clone(),
-        out_dir: options.out_dir.join("map"),
-        project_root: project_root.clone(),
-        agent_runner: options.agent_runner,
-    })?;
-    let run = run_v0(RunOptions {
-        manifest_path: promoted.manifest_path.clone(),
-        out_dir: options.out_dir.join("run"),
-        project_root: Some(project_root.clone()),
-    })?;
-    let promoted_manifest = FlowManifest::load(&promoted.manifest_path)?;
-    if promoted_manifest.model.enabled {
-        let summary = crate::agentic::run_agentic_review(&promoted_manifest, &run.evidence_path)?;
-        eprintln!(
-            "Agentic review: {} criteria, {} model call(s), status {}",
-            summary.criteria, summary.calls, summary.status
-        );
+    match result {
+        PipelineRunResult::Completed(pipeline) => Ok(*pipeline),
+        PipelineRunResult::Stopped(never) => match never {},
     }
-    let report = run_compliance_report(ReportOptions {
-        map_path: map.map_path.clone(),
-        packet_path: run.evidence_path.clone(),
-        out_dir: options.out_dir.join("report"),
-    })?;
-    let changed_surfaces = verify_changed_surfaces(&discovery, &options.changed_surfaces)?;
-    let release = run_release(ReleaseOptions {
-        packet_path: run.evidence_path.clone(),
-        out_dir: options.out_dir.join("release"),
-        changed_surfaces: changed_surfaces.clone(),
-        stale_after_days: options.stale_after_days,
-    })?;
-
-    Ok(VerifyPipelineReceipts {
-        discovery,
-        promoted,
-        map,
-        run,
-        report,
-        release,
-        project_root,
-        changed_surfaces,
-    })
 }
 
 fn write_verify_reporters(
