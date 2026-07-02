@@ -1,9 +1,11 @@
+use crate::pipeline::{
+    DisabledModelReview, PipelineCheckpoint, PipelineOptions, PipelinePaths, PipelineRunResult,
+    PipelineStepComplete, run_pipeline,
+};
 use crate::{
-    AgentRunnerKind, AllieError, DiscoveryOptions, ExitClass, FlowManifest, FlowPlanPacket,
-    MapOptions, PromoteFlowOptions, ReleaseOptions, ReportOptions, Result, ReviewOptions,
-    RunOptions, default_project_root_for_manifest, new_job_id, now_utc, path_relative_to,
-    read_json_file, run_compliance_report, run_discovery, run_map, run_promote_flow, run_release,
-    run_review, run_v0, status_for_exit_class, write_string, write_string_atomic,
+    AgentRunnerKind, AllieError, ExitClass, FlowManifest, FlowPlanPacket, Result,
+    default_project_root_for_manifest, new_job_id, now_utc, path_relative_to, read_json_file,
+    write_string, write_string_atomic,
 };
 use crate::{DEFAULT_WORKBENCH_IDLE_TIMEOUT_MS, DEFAULT_WORKBENCH_MAX_RUNTIME_MS, JOB_SCHEMA};
 use serde::{Deserialize, Serialize};
@@ -206,250 +208,24 @@ fn run_workbench_start_with_job(
     )?;
     write_workbench_job(&options.out_dir, &job)?;
 
-    let discovery_dir = options.out_dir.join("steps/discovery");
-    let map_dir = options.out_dir.join("steps/map");
-    let run_dir = options.out_dir.join("steps/run");
-    let report_dir = options.out_dir.join("steps/report");
-    let review_dir = options.out_dir.join("steps/review");
-    let release_dir = options.out_dir.join("steps/release");
-
-    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "discover")? {
-        return Ok(receipt);
-    }
-    let discovery = match run_discovery(DiscoveryOptions {
-        manifest_path: options.manifest_path.clone(),
-        out_dir: discovery_dir.clone(),
-    }) {
-        Ok(receipt) => receipt,
-        Err(error) => return workbench_step_error(&options.out_dir, job, "discover", error),
-    };
-    job.pointers.discovery = Some(path_relative_to(
-        &options.out_dir,
-        &discovery.discovery_path,
-    ));
-    job.pointers.flow_plan = Some(path_relative_to(
-        &options.out_dir,
-        &discovery.flow_plan_path,
-    ));
-    job.artifacts.push(WorkbenchArtifactRef {
-        kind: "discovery".to_string(),
-        path: path_relative_to(&options.out_dir, &discovery.discovery_path),
-    });
-    workbench_step_complete(
-        &options.out_dir,
-        &mut job,
-        "discover",
-        "completed",
-        Some(&discovery.discovery_path),
-        ExitClass::Success,
-        "discovery packet written",
+    let pipeline = run_pipeline(
+        PipelineOptions {
+            manifest_path: options.manifest_path.clone(),
+            project_root: Some(project_root),
+            agent_runner: options.agent_runner,
+            paths: PipelinePaths::workbench(&options.out_dir),
+            disabled_model_review: DisabledModelReview::WriteOfflineReview,
+            stale_after_days: 7,
+        },
+        |checkpoint| workbench_pipeline_checkpoint(&options.out_dir, &mut job, checkpoint),
+        |discovery| workbench_changed_surfaces(&discovery.flow_plan_path),
     )?;
-    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
-        return Ok(receipt);
-    }
-
-    let generated_flow_path = discovery_dir.join("generated-flow.yml");
-    if let Some(receipt) =
-        workbench_start_step_or_cancel(&options.out_dir, &mut job, "promote-flow")?
-    {
-        return Ok(receipt);
-    }
-    let promoted = match run_promote_flow(PromoteFlowOptions {
-        discovery_path: discovery.discovery_path.clone(),
-        flow_plan_path: discovery.flow_plan_path.clone(),
-        out_path: generated_flow_path,
-    }) {
-        Ok(receipt) => receipt,
-        Err(error) => return workbench_step_error(&options.out_dir, job, "promote-flow", error),
+    let pipeline = match pipeline {
+        PipelineRunResult::Completed(pipeline) => pipeline,
+        PipelineRunResult::Stopped(receipt) => return Ok(receipt),
     };
-    job.pointers.generated_flow = Some(path_relative_to(&options.out_dir, &promoted.manifest_path));
-    job.artifacts.push(WorkbenchArtifactRef {
-        kind: "generated_flow".to_string(),
-        path: path_relative_to(&options.out_dir, &promoted.manifest_path),
-    });
-    workbench_step_complete(
-        &options.out_dir,
-        &mut job,
-        "promote-flow",
-        "completed",
-        Some(&promoted.manifest_path),
-        ExitClass::Success,
-        "generated flow manifest written",
-    )?;
-    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
-        return Ok(receipt);
-    }
 
-    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "map")? {
-        return Ok(receipt);
-    }
-    let map = match run_map(MapOptions {
-        manifest_path: options.manifest_path.clone(),
-        out_dir: map_dir,
-        project_root: project_root.clone(),
-        agent_runner: options.agent_runner,
-    }) {
-        Ok(receipt) => receipt,
-        Err(error) => return workbench_step_error(&options.out_dir, job, "map", error),
-    };
-    job.pointers.product_map = Some(path_relative_to(&options.out_dir, &map.map_path));
-    job.pointers.surface_map = Some(path_relative_to(&options.out_dir, &map.report_path));
-    job.artifacts.push(WorkbenchArtifactRef {
-        kind: "product_map".to_string(),
-        path: path_relative_to(&options.out_dir, &map.map_path),
-    });
-    workbench_step_complete(
-        &options.out_dir,
-        &mut job,
-        "map",
-        "completed",
-        Some(&map.map_path),
-        ExitClass::Success,
-        "product map written",
-    )?;
-    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
-        return Ok(receipt);
-    }
-
-    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "run")? {
-        return Ok(receipt);
-    }
-    let run = match run_v0(RunOptions {
-        manifest_path: promoted.manifest_path.clone(),
-        out_dir: run_dir,
-        project_root: Some(project_root.clone()),
-    }) {
-        Ok(receipt) => receipt,
-        Err(error) => return workbench_step_error(&options.out_dir, job, "run", error),
-    };
-    job.pointers.evidence_packet = Some(path_relative_to(&options.out_dir, &run.evidence_path));
-    job.pointers.evidence_report = Some(path_relative_to(&options.out_dir, &run.report_path));
-    job.artifacts.push(WorkbenchArtifactRef {
-        kind: "evidence_packet".to_string(),
-        path: path_relative_to(&options.out_dir, &run.evidence_path),
-    });
-    let run_step_status = status_for_exit_class(run.exit_class);
-    workbench_step_complete(
-        &options.out_dir,
-        &mut job,
-        "run",
-        run_step_status,
-        Some(&run.evidence_path),
-        run.exit_class,
-        "evidence replay completed",
-    )?;
-    if run.exit_class == ExitClass::InfrastructureFailure {
-        return workbench_finish(
-            &options.out_dir,
-            job,
-            "failed",
-            ExitClass::InfrastructureFailure,
-            "run stopped on infrastructure failure",
-        );
-    }
-    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
-        return Ok(receipt);
-    }
-
-    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "review")? {
-        return Ok(receipt);
-    }
-    let review_manifest = match FlowManifest::load(&promoted.manifest_path) {
-        Ok(manifest) => manifest,
-        Err(error) => return workbench_step_error(&options.out_dir, job, "review", error),
-    };
-    let review = match run_workbench_review(&review_manifest, &run.evidence_path, &review_dir) {
-        Ok(receipt) => receipt,
-        Err(error) => return workbench_step_error(&options.out_dir, job, "review", error),
-    };
-    job.pointers.reviewed_packet = Some(path_relative_to(&options.out_dir, &review.packet_path));
-    if let Some(report_path) = &review.report_path {
-        job.pointers.review_report = Some(path_relative_to(&options.out_dir, report_path));
-    }
-    job.artifacts.push(WorkbenchArtifactRef {
-        kind: "reviewed_packet".to_string(),
-        path: path_relative_to(&options.out_dir, &review.packet_path),
-    });
-    workbench_step_complete(
-        &options.out_dir,
-        &mut job,
-        "review",
-        "completed",
-        Some(&review.packet_path),
-        ExitClass::Success,
-        &review.message,
-    )?;
-    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
-        return Ok(receipt);
-    }
-    let reviewed_packet_path = review.packet_path;
-
-    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "report")? {
-        return Ok(receipt);
-    }
-    let report = match run_compliance_report(ReportOptions {
-        map_path: map.map_path.clone(),
-        packet_path: reviewed_packet_path.clone(),
-        out_dir: report_dir,
-    }) {
-        Ok(receipt) => receipt,
-        Err(error) => return workbench_step_error(&options.out_dir, job, "report", error),
-    };
-    job.pointers.compliance_report =
-        Some(path_relative_to(&options.out_dir, &report.report_json_path));
-    job.pointers.compliance_html =
-        Some(path_relative_to(&options.out_dir, &report.report_html_path));
-    job.artifacts.push(WorkbenchArtifactRef {
-        kind: "compliance_report".to_string(),
-        path: path_relative_to(&options.out_dir, &report.report_json_path),
-    });
-    workbench_step_complete(
-        &options.out_dir,
-        &mut job,
-        "report",
-        "completed",
-        Some(&report.report_json_path),
-        ExitClass::Success,
-        "compliance report written",
-    )?;
-    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
-        return Ok(receipt);
-    }
-
-    if let Some(receipt) = workbench_start_step_or_cancel(&options.out_dir, &mut job, "release")? {
-        return Ok(receipt);
-    }
-    let changed_surface = workbench_changed_surface(&discovery.flow_plan_path)?;
-    let release = match run_release(ReleaseOptions {
-        packet_path: reviewed_packet_path,
-        out_dir: release_dir,
-        changed_surfaces: vec![changed_surface],
-        stale_after_days: 7,
-    }) {
-        Ok(receipt) => receipt,
-        Err(error) => return workbench_step_error(&options.out_dir, job, "release", error),
-    };
-    job.pointers.release_summary = Some(path_relative_to(&options.out_dir, &release.summary_path));
-    job.pointers.release_report = Some(path_relative_to(&options.out_dir, &release.report_path));
-    job.artifacts.push(WorkbenchArtifactRef {
-        kind: "release_summary".to_string(),
-        path: path_relative_to(&options.out_dir, &release.summary_path),
-    });
-    let release_step_status = status_for_exit_class(release.exit_class);
-    workbench_step_complete(
-        &options.out_dir,
-        &mut job,
-        "release",
-        release_step_status,
-        Some(&release.summary_path),
-        release.exit_class,
-        "release projection written",
-    )?;
-    if let Some(receipt) = workbench_cancel_checkpoint(&options.out_dir, &mut job)? {
-        return Ok(receipt);
-    }
-
-    let final_status = match release.exit_class {
+    let final_status = match pipeline.release.exit_class {
         ExitClass::Success => "completed",
         ExitClass::BlockingFinding => "blocked",
         ExitClass::InfrastructureFailure | ExitClass::Usage => "failed",
@@ -458,7 +234,7 @@ fn run_workbench_start_with_job(
         &options.out_dir,
         job,
         final_status,
-        release.exit_class,
+        pipeline.release.exit_class,
         "workbench job finished",
     )
 }
@@ -506,38 +282,116 @@ fn run_workbench_resume(job_dir: &Path) -> Result<WorkbenchReceipt> {
     )
 }
 
-struct WorkbenchReviewStepReceipt {
-    packet_path: PathBuf,
-    report_path: Option<PathBuf>,
-    message: String,
+fn workbench_pipeline_checkpoint(
+    job_dir: &Path,
+    job: &mut WorkbenchJobPacket,
+    checkpoint: PipelineCheckpoint<'_>,
+) -> Result<Option<WorkbenchReceipt>> {
+    match checkpoint {
+        PipelineCheckpoint::BeforeStep(step) => {
+            workbench_start_step_or_cancel(job_dir, job, step.id())
+        }
+        PipelineCheckpoint::StepFailed { step, message } => {
+            workbench_step_error(job_dir, job, step.id(), message.to_string()).map(Some)
+        }
+        PipelineCheckpoint::StepCompleted(complete) => {
+            let run_stopped_on_infrastructure = matches!(
+                &complete,
+                PipelineStepComplete::Run(run)
+                    if run.exit_class == ExitClass::InfrastructureFailure
+            );
+            workbench_record_pipeline_step(job_dir, job, &complete)?;
+            if run_stopped_on_infrastructure {
+                return workbench_finish(
+                    job_dir,
+                    job.clone(),
+                    "failed",
+                    ExitClass::InfrastructureFailure,
+                    "run stopped on infrastructure failure",
+                )
+                .map(Some);
+            }
+            workbench_cancel_checkpoint(job_dir, job)
+        }
+    }
 }
 
-fn run_workbench_review(
-    manifest: &FlowManifest,
-    packet_path: &Path,
-    review_dir: &Path,
-) -> Result<WorkbenchReviewStepReceipt> {
-    if manifest.model.enabled {
-        let summary = crate::agentic::run_agentic_review(manifest, packet_path)?;
-        return Ok(WorkbenchReviewStepReceipt {
-            packet_path: packet_path.to_path_buf(),
-            report_path: None,
-            message: format!(
-                "live agentic review completed: {} criteria, {} model call(s), status {}",
-                summary.criteria, summary.calls, summary.status
-            ),
-        });
+fn workbench_record_pipeline_step(
+    job_dir: &Path,
+    job: &mut WorkbenchJobPacket,
+    complete: &PipelineStepComplete<'_>,
+) -> Result<()> {
+    match complete {
+        PipelineStepComplete::Discovery(discovery) => {
+            job.pointers.discovery = Some(path_relative_to(job_dir, &discovery.discovery_path));
+            job.pointers.flow_plan = Some(path_relative_to(job_dir, &discovery.flow_plan_path));
+            job.artifacts.push(WorkbenchArtifactRef {
+                kind: "discovery".to_string(),
+                path: path_relative_to(job_dir, &discovery.discovery_path),
+            });
+        }
+        PipelineStepComplete::PromoteFlow(promoted) => {
+            job.pointers.generated_flow = Some(path_relative_to(job_dir, &promoted.manifest_path));
+            job.artifacts.push(WorkbenchArtifactRef {
+                kind: "generated_flow".to_string(),
+                path: path_relative_to(job_dir, &promoted.manifest_path),
+            });
+        }
+        PipelineStepComplete::Map(map) => {
+            job.pointers.product_map = Some(path_relative_to(job_dir, &map.map_path));
+            job.pointers.surface_map = Some(path_relative_to(job_dir, &map.report_path));
+            job.artifacts.push(WorkbenchArtifactRef {
+                kind: "product_map".to_string(),
+                path: path_relative_to(job_dir, &map.map_path),
+            });
+        }
+        PipelineStepComplete::Run(run) => {
+            job.pointers.evidence_packet = Some(path_relative_to(job_dir, &run.evidence_path));
+            job.pointers.evidence_report = Some(path_relative_to(job_dir, &run.report_path));
+            job.artifacts.push(WorkbenchArtifactRef {
+                kind: "evidence_packet".to_string(),
+                path: path_relative_to(job_dir, &run.evidence_path),
+            });
+        }
+        PipelineStepComplete::Review(review) => {
+            job.pointers.reviewed_packet = Some(path_relative_to(job_dir, &review.packet_path));
+            if let Some(report_path) = &review.report_path {
+                job.pointers.review_report = Some(path_relative_to(job_dir, report_path));
+            }
+            job.artifacts.push(WorkbenchArtifactRef {
+                kind: "reviewed_packet".to_string(),
+                path: path_relative_to(job_dir, &review.packet_path),
+            });
+        }
+        PipelineStepComplete::Report(report) => {
+            job.pointers.compliance_report =
+                Some(path_relative_to(job_dir, &report.report_json_path));
+            job.pointers.compliance_html =
+                Some(path_relative_to(job_dir, &report.report_html_path));
+            job.artifacts.push(WorkbenchArtifactRef {
+                kind: "compliance_report".to_string(),
+                path: path_relative_to(job_dir, &report.report_json_path),
+            });
+        }
+        PipelineStepComplete::Release(release) => {
+            job.pointers.release_summary = Some(path_relative_to(job_dir, &release.summary_path));
+            job.pointers.release_report = Some(path_relative_to(job_dir, &release.report_path));
+            job.artifacts.push(WorkbenchArtifactRef {
+                kind: "release_summary".to_string(),
+                path: path_relative_to(job_dir, &release.summary_path),
+            });
+        }
     }
 
-    let review = run_review(ReviewOptions {
-        packet_path: packet_path.to_path_buf(),
-        out_dir: review_dir.to_path_buf(),
-    })?;
-    Ok(WorkbenchReviewStepReceipt {
-        packet_path: review.packet_path,
-        report_path: Some(review.report_path),
-        message: "offline agentic review context written".to_string(),
-    })
+    workbench_step_complete(
+        job_dir,
+        job,
+        complete.step().id(),
+        complete.status(),
+        complete.receipt_path(),
+        complete.exit_class(),
+        complete.message(),
+    )
 }
 
 fn new_workbench_job(
@@ -674,15 +528,14 @@ fn workbench_step_complete(
 
 fn workbench_step_error(
     job_dir: &Path,
-    mut job: WorkbenchJobPacket,
+    job: &mut WorkbenchJobPacket,
     step: &str,
-    error: AllieError,
+    message: String,
 ) -> Result<WorkbenchReceipt> {
-    let message = error.to_string();
     job.warnings.push(message.clone());
     workbench_step_complete(
         job_dir,
-        &mut job,
+        job,
         step,
         "failed",
         None,
@@ -691,7 +544,7 @@ fn workbench_step_error(
     )?;
     workbench_finish(
         job_dir,
-        job,
+        job.clone(),
         "failed",
         ExitClass::InfrastructureFailure,
         "workbench job failed",
@@ -862,13 +715,15 @@ fn append_workbench_event(
     })
 }
 
-fn workbench_changed_surface(flow_plan_path: &Path) -> Result<String> {
+fn workbench_changed_surfaces(flow_plan_path: &Path) -> Result<Vec<String>> {
     let flow_plan: FlowPlanPacket = read_json_file(flow_plan_path)?;
-    Ok(flow_plan
-        .candidates
-        .first()
-        .map(|candidate| candidate.id.clone())
-        .unwrap_or_else(|| "generated-flow".to_string()))
+    Ok(vec![
+        flow_plan
+            .candidates
+            .first()
+            .map(|candidate| candidate.id.clone())
+            .unwrap_or_else(|| "generated-flow".to_string()),
+    ])
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
