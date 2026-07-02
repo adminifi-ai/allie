@@ -197,6 +197,8 @@ pub(crate) fn run_pipeline<S>(
     mut checkpoint: impl FnMut(PipelineCheckpoint<'_>) -> Result<Option<S>>,
     release_changed_surfaces: impl FnOnce(&DiscoveryReceipt) -> Result<Vec<String>>,
 ) -> Result<PipelineRunResult<S>> {
+    // Keep these blocks explicit: each step consumes different receipt inputs,
+    // so the typed data flow is easier to audit here than behind a macro.
     let manifest = FlowManifest::load(&options.manifest_path)?;
     manifest.validate()?;
     let project_root = options

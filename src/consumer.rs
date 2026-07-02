@@ -4,6 +4,7 @@ use crate::pipeline::{
     DisabledModelReview, PipelineCheckpoint, PipelineOptions, PipelinePaths, PipelineReceipts,
     PipelineRunResult, PipelineStepComplete, run_pipeline,
 };
+use std::convert::Infallible;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -342,14 +343,14 @@ fn run_verify_pipeline(options: &VerifyOptions) -> Result<VerifyPipelineReceipts
                     summary.criteria, summary.calls, summary.status
                 );
             }
-            Ok(None::<()>)
+            Ok(None::<Infallible>)
         },
         |discovery| verify_changed_surfaces(discovery, &options.changed_surfaces),
     )?;
 
     match result {
         PipelineRunResult::Completed(pipeline) => Ok(*pipeline),
-        PipelineRunResult::Stopped(()) => unreachable!("verify pipeline callback never stops"),
+        PipelineRunResult::Stopped(never) => match never {},
     }
 }
 
