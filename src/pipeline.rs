@@ -306,7 +306,13 @@ pub(crate) fn run_pipeline<S>(
     if let Some(stop) = checkpoint(PipelineCheckpoint::BeforeStep(PipelineStep::Release))? {
         return Ok(PipelineRunResult::Stopped(stop));
     }
-    let changed_surfaces = release_changed_surfaces(&discovery)?;
+    let changed_surfaces = match release_changed_surfaces(&discovery) {
+        Ok(changed_surfaces) => changed_surfaces,
+        Err(error) => match step_error(&mut checkpoint, PipelineStep::Release, error)? {
+            StepErrorOutcome::Stop(stop) => return Ok(PipelineRunResult::Stopped(stop)),
+            StepErrorOutcome::Propagate(error) => return Err(error),
+        },
+    };
     let release = match run_pipeline_release(&options, &review, &changed_surfaces) {
         Ok(receipt) => receipt,
         Err(error) => match step_error(&mut checkpoint, PipelineStep::Release, error)? {
@@ -451,4 +457,74 @@ fn run_pipeline_release(
         changed_surfaces: changed_surfaces.to_vec(),
         stale_after_days: options.stale_after_days,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn release_surface_resolution_errors_are_attributed_to_release_step() {
+        let temp = tempdir().unwrap();
+        let out_dir = temp.path().join("verify");
+        let mut failed_steps = Vec::new();
+        let mut before_release = false;
+        let mut release_completed = false;
+
+        let result = run_pipeline(
+            PipelineOptions {
+                manifest_path: PathBuf::from("examples/autonomous-workbench.yml"),
+                project_root: None,
+                agent_runner: AgentRunnerKind::Local,
+                paths: PipelinePaths::verify(&out_dir),
+                disabled_model_review: DisabledModelReview::KeepRunPacket,
+                stale_after_days: 7,
+            },
+            |checkpoint| {
+                match checkpoint {
+                    PipelineCheckpoint::BeforeStep(PipelineStep::Release) => {
+                        before_release = true;
+                    }
+                    PipelineCheckpoint::StepFailed { step, message } => {
+                        failed_steps.push((step, message.to_string()));
+                        return Ok(Some("release failure recorded"));
+                    }
+                    PipelineCheckpoint::StepCompleted(complete)
+                        if complete.step() == PipelineStep::Release =>
+                    {
+                        release_completed = true;
+                    }
+                    _ => {}
+                }
+                Ok(None)
+            },
+            |_| {
+                Err(AllieError::InvalidManifest(
+                    "flow-plan unavailable at release".to_string(),
+                ))
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(
+            result,
+            PipelineRunResult::Stopped("release failure recorded")
+        ));
+        assert!(
+            before_release,
+            "release surface resolution should fail after the release checkpoint starts"
+        );
+        assert_eq!(
+            failed_steps,
+            vec![(
+                PipelineStep::Release,
+                "invalid manifest: flow-plan unavailable at release".to_string()
+            )]
+        );
+        assert!(
+            !release_completed,
+            "release must not complete after changed-surface resolution fails"
+        );
+    }
 }
