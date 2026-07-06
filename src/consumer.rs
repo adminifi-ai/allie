@@ -286,7 +286,7 @@ fn scaffold_manifest(options: &InitOptions) -> FlowManifest {
             redaction_status: "not_redacted_local".to_string(),
             retention_class: "local_ephemeral".to_string(),
         },
-        model: ModelPolicy::default(),
+        model: ModelPolicy::scaffold(),
         known_nondeterminism: Vec::new(),
         browser: BrowserSettings {
             viewport: Viewport {
@@ -895,5 +895,129 @@ fn slug_id(value: &str) -> String {
         "app".to_string()
     } else {
         slug
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    // Serializes tests that mutate the model provider API key env vars.
+    static MODEL_ENV_GUARD: Mutex<()> = Mutex::new(());
+
+    fn clear_model_credential_env() {
+        unsafe {
+            std::env::remove_var("OPENROUTER_API_KEY");
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+    }
+
+    fn init_options(manifest_path: PathBuf) -> InitOptions {
+        InitOptions {
+            manifest_path,
+            app_name: "Doctor Fixture App".to_string(),
+            base_url: "http://127.0.0.1:3000".to_string(),
+            fixture_dir: None,
+            force: false,
+        }
+    }
+
+    #[test]
+    fn init_enables_model_review_when_an_api_key_resolves() {
+        let _guard = MODEL_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear_model_credential_env();
+        unsafe {
+            std::env::set_var("OPENROUTER_API_KEY", "sk-or-test");
+        }
+        let temp = tempdir().unwrap();
+        let manifest_path = temp.path().join("manifest.yml");
+
+        let receipt = run_init(init_options(manifest_path)).unwrap();
+        let manifest = FlowManifest::load(&receipt.manifest_path).unwrap();
+
+        clear_model_credential_env();
+
+        assert!(manifest.model.enabled);
+        assert_eq!(
+            manifest.model.provider_allowlist,
+            vec!["openrouter".to_string()]
+        );
+        assert_eq!(manifest.model.provider.as_deref(), Some("openrouter"));
+        assert_eq!(
+            manifest.model.api_key_env.as_deref(),
+            Some("OPENROUTER_API_KEY")
+        );
+        assert!(
+            manifest
+                .preflight_failures()
+                .iter()
+                .all(|failure| failure.kind != "model-policy-incomplete")
+        );
+    }
+
+    #[test]
+    fn init_prefers_openrouter_over_openai_when_both_keys_resolve() {
+        let _guard = MODEL_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear_model_credential_env();
+        unsafe {
+            std::env::set_var("OPENROUTER_API_KEY", "sk-or-test");
+            std::env::set_var("OPENAI_API_KEY", "sk-openai-test");
+        }
+        let temp = tempdir().unwrap();
+        let manifest_path = temp.path().join("manifest.yml");
+
+        let receipt = run_init(init_options(manifest_path)).unwrap();
+        let manifest = FlowManifest::load(&receipt.manifest_path).unwrap();
+
+        clear_model_credential_env();
+
+        assert_eq!(manifest.model.provider.as_deref(), Some("openrouter"));
+    }
+
+    #[test]
+    fn init_falls_back_to_openai_when_only_that_key_resolves() {
+        let _guard = MODEL_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear_model_credential_env();
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "sk-openai-test");
+        }
+        let temp = tempdir().unwrap();
+        let manifest_path = temp.path().join("manifest.yml");
+
+        let receipt = run_init(init_options(manifest_path)).unwrap();
+        let manifest = FlowManifest::load(&receipt.manifest_path).unwrap();
+
+        clear_model_credential_env();
+
+        assert!(manifest.model.enabled);
+        assert_eq!(manifest.model.provider.as_deref(), Some("openai"));
+        assert_eq!(
+            manifest.model.api_key_env.as_deref(),
+            Some("OPENAI_API_KEY")
+        );
+    }
+
+    #[test]
+    fn init_leaves_model_review_off_when_no_api_key_resolves() {
+        let _guard = MODEL_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear_model_credential_env();
+        let temp = tempdir().unwrap();
+        let manifest_path = temp.path().join("manifest.yml");
+
+        let receipt = run_init(init_options(manifest_path)).unwrap();
+        let manifest = FlowManifest::load(&receipt.manifest_path).unwrap();
+
+        assert!(!manifest.model.enabled);
+        assert!(manifest.model.provider_allowlist.is_empty());
     }
 }
