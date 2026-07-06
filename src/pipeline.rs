@@ -2,9 +2,9 @@ use crate::agentic::AgenticReviewSummary;
 use crate::{
     AgentRunnerKind, AllieError, ComplianceReportReceipt, DiscoveryOptions, DiscoveryReceipt,
     ExitClass, FlowManifest, MapOptions, MapReceipt, PromoteFlowOptions, PromoteFlowReceipt,
-    ReleaseOptions, ReleaseReceipt, ReportOptions, Result, ReviewOptions, RunOptions, RunReceipt,
+    ReleaseOptions, ReleaseReceipt, ReportOptions, Result, RunOptions, RunReceipt,
     default_project_root_for_manifest, run_compliance_report, run_discovery, run_map,
-    run_promote_flow, run_release, run_review, run_v0, status_for_exit_class,
+    run_promote_flow, run_release, run_v0, status_for_exit_class,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,6 @@ pub(crate) struct PipelineOptions {
     pub(crate) project_root: Option<PathBuf>,
     pub(crate) agent_runner: AgentRunnerKind,
     pub(crate) paths: PipelinePaths,
-    pub(crate) disabled_model_review: DisabledModelReview,
     pub(crate) stale_after_days: i64,
 }
 
@@ -25,7 +24,6 @@ pub(crate) struct PipelinePaths {
     generated_flow_path: PathBuf,
     map_dir: PathBuf,
     run_dir: PathBuf,
-    review_dir: PathBuf,
     report_dir: PathBuf,
     release_dir: PathBuf,
 }
@@ -37,7 +35,6 @@ impl PipelinePaths {
             generated_flow_path: out_dir.join("flow/generated-flow.yml"),
             map_dir: out_dir.join("map"),
             run_dir: out_dir.join("run"),
-            review_dir: out_dir.join("review"),
             report_dir: out_dir.join("report"),
             release_dir: out_dir.join("release"),
         }
@@ -50,17 +47,10 @@ impl PipelinePaths {
             discovery_dir,
             map_dir: job_dir.join("steps/map"),
             run_dir: job_dir.join("steps/run"),
-            review_dir: job_dir.join("steps/review"),
             report_dir: job_dir.join("steps/report"),
             release_dir: job_dir.join("steps/release"),
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum DisabledModelReview {
-    KeepRunPacket,
-    WriteOfflineReview,
 }
 
 #[derive(Debug)]
@@ -394,7 +384,7 @@ fn run_pipeline_replay(
 }
 
 fn run_pipeline_review(
-    options: &PipelineOptions,
+    _options: &PipelineOptions,
     promoted: &PromoteFlowReceipt,
     run: &RunReceipt,
 ) -> Result<PipelineReviewReceipt> {
@@ -412,26 +402,12 @@ fn run_pipeline_review(
         });
     }
 
-    match options.disabled_model_review {
-        DisabledModelReview::KeepRunPacket => Ok(PipelineReviewReceipt {
-            packet_path: run.evidence_path.clone(),
-            report_path: None,
-            message: "agentic review disabled; using replay evidence packet".to_string(),
-            agentic_summary: None,
-        }),
-        DisabledModelReview::WriteOfflineReview => {
-            let review = run_review(ReviewOptions {
-                packet_path: run.evidence_path.clone(),
-                out_dir: options.paths.review_dir.clone(),
-            })?;
-            Ok(PipelineReviewReceipt {
-                packet_path: review.packet_path,
-                report_path: Some(review.report_path),
-                message: "offline agentic review context written".to_string(),
-                agentic_summary: None,
-            })
-        }
-    }
+    Ok(PipelineReviewReceipt {
+        packet_path: run.evidence_path.clone(),
+        report_path: None,
+        message: "agentic review disabled; using replay evidence packet".to_string(),
+        agentic_summary: None,
+    })
 }
 
 fn run_pipeline_report(
@@ -460,71 +436,4 @@ fn run_pipeline_release(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn release_surface_resolution_errors_are_attributed_to_release_step() {
-        let temp = tempdir().unwrap();
-        let out_dir = temp.path().join("verify");
-        let mut failed_steps = Vec::new();
-        let mut before_release = false;
-        let mut release_completed = false;
-
-        let result = run_pipeline(
-            PipelineOptions {
-                manifest_path: PathBuf::from("examples/autonomous-workbench.yml"),
-                project_root: None,
-                agent_runner: AgentRunnerKind::Local,
-                paths: PipelinePaths::verify(&out_dir),
-                disabled_model_review: DisabledModelReview::KeepRunPacket,
-                stale_after_days: 7,
-            },
-            |checkpoint| {
-                match checkpoint {
-                    PipelineCheckpoint::BeforeStep(PipelineStep::Release) => {
-                        before_release = true;
-                    }
-                    PipelineCheckpoint::StepFailed { step, message } => {
-                        failed_steps.push((step, message.to_string()));
-                        return Ok(Some("release failure recorded"));
-                    }
-                    PipelineCheckpoint::StepCompleted(complete)
-                        if complete.step() == PipelineStep::Release =>
-                    {
-                        release_completed = true;
-                    }
-                    _ => {}
-                }
-                Ok(None)
-            },
-            |_| {
-                Err(AllieError::InvalidManifest(
-                    "flow-plan unavailable at release".to_string(),
-                ))
-            },
-        )
-        .unwrap();
-
-        assert!(matches!(
-            result,
-            PipelineRunResult::Stopped("release failure recorded")
-        ));
-        assert!(
-            before_release,
-            "release surface resolution should fail after the release checkpoint starts"
-        );
-        assert_eq!(
-            failed_steps,
-            vec![(
-                PipelineStep::Release,
-                "invalid manifest: flow-plan unavailable at release".to_string()
-            )]
-        );
-        assert!(
-            !release_completed,
-            "release must not complete after changed-surface resolution fails"
-        );
-    }
-}
+mod tests;

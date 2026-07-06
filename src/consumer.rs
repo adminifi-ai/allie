@@ -1,8 +1,8 @@
 use super::*;
 use crate::model::{ArtifactPolicy, BrowserSettings, ManifestTarget, Viewport};
 use crate::pipeline::{
-    DisabledModelReview, PipelineCheckpoint, PipelineOptions, PipelinePaths, PipelineReceipts,
-    PipelineRunResult, PipelineStepComplete, run_pipeline,
+    PipelineCheckpoint, PipelineOptions, PipelinePaths, PipelineReceipts, PipelineRunResult,
+    PipelineStepComplete, run_pipeline,
 };
 use std::convert::Infallible;
 use std::fs;
@@ -382,7 +382,6 @@ fn run_verify_pipeline(options: &VerifyOptions) -> Result<VerifyPipelineReceipts
             project_root: options.project_root.clone(),
             agent_runner: options.agent_runner,
             paths: PipelinePaths::verify(&options.out_dir),
-            disabled_model_review: DisabledModelReview::KeepRunPacket,
             stale_after_days: options.stale_after_days,
         },
         |checkpoint| {

@@ -52,7 +52,7 @@ test -f .allie/releases/v0-smoke/release-report.html
 test -f .allie/discovery/autonomous-smoke/discovery.json
 test -f .allie/discovery/autonomous-smoke/flow-plan.json
 test -f .allie/runs/autonomous-smoke/evidence.json
-test -f .allie/reviews/autonomous-smoke/evidence-reviewed.json
+test ! -d .allie/reviews/autonomous-smoke
 test ! -d .allie/remediation/autonomous-smoke
 test -f .allie/releases/autonomous-smoke/release-summary.json
 test -f .allie/jobs/autonomous-smoke/job.json

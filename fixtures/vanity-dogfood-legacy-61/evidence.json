@@ -165,7 +165,6 @@
     }
   ],
   "waivers": [],
-  "review": [],
   "replay": {
     "command": "cargo run --locked -- run --manifest fixtures/vanity-dogfood-legacy-61/flow.yml --out .allie/runs/vanity",
     "manifest_path": "fixtures/vanity-dogfood-legacy-61/flow.yml",

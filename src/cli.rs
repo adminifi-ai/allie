@@ -1,8 +1,8 @@
 use crate::{
     ExitClass, NEXT_STEP, PRODUCT_LINE, parse_discovery_options, parse_doctor_options,
     parse_map_options, parse_promote_flow_options, parse_release_options, parse_report_options,
-    parse_review_options, parse_run_options, run_compliance_report, run_discovery, run_map,
-    run_promote_flow, run_release, run_review, run_v0,
+    parse_run_options, run_compliance_report, run_discovery, run_map, run_promote_flow,
+    run_release, run_v0,
 };
 use crate::{consumer, workbench, worker_runtime};
 use std::fmt::Display;
@@ -46,7 +46,6 @@ pub(crate) fn run_cli_with_io(
         Some("map") => handle_map(&args[1..], stdout, stderr),
         Some("report") => handle_report(&args[1..], stdout, stderr),
         Some("workbench") => handle_workbench(&args[1..], stdout, stderr),
-        Some("review") => handle_review(&args[1..], stdout, stderr),
         Some("release") => handle_release(&args[1..], stdout, stderr),
         _ => {
             let _ = writeln!(stderr, "allie: unknown command");
@@ -263,20 +262,6 @@ fn handle_workbench(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Wr
     }
 }
 
-fn handle_review(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
-    match parse_review_options(args) {
-        Ok(options) => match run_review(options) {
-            Ok(receipt) => {
-                let _ = writeln!(stdout, "Reviewed packet: {}", receipt.packet_path.display());
-                let _ = writeln!(stdout, "Review report: {}", receipt.report_path.display());
-                ExitClass::Success.code()
-            }
-            Err(error) => infra_error(error, stderr),
-        },
-        Err(error) => usage_error(error, stderr),
-    }
-}
-
 fn handle_release(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
     match parse_release_options(args) {
         Ok(options) => match run_release(options) {
@@ -311,7 +296,7 @@ fn usage_error(error: impl Display, stderr: &mut dyn Write) -> i32 {
 fn print_usage(writer: &mut dyn Write) {
     let _ = writeln!(
         writer,
-        "Usage:\n  allie init [--manifest .allie/manifest.yml] [--app-name <name>] [--base-url <url> | --fixture-dir <dir>] [--force]\n  allie doctor [--manifest .allie/manifest.yml | --no-manifest] [--out .allie/doctor]\n  allie verify [--manifest .allie/manifest.yml] [--out .allie/verify/latest] [--project-root <dir>] [--changed-surface <id>] [--agent local|opencode|omp] [--stale-after-days <days>]\n  allie run --manifest <flow.yml> --out <output-dir> [--project-root <dir>]\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie review --packet <evidence.json> --out <output-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
+        "Usage:\n  allie init [--manifest .allie/manifest.yml] [--app-name <name>] [--base-url <url> | --fixture-dir <dir>] [--force]\n  allie doctor [--manifest .allie/manifest.yml | --no-manifest] [--out .allie/doctor]\n  allie verify [--manifest .allie/manifest.yml] [--out .allie/verify/latest] [--project-root <dir>] [--changed-surface <id>] [--agent local|opencode|omp] [--stale-after-days <days>]\n  allie run --manifest <flow.yml> --out <output-dir> [--project-root <dir>]\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
     );
 }
 

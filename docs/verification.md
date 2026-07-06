@@ -254,7 +254,6 @@ attached as review context and the criterion remains `needs_review`.
 .allie/jobs/autonomous-smoke/steps/map/product-map.json
 .allie/jobs/autonomous-smoke/steps/run/evidence.json
 .allie/jobs/autonomous-smoke/steps/report/compliance-report.json
-.allie/jobs/autonomous-smoke/steps/review/evidence-reviewed.json
 .allie/jobs/autonomous-smoke/steps/release/release-summary.json
 .allie/jobs/autonomous-agentic-smoke/steps/run/agentic-request.json
 .allie/jobs/autonomous-agentic-smoke/steps/run/agentic-response.json
@@ -267,14 +266,14 @@ attached as review context and the criterion remains `needs_review`.
 .allie/discovery/autonomous-smoke/flow-plan.json
 .allie/discovery/autonomous-smoke/generated-flow.yml
 .allie/runs/autonomous-smoke/evidence.json
-.allie/reviews/autonomous-smoke/evidence-reviewed.json
 .allie/releases/autonomous-smoke/release-summary.json
 ```
 
 The smoke expects the generated replay to find the fixture's known deterministic
-contrast issue. That failure proves enforcement is wired: review still runs, and
-release projection blocks on deterministic evidence while keeping agentic context
-non-authoritative.
+contrast issue. That failure proves enforcement is wired: with the model
+disabled, the review step passes the replay evidence packet through
+unchanged (no fabricated agentic finding), and release projection blocks on
+deterministic evidence.
 
 The generated flow is not only a route echo. Its flow-plan candidates and
 promoted manifest include deterministic state steps for the workbench fixture:

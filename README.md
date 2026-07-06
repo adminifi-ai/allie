@@ -286,7 +286,6 @@ artifacts, and final pointers under one fresh directory:
 .allie/jobs/autonomous/steps/map/product-map.json
 .allie/jobs/autonomous/steps/run/evidence.json
 .allie/jobs/autonomous/steps/report/compliance-report.json
-.allie/jobs/autonomous/steps/review/evidence-reviewed.json
 .allie/jobs/autonomous/steps/release/release-summary.json
 ```
 
@@ -310,16 +309,15 @@ orchestration:
 cargo run --locked -- discover --manifest examples/autonomous-workbench.yml --out .allie/discovery/autonomous
 cargo run --locked -- promote-flow --discovery .allie/discovery/autonomous/discovery.json --flow-plan .allie/discovery/autonomous/flow-plan.json --out .allie/discovery/autonomous/generated-flow.yml
 cargo run --locked -- run --manifest .allie/discovery/autonomous/generated-flow.yml --out .allie/runs/autonomous
-cargo run --locked -- review --packet .allie/runs/autonomous/evidence.json --out .allie/reviews/autonomous
-cargo run --locked -- release --packet .allie/reviews/autonomous/evidence-reviewed.json --out .allie/releases/autonomous --changed-surface settings
+cargo run --locked -- release --packet .allie/runs/autonomous/evidence.json --out .allie/releases/autonomous --changed-surface settings
 ```
 
 The autonomous loop discovers fixture surfaces, promotes generated flow
 candidates into a replayable manifest, captures axe, screenshot, DOM,
-accessibility-tree, keyboard, and trace artifacts, adds offline agentic review
-context with redaction receipts, and projects the release decision. Generated
-and agentic claims do not enforce release policy until replayed, scripted, or
-human-attested.
+accessibility-tree, keyboard, and trace artifacts, and projects the release
+decision from that replay evidence. With `model.enabled: true`, the review
+step calls the live agentic gateway instead; generated and agentic claims do
+not enforce release policy until replayed, scripted, or human-attested.
 
 ## Local Verification
 
@@ -357,8 +355,8 @@ Markdown, JUnit, and SARIF reporters from the same local manifest contract. The
 release smoke projects that packet into `.allie/releases/v0-smoke/`. The final
 two commands are the V0 live oracle and release projection, leaving inspectable
 evidence under `.allie/runs/latest/` and `.allie/releases/latest/`.
-The autonomous smoke leaves discovery, generated-flow, richer evidence, review,
-and blocked-release receipts under `.allie/*/autonomous-smoke/`. It also leaves
+The autonomous smoke leaves discovery, generated-flow, richer evidence, and
+blocked-release receipts under `.allie/*/autonomous-smoke/`. It also leaves
 durable workbench lifecycle receipts under `.allie/jobs/autonomous-smoke/` and
 proves the model-enabled workbench path under
 `.allie/jobs/autonomous-agentic-smoke/`.

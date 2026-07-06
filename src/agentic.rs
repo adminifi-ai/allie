@@ -642,7 +642,6 @@ mod tests {
                 "finding_refs": []
             }],
             "waivers": [],
-            "review": [],
             "agentic_assessments": [],
             "replay": {
                 "command": "cargo run --locked -- run --manifest examples/autonomous-workbench-agentic.yml --out test",

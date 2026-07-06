@@ -1,6 +1,6 @@
 use crate::pipeline::{
-    DisabledModelReview, PipelineCheckpoint, PipelineOptions, PipelinePaths, PipelineRunResult,
-    PipelineStepComplete, run_pipeline,
+    PipelineCheckpoint, PipelineOptions, PipelinePaths, PipelineRunResult, PipelineStepComplete,
+    run_pipeline,
 };
 use crate::{
     AgentRunnerKind, AllieError, ExitClass, FlowManifest, FlowPlanPacket, Result,
@@ -214,7 +214,6 @@ fn run_workbench_start_with_job(
             project_root: Some(project_root),
             agent_runner: options.agent_runner,
             paths: PipelinePaths::workbench(&options.out_dir),
-            disabled_model_review: DisabledModelReview::WriteOfflineReview,
             stale_after_days: 7,
         },
         |checkpoint| workbench_pipeline_checkpoint(&options.out_dir, &mut job, checkpoint),

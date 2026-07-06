@@ -16,7 +16,6 @@ This is the first draft of the Allie evidence packet. The formal V0 JSON Schema 
   "findings": [],
   "verdicts": [],
   "waivers": [],
-  "review": [],
   "replay": {}
 }
 ```
