@@ -11,6 +11,18 @@ const WORKER_REQUEST_SCHEMA = 'allie.worker.request.v0';
 const WORKER_RESPONSE_SCHEMA = 'allie.worker.response.v0';
 const STATE_STEP_TIMEOUT_MS = 5000;
 const MOBILE_WEB_VIEWPORT = { width: 390, height: 844 };
+// axe-core does not run these three rules in a plain analyze(): target-size
+// ships with `enabled: false` pending its own stabilization, and
+// css-orientation-lock / label-content-name-mismatch carry the `experimental`
+// tag that axe's default tagExclude drops. Each closes a WCAG success
+// criterion the profile previously routed to human_review (see
+// docs/criteria-assessability-research.md, bucket A), so they are requested
+// explicitly and merged into the default result.
+const AXE_RULES_REQUIRING_EXPLICIT_ENABLE = [
+  'target-size',
+  'css-orientation-lock',
+  'label-content-name-mismatch',
+];
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
 
@@ -183,6 +195,22 @@ async function performLogin(context, baseUrl, auth) {
   }
 }
 
+// Runs axe-core's default rule set plus the named rules in
+// AXE_RULES_REQUIRING_EXPLICIT_ENABLE, merging both violation lists. A second
+// pass is required because `.withRules(...)` replaces the active rule
+// selection rather than adding to it, and running both selections in one
+// pass is not supported by @axe-core/playwright.
+async function runAxeAudit(page) {
+  const defaultResult = await new AxeBuilder({ page }).analyze();
+  const extraResult = await new AxeBuilder({ page })
+    .withRules(AXE_RULES_REQUIRING_EXPLICIT_ENABLE)
+    .analyze();
+  return {
+    ...defaultResult,
+    violations: [...defaultResult.violations, ...extraResult.violations],
+  };
+}
+
 async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMarker, determinism) {
   const page = await context.newPage();
   const pageVideo = page.video();
@@ -277,7 +305,7 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
   let axeJsonPath = null;
   let axeViolations = [];
   if (state.axe) {
-    const axeResult = await new AxeBuilder({ page }).analyze();
+    const axeResult = await runAxeAudit(page);
     if (determinism?.timestamp) {
       axeResult.timestamp = determinism.timestamp;
     }
@@ -378,7 +406,7 @@ async function captureMobileWebAudit(page, state, artifactsDir, determinism) {
       await page.screenshot({ path: result.screenshotPath, fullPage: true });
     }
     if (state.axe) {
-      const axeResult = await new AxeBuilder({ page }).analyze();
+      const axeResult = await runAxeAudit(page);
       if (determinism?.timestamp) {
         axeResult.timestamp = determinism.timestamp;
       }
