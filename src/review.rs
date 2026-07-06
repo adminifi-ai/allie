@@ -182,7 +182,6 @@ mod tests {
             findings: Vec::new(),
             verdicts,
             waivers: Vec::new(),
-            review: Vec::new(),
             agentic_assessments: Vec::new(),
             replay: Replay {
                 command: "cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest".to_string(),
@@ -231,12 +230,13 @@ mod tests {
         let packet = packet_with(verdicts, profile_scope);
 
         // Criterion-grain: 2 aggregated criteria at needs_review out of 5.
-        let mut criteria = Vec::new();
-        criteria.push(sample_criterion("wcag22-aa:crit-a", "needs_review"));
-        criteria.push(sample_criterion("wcag22-aa:crit-b", "needs_review"));
-        criteria.push(sample_criterion("wcag22-aa:crit-c", "pass"));
-        criteria.push(sample_criterion("wcag22-aa:crit-d", "pass"));
-        criteria.push(sample_criterion("wcag22-aa:crit-e", "fail"));
+        let criteria = vec![
+            sample_criterion("wcag22-aa:crit-a", "needs_review"),
+            sample_criterion("wcag22-aa:crit-b", "needs_review"),
+            sample_criterion("wcag22-aa:crit-c", "pass"),
+            sample_criterion("wcag22-aa:crit-d", "pass"),
+            sample_criterion("wcag22-aa:crit-e", "fail"),
+        ];
 
         let summary = review_summary(&packet, Some(&criteria));
 
