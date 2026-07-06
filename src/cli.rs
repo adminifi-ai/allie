@@ -89,6 +89,9 @@ fn handle_init(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) 
                     "Allie manifest: {}",
                     receipt.manifest_path.display()
                 );
+                if let Some(note) = &receipt.model_note {
+                    let _ = writeln!(stdout, "{note}");
+                }
                 let _ = writeln!(stdout, "Setup checklist:");
                 for step in receipt.setup_steps {
                     let _ = writeln!(stdout, "  - {step}");

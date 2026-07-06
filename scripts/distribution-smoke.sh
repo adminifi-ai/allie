@@ -3,6 +3,12 @@
 # wiring: bundle/bin/allie resolves bundle/workers/browser/run.mjs.
 set -eu
 
+# Post-AL-082, `allie init` auto-enables model review when a provider API key
+# resolves in the environment. This smoke is meant to be offline-deterministic,
+# so isolate it from any ambient keys rather than let the scaffolded manifest
+# vary with whatever a developer's shell happens to export.
+unset OPENROUTER_API_KEY OPENAI_API_KEY
+
 ALLIE_REPO="$(pwd)"
 OUT="$ALLIE_REPO/.allie/distribution-smoke"
 BUNDLE="$OUT/bundle/allie"

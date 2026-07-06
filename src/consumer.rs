@@ -15,6 +15,9 @@ pub(super) struct InitReceipt {
     pub(super) manifest_path: PathBuf,
     pub(super) next_command: String,
     pub(super) setup_steps: Vec<String>,
+    /// Set when `--force` preserved an existing manifest's `model:` section
+    /// instead of re-scaffolding it, so the CLI can say so explicitly.
+    pub(super) model_note: Option<String>,
 }
 
 #[derive(Debug)]
@@ -203,7 +206,22 @@ pub(super) fn run_init(options: InitOptions) -> Result<InitReceipt> {
         )));
     }
 
-    let manifest = scaffold_manifest(&options);
+    // `--force` replaces everything else in the manifest, but a `model:`
+    // section the user (or a prior `allie init`) already wrote down is
+    // explicit config, not a scaffold default — silently re-scaffolding it
+    // would flip a deliberately-disabled model back on whenever a provider
+    // key happens to be in the environment. Preserve it verbatim; only a
+    // manifest with no `model:` key at all (or none on disk yet) gets a
+    // fresh scaffold.
+    let preserved_model = existing_model_policy(&options.manifest_path);
+    let mut manifest = scaffold_manifest(&options);
+    let model_note = preserved_model.map(|existing| {
+        manifest.model = existing;
+        format!(
+            "Preserved the existing model: policy from {} — edit model: in the manifest directly to change it.",
+            options.manifest_path.display()
+        )
+    });
     manifest.validate()?;
     let yaml = serde_yaml::to_string(&manifest).map_err(|source| AllieError::Yaml {
         context: format!("serialize manifest {}", options.manifest_path.display()),
@@ -214,8 +232,22 @@ pub(super) fn run_init(options: InitOptions) -> Result<InitReceipt> {
     Ok(InitReceipt {
         next_command: next_verify_command(&options.manifest_path),
         setup_steps: first_run_checklist(&options.manifest_path),
+        model_note,
         manifest_path: options.manifest_path,
     })
+}
+
+/// If `manifest_path` already holds YAML with an explicit `model:` key,
+/// return the model policy it deserializes to, so a `--force` re-init can
+/// preserve it. Returns `None` when there is no prior file, it isn't valid
+/// YAML, it has no `model:` key at all, or that key doesn't deserialize to a
+/// valid `ModelPolicy` — in every case, falling back to a fresh scaffold is
+/// the right move because there is nothing explicit to preserve.
+fn existing_model_policy(manifest_path: &Path) -> Option<ModelPolicy> {
+    let text = fs::read_to_string(manifest_path).ok()?;
+    let value: serde_yaml::Value = serde_yaml::from_str(&text).ok()?;
+    let model_value = value.get("model")?;
+    serde_yaml::from_value(model_value.clone()).ok()
 }
 
 pub(super) fn run_verify(options: VerifyOptions) -> Result<VerifyReceipt> {
@@ -901,11 +933,8 @@ fn slug_id(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use crate::test_support::MODEL_ENV_GUARD;
     use tempfile::tempdir;
-
-    // Serializes tests that mutate the model provider API key env vars.
-    static MODEL_ENV_GUARD: Mutex<()> = Mutex::new(());
 
     fn clear_model_credential_env() {
         unsafe {
@@ -1019,5 +1048,130 @@ mod tests {
 
         assert!(!manifest.model.enabled);
         assert!(manifest.model.provider_allowlist.is_empty());
+    }
+
+    fn forced_init_options(manifest_path: PathBuf) -> InitOptions {
+        InitOptions {
+            force: true,
+            ..init_options(manifest_path)
+        }
+    }
+
+    #[test]
+    fn force_reinit_on_a_fresh_path_still_auto_enables_with_key() {
+        let _guard = MODEL_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear_model_credential_env();
+        unsafe {
+            std::env::set_var("OPENROUTER_API_KEY", "sk-or-test");
+        }
+        let temp = tempdir().unwrap();
+        let manifest_path = temp.path().join("manifest.yml");
+
+        // `--force` on a path with nothing on disk yet is just a fresh init.
+        let receipt = run_init(forced_init_options(manifest_path)).unwrap();
+        let manifest = FlowManifest::load(&receipt.manifest_path).unwrap();
+
+        clear_model_credential_env();
+
+        assert!(manifest.model.enabled);
+        assert_eq!(manifest.model.provider.as_deref(), Some("openrouter"));
+        assert!(receipt.model_note.is_none());
+    }
+
+    #[test]
+    fn force_reinit_preserves_a_deliberately_disabled_model_even_with_a_key_present() {
+        let _guard = MODEL_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear_model_credential_env();
+        let temp = tempdir().unwrap();
+        let manifest_path = temp.path().join("manifest.yml");
+
+        // First init with no key: model.enabled stays false. A human could
+        // equally have hand-written this file with model.enabled: false.
+        run_init(init_options(manifest_path.clone())).unwrap();
+        let before = FlowManifest::load(&manifest_path).unwrap();
+        assert!(!before.model.enabled);
+
+        // Re-init with --force while a real key is now present: the existing
+        // (deliberately off) model policy must survive, not silently flip on.
+        unsafe {
+            std::env::set_var("OPENROUTER_API_KEY", "sk-or-test");
+        }
+        let receipt = run_init(forced_init_options(manifest_path.clone())).unwrap();
+        let after = FlowManifest::load(&manifest_path).unwrap();
+
+        clear_model_credential_env();
+
+        assert!(!after.model.enabled);
+        assert!(after.model.provider_allowlist.is_empty());
+        let note = receipt.model_note.expect("expected a preserved-model note");
+        assert!(note.contains("Preserved"));
+        assert!(note.contains(&manifest_path.display().to_string()));
+    }
+
+    #[test]
+    fn force_reinit_scaffolds_fresh_when_the_manifest_has_no_model_section() {
+        let _guard = MODEL_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear_model_credential_env();
+        let temp = tempdir().unwrap();
+        let manifest_path = temp.path().join("manifest.yml");
+        // Hand-write a manifest with no `model:` key at all (as if a human
+        // trimmed it out, or an older Allie version wrote it).
+        fs::write(
+            &manifest_path,
+            r#"id: no-model-section
+name: No model section fixture
+app_name: No Model Section
+environment: local
+target:
+  kind: local_fixture
+  fixture_dir: .
+policy:
+  profile: wcag22-aa
+  blocking_classes:
+    - deterministic
+browser:
+  viewport:
+    width: 1280
+    height: 900
+  color_scheme: light
+  reduced_motion: reduce
+  locale: en-US
+  zoom: 1.0
+flow:
+  id: no-model-section-path
+  description: fixture
+  states:
+    - id: home
+      path: /
+      description: home
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+      accessibility_tree: true
+      keyboard: true
+      video: false
+      trace: true
+"#,
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("OPENROUTER_API_KEY", "sk-or-test");
+        }
+
+        let receipt = run_init(forced_init_options(manifest_path.clone())).unwrap();
+        let after = FlowManifest::load(&manifest_path).unwrap();
+
+        clear_model_credential_env();
+
+        assert!(after.model.enabled);
+        assert_eq!(after.model.provider.as_deref(), Some("openrouter"));
+        assert!(receipt.model_note.is_none());
     }
 }

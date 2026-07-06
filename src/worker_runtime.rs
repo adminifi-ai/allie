@@ -660,6 +660,7 @@ fn stderr_or_stdout(output: &std::process::Output) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::MODEL_ENV_GUARD;
     use tempfile::tempdir;
 
     #[test]
@@ -750,10 +751,6 @@ mod tests {
         assert_eq!(check.status, DoctorCheckStatus::Fail);
         assert!(check.detail.contains("does not exist"));
     }
-
-    // Serializes tests that mutate the model provider API key env vars so
-    // parallel test threads cannot observe each other's set/remove.
-    static MODEL_ENV_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn write_model_fixture_manifest(dir: &Path, model_yaml: &str) -> PathBuf {
         let manifest_path = dir.join("manifest.yml");

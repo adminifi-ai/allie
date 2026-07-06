@@ -2310,7 +2310,8 @@ mod tests {
     use crate::runtime;
     use crate::standards::{criterion_level, criterion_principle, criterion_source_url};
     use crate::test_support::{
-        start_live_discovery_site, unused_local_base_url, write_live_discovery_manifest,
+        MODEL_ENV_GUARD, start_live_discovery_site, unused_local_base_url,
+        write_live_discovery_manifest,
     };
     use std::process::Command;
     use std::sync::Mutex;
@@ -2325,8 +2326,6 @@ mod tests {
     // worker process and artifact paths are not isolated enough for parallel
     // launches to be a meaningful unit test signal.
     static WORKBENCH_CLI_GUARD: Mutex<()> = Mutex::new(());
-    // Serializes tests that mutate the model provider API key env vars.
-    static MODEL_ENV_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
     fn placeholder_cli_points_to_v0_command() {
