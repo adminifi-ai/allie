@@ -21,6 +21,7 @@ mod model_credentials;
 mod pipeline;
 mod release;
 mod report;
+mod review;
 mod runtime;
 mod standards;
 #[cfg(test)]
@@ -1664,8 +1665,8 @@ fn coverage_from_response(
     }
 
     let not_tested = scripted_profile_obligations(&manifest.policy.profile);
-    let needs_review = human_review_profile_obligations(&manifest.policy.profile);
-    for obligation in not_tested.iter().chain(needs_review.iter()) {
+    let profile_human_review_scope = human_review_profile_obligations(&manifest.policy.profile);
+    for obligation in not_tested.iter().chain(profile_human_review_scope.iter()) {
         obligations.insert(obligation.clone());
     }
 
@@ -1692,7 +1693,7 @@ fn coverage_from_response(
             .collect(),
         standards_obligations_evaluated: obligations.into_iter().collect(),
         obligations_not_tested: not_tested,
-        obligations_requiring_human_review: needs_review,
+        profile_human_review_scope,
     }
 }
 
@@ -1865,12 +1866,7 @@ fn render_report(packet: &EvidencePacket) -> String {
         findings = findings,
         verdicts = verdicts,
         artifacts = artifacts,
-        review_needs = escape_html(
-            &packet
-                .coverage
-                .obligations_requiring_human_review
-                .join(", ")
-        ),
+        review_needs = escape_html(&packet.coverage.profile_human_review_scope.join(", ")),
     )
 }
 
@@ -4303,7 +4299,7 @@ mod tests {
                 "state_metadata": [],
                 "standards_obligations_evaluated": [],
                 "obligations_not_tested": [],
-                "obligations_requiring_human_review": []
+                "profile_human_review_scope": []
             },
             "artifacts": [
                 {"id":"axe-json-login-form","type":"axe_json","path":"artifacts/axe-login-form.json","hash":"sha256:test","redaction_status":"not_redacted_local_fixture","retention_class":"local_ephemeral","unavailable_reason":null,"related_flow_state":"login-form","creation_tool":"allie-release-test-fixture","timestamp":Utc::now().to_rfc3339()},

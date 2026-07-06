@@ -2,6 +2,8 @@
 
 This is the first draft of the Allie evidence packet. The formal V0 JSON Schema lives at `schemas/allie.evidence.v0.schema.json`.
 
+`allie.evidence.v0` is not guaranteed to deserialize across Allie version bumps — fields have been renamed as their semantics were clarified (e.g. `coverage.obligations_requiring_human_review` → `coverage.profile_human_review_scope`), with no `serde` back-compat aliasing; re-run `allie run`/`allie verify` against the current binary rather than persisting `evidence.json` artifacts across versions.
+
 ## Packet
 
 ```json

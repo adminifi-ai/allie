@@ -76,7 +76,7 @@
       "wcag22-aa:1.4.10-zoom-reflow",
       "wcag22-aa:2.2.2-reduced-motion"
     ],
-    "obligations_requiring_human_review": [
+    "profile_human_review_scope": [
       "wcag22-aa:human-content-meaning",
       "wcag22-aa:human-assistive-technology-review"
     ]

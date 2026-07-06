@@ -628,7 +628,7 @@ mod tests {
                 "state_metadata": [],
                 "standards_obligations_evaluated": ["wcag22-aa:2.4.7-focus-visible"],
                 "obligations_not_tested": [],
-                "obligations_requiring_human_review": ["wcag22-aa:2.4.7-focus-visible"]
+                "profile_human_review_scope": ["wcag22-aa:2.4.7-focus-visible"]
             },
             "artifacts": [],
             "findings": [],

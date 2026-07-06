@@ -457,7 +457,14 @@ pub(crate) struct Coverage {
     pub(crate) state_metadata: Vec<StateMetadata>,
     pub(crate) standards_obligations_evaluated: Vec<String>,
     pub(crate) obligations_not_tested: Vec<String>,
-    pub(crate) obligations_requiring_human_review: Vec<String>,
+    /// The fixed set of obligations this policy profile defines as requiring
+    /// human judgment by method (WCAG's `human_review`-tagged success criteria
+    /// plus any profile's explicit `human_review_obligations`). This is scope,
+    /// not a run outcome: it is the same list for every run of a given
+    /// profile regardless of what the run found. See `crate::review` for how
+    /// this relates to the other two "review" grains (`Verdict.status ==
+    /// "needs_review"` and a criterion's aggregated report status).
+    pub(crate) profile_human_review_scope: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
