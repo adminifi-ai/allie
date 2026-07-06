@@ -20,7 +20,7 @@
     "package:release": "scripts/package-release.sh",
     "release:smoke": "cargo run --locked -- release --packet .allie/runs/v0-smoke/evidence.json --out .allie/releases/v0-smoke --changed-surface login-form",
     "autonomous:smoke": "scripts/autonomous-smoke.sh",
-    "size:smoke": "scripts/module-size-gate.sh",
+    "size:smoke": "scripts/module-size-gate.sh --self-test && scripts/module-size-gate.sh",
     "verify": "scripts/verify.sh"
   },
   "dependencies": {

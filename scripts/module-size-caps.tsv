@@ -1,0 +1,37 @@
+# Module size ratchet caps. TAB-separated: <path from repo root>\t<cap in lines>.
+# Read by scripts/module-size-gate.sh. Paths not listed here fall back to
+# that script's DEFAULT_CAP.
+#
+# Ratchet discipline:
+#   - Shrink a file -> lower its cap here in the same change (or a fast
+#     follow-up) to lock the win in. Lowering never breaks a green gate.
+#   - Grow a file past its cap -> extract a cohesive module instead. If
+#     growth is truly unavoidable, raise ONLY that file's line below,
+#     never DEFAULT_CAP, and say why in the commit/PR.
+#
+# Caps below were recorded from current sizes on master (2026-07-06),
+# rounded up to the next 10 lines for trivial headroom. src/lib.rs is mid
+# extraction (AL-087 is landing a further ~200-line cut); re-lower its cap
+# in a fast follow-up once that lands instead of leaving slack unclaimed.
+src/lib.rs	4730
+src/compliance.rs	1280
+src/discovery.rs	990
+src/consumer.rs	900
+src/workbench.rs	810
+src/report.rs	740
+src/agentic.rs	670
+src/worker_runtime.rs	660
+src/model.rs	600
+src/pipeline.rs	530
+src/worker.rs	510
+src/standards.rs	450
+src/discovery/live.rs	420
+src/cli.rs	360
+src/release.rs	330
+src/discovery/steps.rs	250
+src/runtime.rs	200
+src/test_support.rs	170
+src/discovery/render.rs	160
+src/auth.rs	130
+src/workbench/tests.rs	70
+src/main.rs	10
