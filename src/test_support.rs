@@ -6,11 +6,8 @@ use std::sync::{Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
-/// Serializes tests (across every module — `lib.rs`, `consumer.rs`,
-/// `worker_runtime.rs`, ...) that mutate the model provider API key env vars
-/// (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`). These are process-wide and
-/// `cargo test` runs the whole crate's tests concurrently across modules, so
-/// a per-module guard is not enough exclusion — a shared guard here is.
+/// Serializes tests across every module that mutate the model provider API
+/// key env vars — process-wide, so a per-module guard is not enough.
 pub(crate) static MODEL_ENV_GUARD: Mutex<()> = Mutex::new(());
 
 pub(crate) fn write_live_discovery_manifest(root: &Path, base_url: &str) -> PathBuf {
