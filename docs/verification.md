@@ -305,9 +305,15 @@ synthetic worker-error path proves agentic worker infrastructure failures fail
 the `review` step before report/release instead of being recorded as completed
 advisory review.
 
-`npm run size:smoke` enforces the Rust module-size ratchet. No `src/*.rs` file
-may exceed the current cap; when the gate fails, extract a cohesive module
-instead of raising the cap.
+`npm run size:smoke` enforces the Rust module-size ratchet. It scans every
+`*.rs` file under `src/`, including nested modules such as `src/discovery/*.rs`
+and `src/workbench/tests.rs`, not just the top-level glob. Each file's cap is
+recorded in `scripts/module-size-caps.tsv`; an unlisted file falls back to the
+script's `DEFAULT_CAP`. Shrinking a file is free — lower its recorded cap to
+lock the win in. Growing past a cap fails the gate; extract a cohesive module
+instead of raising the cap, and never raise `DEFAULT_CAP` or a cap silently.
+`scripts/module-size-gate.sh --self-test` exercises the gate's own recursion
+and cap-lookup logic against injected, cleaned-up fixture files.
 
 ## Failure Meanings
 
