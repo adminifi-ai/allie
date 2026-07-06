@@ -360,7 +360,6 @@ pub(crate) struct EvidencePacket {
     pub(crate) findings: Vec<Finding>,
     pub(crate) verdicts: Vec<Verdict>,
     pub(crate) waivers: Vec<serde_json::Value>,
-    pub(crate) review: Vec<ReviewAttempt>,
     #[serde(default)]
     pub(crate) agentic_assessments: Vec<AgenticAssessmentRecord>,
     pub(crate) replay: Replay,
@@ -518,19 +517,6 @@ pub(crate) struct Verdict {
     pub(crate) source: String,
     pub(crate) affected_states: Vec<String>,
     pub(crate) finding_refs: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct ReviewAttempt {
-    pub(crate) id: String,
-    pub(crate) provider: String,
-    pub(crate) model: String,
-    pub(crate) prompt_artifact: String,
-    pub(crate) response_artifact: String,
-    pub(crate) redaction_receipt: String,
-    pub(crate) status: String,
-    pub(crate) confidence: String,
-    pub(crate) promotion_state: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

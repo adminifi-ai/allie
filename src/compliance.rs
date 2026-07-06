@@ -341,7 +341,7 @@ fn compliance_obligation(
             .chain(findings.iter().map(|finding| finding.source.clone())),
     );
     let artifact_refs = obligation_artifact_refs(packet, &verdicts, &findings);
-    let agentic_context = obligation_agentic_context(map, packet, &findings);
+    let agentic_context = obligation_agentic_context(map, &findings);
     let confidence = verdicts
         .iter()
         .map(|verdict| verdict.confidence.clone())
@@ -531,17 +531,12 @@ fn obligation_artifact_refs(
     unique_strings(refs)
 }
 
-fn obligation_agentic_context(
-    map: &ProductMapPacket,
-    packet: &EvidencePacket,
-    findings: &[&Finding],
-) -> Vec<String> {
+fn obligation_agentic_context(map: &ProductMapPacket, findings: &[&Finding]) -> Vec<String> {
     let mut context = findings
         .iter()
         .filter(|finding| finding.evidence_class == "agentic")
         .map(|finding| finding.id.clone())
         .collect::<Vec<_>>();
-    context.extend(packet.review.iter().map(|review| review.id.clone()));
     if let Some(transcript) = &map.agent.transcript_path {
         context.push(format!("map-agent-transcript:{transcript}"));
     }
@@ -818,7 +813,7 @@ fn criterion_coverage_cell(
             .chain(artifact_refs.iter().cloned())
             .chain(test_refs.iter().cloned()),
     );
-    let agentic_refs = obligation_agentic_context(map, packet, &findings);
+    let agentic_refs = obligation_agentic_context(map, &findings);
     let confidence = if waiver_status.is_some() {
         "human_attested".to_string()
     } else {

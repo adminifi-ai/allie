@@ -3,7 +3,7 @@
   "$id": "https://allie.local/schemas/allie.evidence.v0.schema.json",
   "title": "Allie Evidence Packet V0",
   "type": "object",
-  "required": ["schema", "summary", "run", "target", "policy", "coverage", "artifacts", "findings", "verdicts", "waivers", "review", "replay"],
+  "required": ["schema", "summary", "run", "target", "policy", "coverage", "artifacts", "findings", "verdicts", "waivers", "replay"],
   "properties": {
     "schema": { "const": "allie.evidence.v0" },
     "summary": {
@@ -193,25 +193,6 @@
           { "required": ["packet_refs"] }
         ],
         "additionalProperties": true
-      }
-    },
-    "review": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["id", "provider", "model", "prompt_artifact", "response_artifact", "redaction_receipt", "status", "confidence", "promotion_state"],
-        "properties": {
-          "id": { "type": "string" },
-          "provider": { "type": "string" },
-          "model": { "type": "string" },
-          "prompt_artifact": { "type": "string" },
-          "response_artifact": { "type": "string" },
-          "redaction_receipt": { "type": "string" },
-          "status": { "enum": ["needs_review", "complete", "failed"] },
-          "confidence": { "type": "string" },
-          "promotion_state": { "enum": ["model_hypothesis", "scripted_reproduced", "human_attested"] }
-        },
-        "additionalProperties": false
       }
     },
     "replay": {

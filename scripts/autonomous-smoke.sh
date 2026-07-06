@@ -92,7 +92,7 @@ if (!settingsDom.includes('id="email-preview"') || !settingsDom.includes('data-r
   throw new Error('generated settings DOM did not capture the ready email preview');
 }
 NODE
-node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$RUN_DIR/evidence.json','utf8')); if(p.review.length) process.exit(1); if(p.findings.some(f=>f.evidence_class==='agentic')) process.exit(1);"
+node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$RUN_DIR/evidence.json','utf8')); if('review' in p) process.exit(1); if(p.findings.some(f=>f.evidence_class==='agentic')) process.exit(1);"
 node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync('$RELEASE_DIR/release-summary.json','utf8')); if(r.status!=='blocked') process.exit(1);"
 
 set +e
@@ -116,7 +116,7 @@ test ! -d "$JOB_DIR/steps/review"
 test ! -d "$JOB_DIR/steps/remediation"
 test ! -d "$LEGACY_REMEDIATION_DIR"
 test -f "$JOB_DIR/steps/release/release-summary.json"
-node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$JOB_DIR/steps/run/evidence.json','utf8')); if(p.review.length) process.exit(1); if(p.findings.some(f=>f.evidence_class==='agentic')) process.exit(1);"
+node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$JOB_DIR/steps/run/evidence.json','utf8')); if('review' in p) process.exit(1); if(p.findings.some(f=>f.evidence_class==='agentic')) process.exit(1);"
 
 set +e
 env -u ALLIE_AGENTIC_WORKBENCH_SMOKE_KEY cargo run --locked -- workbench start \

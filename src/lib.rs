@@ -1183,7 +1183,6 @@ fn write_packet_and_report(
         findings,
         verdicts,
         waivers: Vec::new(),
-        review: Vec::new(),
         agentic_assessments: Vec::new(),
         replay: Replay {
             command: replay_command,
@@ -3771,7 +3770,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            evidence["review"].as_array().unwrap().is_empty(),
+            evidence.get("review").is_none(),
             "model-off workbench review must not fabricate a review attempt"
         );
         assert!(
@@ -4314,7 +4313,6 @@ mod tests {
             "findings": [],
             "verdicts": [],
             "waivers": [],
-            "review": [],
             "agentic_assessments": [],
             "replay": {
                 "command": "cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest",

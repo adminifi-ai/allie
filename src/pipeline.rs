@@ -509,7 +509,7 @@ mod tests {
         let job_dir = temp.path().join("job");
         let evidence_path = job_dir.join("steps/run/evidence.json");
         fs::create_dir_all(evidence_path.parent().unwrap()).unwrap();
-        fs::write(&evidence_path, r#"{"findings":[],"review":[]}"#).unwrap();
+        fs::write(&evidence_path, r#"{"findings":[]}"#).unwrap();
 
         let options = PipelineOptions {
             manifest_path: PathBuf::from("examples/autonomous-workbench.yml"),
