@@ -1132,10 +1132,12 @@ pub(crate) fn compliance_summary(
         .iter()
         .filter(|obligation| obligation.status == "fail")
         .count();
-    let needs_review = criteria
-        .iter()
-        .filter(|obligation| obligation.status == "needs_review")
-        .count();
+    // Criterion-grain review count, sourced from the one shared definition in
+    // `crate::review` so it can't independently drift from the release
+    // decision's verdict-grain count or the profile's static review scope.
+    let needs_review = crate::review::review_summary(packet, Some(criteria))
+        .criteria_needs_review
+        .unwrap_or(0);
     let not_tested = criteria
         .iter()
         .filter(|obligation| obligation.status == "not_tested")

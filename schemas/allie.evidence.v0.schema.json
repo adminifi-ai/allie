@@ -73,7 +73,7 @@
     },
     "coverage": {
       "type": "object",
-      "required": ["routes_visited", "surfaces_discovered", "flows_exercised", "states_captured", "state_metadata", "standards_obligations_evaluated", "obligations_not_tested", "obligations_requiring_human_review"],
+      "required": ["routes_visited", "surfaces_discovered", "flows_exercised", "states_captured", "state_metadata", "standards_obligations_evaluated", "obligations_not_tested", "profile_human_review_scope"],
       "properties": {
         "routes_visited": { "type": "array", "items": { "type": "string" } },
         "surfaces_discovered": { "type": "array", "items": { "type": "string" } },
@@ -100,7 +100,7 @@
         },
         "standards_obligations_evaluated": { "type": "array", "items": { "type": "string" } },
         "obligations_not_tested": { "type": "array", "items": { "type": "string" } },
-        "obligations_requiring_human_review": { "type": "array", "items": { "type": "string" } }
+        "profile_human_review_scope": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false
     },

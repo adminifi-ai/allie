@@ -51,12 +51,13 @@ pub(crate) fn project_release_decision(
     packet: &EvidencePacket,
     options: &ReleaseOptions,
 ) -> ReleaseProjection {
-    let review_needed = packet
-        .verdicts
-        .iter()
-        .filter(|verdict| verdict.status == "needs_review")
-        .map(|verdict| verdict.obligation.clone())
-        .collect::<Vec<_>>();
+    // Verdict-grain review list, sourced from the one shared definition in
+    // `crate::review` so it can't independently drift from the compliance
+    // report's criterion-grain count or the profile's static review scope. No
+    // built `ComplianceObligation`s exist on this path (release projects
+    // straight off the evidence packet), so `criteria` is `None`.
+    let review_needed =
+        crate::review::review_summary(packet, None).verdict_review_needed_obligations;
     let not_tested = packet
         .verdicts
         .iter()
