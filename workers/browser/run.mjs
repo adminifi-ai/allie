@@ -11,6 +11,20 @@ const WORKER_REQUEST_SCHEMA = 'allie.worker.request.v0';
 const WORKER_RESPONSE_SCHEMA = 'allie.worker.response.v0';
 const STATE_STEP_TIMEOUT_MS = 5000;
 const MOBILE_WEB_VIEWPORT = { width: 390, height: 844 };
+// axe-core does not run these three rules in a plain analyze(): target-size
+// ships with `enabled: false` pending its own stabilization, and
+// css-orientation-lock / label-content-name-mismatch carry the `experimental`
+// tag that axe's default tagExclude drops. Each deterministically attributes
+// a real violation to a WCAG success criterion the profile routes to
+// human_review (see docs/criteria-assessability-research.md, bucket A, and
+// each criterion's coverage_note in profiles/wcag22-aa.json for why a clean
+// run still needs review), so they are requested explicitly and merged into
+// the default result.
+const AXE_RULES_REQUIRING_EXPLICIT_ENABLE = [
+  'target-size',
+  'css-orientation-lock',
+  'label-content-name-mismatch',
+];
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
 
@@ -183,6 +197,71 @@ async function performLogin(context, baseUrl, auth) {
   }
 }
 
+// Runs axe-core's default rule set plus the named rules in
+// AXE_RULES_REQUIRING_EXPLICIT_ENABLE, merging both passes/violations/
+// incomplete lists. A second pass is required because `.withRules(...)`
+// replaces the active rule selection rather than adding to it, and running
+// both selections in one pass is not supported by @axe-core/playwright. The
+// two selections are disjoint (none of AXE_RULES_REQUIRING_EXPLICIT_ENABLE
+// runs in the default pass), so a plain concat cannot double-count a rule;
+// merging passes/incomplete (not just violations) keeps the persisted axe
+// JSON artifact a complete record of every rule that ran, including ones
+// that ran and passed.
+async function runAxeAudit(page) {
+  const defaultResult = await new AxeBuilder({ page }).analyze();
+  const extraResult = await new AxeBuilder({ page })
+    .withRules(AXE_RULES_REQUIRING_EXPLICIT_ENABLE)
+    .analyze();
+  return {
+    ...defaultResult,
+    violations: [...defaultResult.violations, ...extraResult.violations],
+    passes: [...defaultResult.passes, ...extraResult.passes],
+    incomplete: [...defaultResult.incomplete, ...extraResult.incomplete],
+  };
+}
+
+// The dedicated mobile-viewport pass (captureMobileWebAudit) runs the same
+// axe rules again at a different viewport. Most fixture/page defects are not
+// viewport-dependent, so the identical DOM node gets flagged twice — once
+// per viewport — which would otherwise surface as two Finding records for
+// one underlying defect (and, since the verdict layer keys findings by WCAG
+// obligation, one of the two silently becomes an orphan no verdict
+// references). Dedupe by (rule id, node target selector): a node already
+// flagged in `primaryViolations` is dropped from `secondaryViolations`; a
+// node that newly appears ONLY at the secondary viewport is real signal
+// (e.g. a responsive layout that only breaks at mobile width) and is kept.
+function mergeViewportViolations(primaryViolations, secondaryViolations) {
+  const seenNodeKeysByRule = new Map();
+  for (const violation of primaryViolations) {
+    seenNodeKeysByRule.set(violation.id, new Set((violation.nodes ?? []).map(nodeTargetKey)));
+  }
+
+  const merged = [...primaryViolations];
+  for (const violation of secondaryViolations) {
+    const seen = seenNodeKeysByRule.get(violation.id) ?? new Set();
+    const newNodes = (violation.nodes ?? []).filter((node) => !seen.has(nodeTargetKey(node)));
+    if (newNodes.length > 0) {
+      merged.push({ ...violation, nodes: newNodes });
+    }
+  }
+  return merged;
+}
+
+function nodeTargetKey(node) {
+  return (node.target ?? []).join(' ');
+}
+
+function summarizeAxeViolations(violations) {
+  return violations.map((violation) => ({
+    id: violation.id,
+    impact: violation.impact ?? null,
+    help: violation.help ?? null,
+    description: violation.description ?? null,
+    tags: violation.tags ?? [],
+    nodes: violation.nodes?.length ?? 0,
+  }));
+}
+
 async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMarker, determinism) {
   const page = await context.newPage();
   const pageVideo = page.video();
@@ -276,28 +355,28 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
 
   let axeJsonPath = null;
   let axeViolations = [];
+  let desktopRawViolations = [];
   if (state.axe) {
-    const axeResult = await new AxeBuilder({ page }).analyze();
+    const axeResult = await runAxeAudit(page);
     if (determinism?.timestamp) {
       axeResult.timestamp = determinism.timestamp;
     }
     axeJsonPath = path.join(artifactsDir, `axe-${state.id}.json`);
     await fs.writeFile(axeJsonPath, `${JSON.stringify(axeResult, null, 2)}\n`);
-    axeViolations = axeResult.violations.map((violation) => ({
-      id: violation.id,
-      impact: violation.impact ?? null,
-      help: violation.help ?? null,
-      description: violation.description ?? null,
-      tags: violation.tags ?? [],
-      nodes: violation.nodes?.length ?? 0,
-    }));
+    desktopRawViolations = axeResult.violations;
   }
 
   const mobileAudit = await captureMobileWebAudit(page, state, artifactsDir, determinism);
   if (mobileAudit.error) {
     stateErrors.push(`mobile-web-audit-failed: ${mobileAudit.error}`);
   }
-  axeViolations = axeViolations.concat(mobileAudit.axeViolations);
+  // Raw per-viewport axe JSON artifacts (axeJsonPath, mobileAudit.axeJsonPath)
+  // stay untouched as the complete ground truth for each viewport; only the
+  // structured axe_violations list that drives Finding generation is
+  // deduped across viewports.
+  axeViolations = summarizeAxeViolations(
+    mergeViewportViolations(desktopRawViolations, mobileAudit.violations),
+  );
 
   const tracePath = state.trace ? path.join(artifactsDir, `trace-${state.id}.json`) : null;
   if (tracePath) {
@@ -367,7 +446,10 @@ async function captureMobileWebAudit(page, state, artifactsDir, determinism) {
     viewport: MOBILE_WEB_VIEWPORT,
     screenshotPath: null,
     axeJsonPath: null,
-    axeViolations: [],
+    // Raw axe violations (full node/target detail), for the caller to merge
+    // and dedupe against the desktop pass before summarizing. See
+    // mergeViewportViolations.
+    violations: [],
     error: null,
   };
   try {
@@ -378,20 +460,13 @@ async function captureMobileWebAudit(page, state, artifactsDir, determinism) {
       await page.screenshot({ path: result.screenshotPath, fullPage: true });
     }
     if (state.axe) {
-      const axeResult = await new AxeBuilder({ page }).analyze();
+      const axeResult = await runAxeAudit(page);
       if (determinism?.timestamp) {
         axeResult.timestamp = determinism.timestamp;
       }
       result.axeJsonPath = path.join(artifactsDir, `axe-mobile-${state.id}.json`);
       await fs.writeFile(result.axeJsonPath, `${JSON.stringify(axeResult, null, 2)}\n`);
-      result.axeViolations = axeResult.violations.map((violation) => ({
-        id: violation.id,
-        impact: violation.impact ?? null,
-        help: violation.help ?? null,
-        description: violation.description ?? null,
-        tags: violation.tags ?? [],
-        nodes: violation.nodes?.length ?? 0,
-      }));
+      result.violations = axeResult.violations;
     }
     result.checked = true;
   } catch (error) {

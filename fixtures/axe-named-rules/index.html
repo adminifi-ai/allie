@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- meta-viewport violation: user-scalable=no disables pinch-zoom (WCAG 1.4.4 Resize Text). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Allie Fixture: Named Axe Rules</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #101418;
+      --muted: #47515f;
+      --line: #d5dbe3;
+      --surface: #ffffff;
+      --page: #f4f7fa;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background: var(--page);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      padding: 32px;
+    }
+
+    main {
+      width: min(100%, 480px);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      padding: 28px;
+      margin: 0 auto;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    input {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 16px;
+      border: 1px solid var(--line);
+    }
+
+    /* target-size violation: an interactive control well under the 24x24 CSS px
+       minimum, with no spacing exception applied (WCAG 2.5.8 Target Size). */
+    .tiny-icon-button {
+      width: 12px;
+      height: 12px;
+      padding: 0;
+      border: 1px solid var(--ink);
+      background: var(--surface);
+      display: inline-block;
+    }
+
+    /* css-orientation-lock violation: content is pinned to landscape via a
+       transform in a portrait media query (WCAG 1.3.4 Orientation). Scoped to
+       "portrait" (not the fixture's landscape test viewport) so axe-core's
+       static CSSOM rule detection still flags it without actually rotating
+       the rendered page out from under the other checks on this fixture. */
+    @media (orientation: portrait) {
+      html {
+        transform: rotate(-90deg);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Named axe rule fixture</h1>
+    <p>This page intentionally violates five axe-core rules used to close WCAG
+      success criteria per docs/criteria-assessability-research.md.</p>
+
+    <form>
+      <label for="email">Email address</label>
+      <!-- autocomplete-valid violation: not a valid autocomplete token
+           (WCAG 1.3.5 Identify Input Purpose). -->
+      <input id="email" name="email" type="email" autocomplete="not-a-real-token">
+
+      <!-- label-content-name-mismatch violation: the accessible name (aria-label)
+           does not contain the visible text "Submit form" (WCAG 2.5.3 Label in Name). -->
+      <button type="submit" aria-label="Go">Submit form</button>
+    </form>
+
+    <!-- Two adjacent tiny targets with zero gap: both are under the 24x24
+         minimum AND too close together for the spacing exception to apply
+         (WCAG 2.5.8 Target Size). -->
+    <div style="display: flex; gap: 0;">
+      <button type="button" class="tiny-icon-button" aria-label="Close"></button>
+      <button type="button" class="tiny-icon-button" aria-label="More"></button>
+    </div>
+  </main>
+</body>
+</html>

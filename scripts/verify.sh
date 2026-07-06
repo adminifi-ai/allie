@@ -7,6 +7,7 @@ cargo clippy --locked -- -D warnings
 npm run secrets:smoke
 npm run worker:smoke
 npm run evidence:smoke
+npm run axe-rules:smoke
 npm run action:smoke
 npm run auth:smoke
 npm run visibility:smoke
