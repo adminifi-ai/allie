@@ -1,0 +1,49 @@
+id: axe-negating-label-in-name-flow
+name: Negating accessible-name regression-guard fixture flow
+app_name: Allie fixture app
+environment: local-fixture
+auth_profile: local-fixture-no-auth
+credentials:
+  profile: local-fixture-no-auth
+  provider: none
+  required: false
+target:
+  kind: local_fixture
+  fixture_dir: ../fixtures/axe-negating-label-in-name
+policy:
+  profile: wcag22-aa
+  blocking_classes:
+    - deterministic
+    - scripted_required
+  worker_timeout_ms: 30000
+artifacts:
+  redaction_status: not_redacted_local_fixture
+  retention_class: local_ephemeral
+model:
+  enabled: false
+  provider_allowlist: []
+  zdr_required: true
+known_nondeterminism: []
+browser:
+  viewport:
+    width: 1280
+    height: 900
+  color_scheme: light
+  reduced_motion: reduce
+  locale: en-US
+  zoom: 1.0
+flow:
+  id: axe-negating-label-in-name-critical-path
+  description: >-
+    Regression guard: axe-core's label-content-name-mismatch rule is a
+    substring-containment check, not a semantic one, so a negating accessible
+    name that still contains the visible text (aria-label="Do not cancel" on
+    a button reading "Cancel") reports no violation. This must not surface as
+    a machine-proven pass for WCAG 2.5.3 Label in Name.
+  states:
+    - id: negating-label-form
+      path: /
+      description: Fixture route with a negating-but-containing accessible name.
+      required: true
+      axe: true
+      screenshot: false

@@ -4,9 +4,12 @@
 # label-content-name-mismatch, autocomplete-valid, css-orientation-lock,
 # meta-viewport) are caught deterministically against a fixture with known
 # violations, with the model disabled (model.enabled: false in the manifest).
+# Also guards against the specific false-negative that kept 2.5.3 Label in
+# Name on method: human_review (see the second run below).
 set -eu
 
 RUN_DIR=.allie/runs/axe-named-rules-smoke
+NEGATING_LABEL_RUN_DIR=.allie/runs/axe-negating-label-in-name-smoke
 
 rm -rf "$RUN_DIR"
 
@@ -34,12 +37,20 @@ function verdict(obligation) {
   return packet.verdicts.find((item) => item.obligation === obligation);
 }
 
-function findingFor(axeRuleId) {
-  return packet.findings.find((finding) => finding.id.includes(`-axe-${axeRuleId}-`));
+// Regression guard: the desktop pass and the dedicated mobile-viewport pass
+// each run axe independently, and a fixture defect that isn't viewport-
+// dependent (all five of this fixture's defects render identically at both
+// widths) previously produced TWO findings per defect — one orphaned by the
+// verdict layer's per-obligation BTreeMap collapse. findingsFor returns every
+// match (not just the first) so an exactly-one-per-rule assertion below can
+// catch that duplication if it regresses.
+function findingsFor(axeRuleId) {
+  return packet.findings.filter((finding) => finding.id.includes(`-axe-${axeRuleId}-`));
 }
 
-// Each named rule must have produced a deterministic, machine-proven finding
-// (not silently dropped, and not routed through any model/agentic path).
+// Each named rule must have produced exactly one deterministic, machine-proven
+// finding (not silently dropped, not duplicated across viewports, and not
+// routed through any model/agentic path).
 const expectedRules = [
   'target-size',
   'label-content-name-mismatch',
@@ -48,13 +59,25 @@ const expectedRules = [
   'meta-viewport',
 ];
 for (const ruleId of expectedRules) {
-  const finding = findingFor(ruleId);
-  assert(finding, `expected a finding for axe rule ${ruleId}`);
+  const findings = findingsFor(ruleId);
+  assert(
+    findings.length === 1,
+    `expected exactly one finding for axe rule ${ruleId}, got ${findings.length} (desktop/mobile dedup may have regressed)`,
+  );
+  const [finding] = findings;
   assert(finding.status === 'fail', `${ruleId} finding must be a fail, got ${finding.status}`);
   assert(finding.confidence === 'machine_proven', `${ruleId} finding must be machine_proven, got ${finding.confidence}`);
   assert(finding.evidence_class === 'deterministic', `${ruleId} finding must be deterministic, got ${finding.evidence_class}`);
   assert(finding.source === 'axe-core', `${ruleId} finding must be sourced from axe-core, got ${finding.source}`);
 }
+
+// The fixture carries exactly five deliberate defects (one per named rule);
+// any count other than 5 means either a missed rule or a duplicate/orphan
+// finding slipped past the per-rule check above.
+assert(
+  packet.findings.length === 5,
+  `expected exactly 5 findings on the fixture (one per named rule), got ${packet.findings.length}`,
+);
 
 // Each rule's obligation mapping must resolve to the correct WCAG success
 // criterion (via profiles/wcag22-aa.json axe_tag_map), not the generic
@@ -68,7 +91,7 @@ const expectedObligations = {
   'wcag22-aa:1.4.4-resize-text': 'meta-viewport',
 };
 for (const [obligation, ruleId] of Object.entries(expectedObligations)) {
-  const finding = findingFor(ruleId);
+  const [finding] = findingsFor(ruleId);
   assert(
     finding.standard_obligation === obligation,
     `${ruleId} must map to ${obligation}, got ${finding.standard_obligation}`,
@@ -93,4 +116,37 @@ console.log('axe named-rules smoke passed: all five rules mapped to their WCAG o
 NODE
 
 test -f "$RUN_DIR/evidence.json"
-echo "axe-named-rules smoke passed: $RUN_DIR/evidence.json"
+
+# Regression guard for the reviewer-found false-negative: axe-core's
+# label-content-name-mismatch rule is a substring-containment check, not a
+# semantic one, so a negating accessible name that still contains the
+# visible text (aria-label="Do not cancel" on a button reading "Cancel")
+# reports zero violations. This run is expected to pass cleanly at the axe
+# layer; the assertion below is that WCAG 2.5.3 Label in Name must NOT come
+# back as a machine-proven pass on the strength of that silence.
+rm -rf "$NEGATING_LABEL_RUN_DIR"
+cargo run --locked -- run --manifest examples/axe-negating-label-in-name-flow.yml --out "$NEGATING_LABEL_RUN_DIR"
+
+node - "$NEGATING_LABEL_RUN_DIR/evidence.json" <<'NODE'
+const fs = require('fs');
+const packet = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+const labelInName = packet.verdicts.find((item) => item.obligation === 'wcag22-aa:2.5.3-label-in-name');
+assert(labelInName, 'expected a verdict for wcag22-aa:2.5.3-label-in-name');
+assert(
+  !(labelInName.status === 'pass' && labelInName.confidence === 'machine_proven'),
+  'wcag22-aa:2.5.3-label-in-name must not resolve to a machine-proven pass on a negating accessible name axe cannot detect; method must stay human_review in profiles/wcag22-aa.json',
+);
+assert(
+  labelInName.status === 'needs_review',
+  `expected wcag22-aa:2.5.3-label-in-name to route to needs_review, got ${labelInName.status}`,
+);
+
+console.log('axe negating-label-in-name regression guard passed: 2.5.3 stayed needs_review, not a false machine-proven pass');
+NODE
+
+echo "axe-named-rules smoke passed: $RUN_DIR/evidence.json and $NEGATING_LABEL_RUN_DIR/evidence.json"

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allie Fixture: Negating Label in Name</title>
+</head>
+<body>
+  <main>
+    <h1>Negating accessible name fixture</h1>
+    <p>This page contains no axe-detectable defect: axe-core's
+      label-content-name-mismatch rule is a substring-containment check, and
+      the accessible name below contains the visible text "Cancel" as a
+      substring even though it instructs the opposite action. A screen reader
+      announces "Do not cancel"; a sighted user reads "Cancel". This is the
+      WCAG 2.5.3 Label in Name failure mode axe-core cannot see, which is why
+      2.5.3 stays method: human_review in profiles/wcag22-aa.json even though
+      the rule is wired into axe_tag_map for the (deterministic) fail
+      direction.</p>
+    <button type="button" aria-label="Do not cancel">Cancel</button>
+  </main>
+</body>
+</html>
