@@ -17,6 +17,7 @@ mod cli;
 mod compliance;
 mod consumer;
 mod discovery;
+mod model_credentials;
 mod pipeline;
 mod release;
 mod report;

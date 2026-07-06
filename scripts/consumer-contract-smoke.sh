@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Post-AL-082, `allie init` auto-enables model review when a provider API key
+# resolves in the environment. This smoke calls `init` then `verify` and is
+# meant to be offline-deterministic, so isolate it from any ambient keys
+# rather than making real, billed model calls whenever a developer's shell
+# happens to export one.
+unset OPENROUTER_API_KEY OPENAI_API_KEY
+
 OUT=.allie/consumer-contract-smoke
 MANIFEST="$OUT/manifest.yml"
 FIXTURE_DIR="../../fixtures/login"

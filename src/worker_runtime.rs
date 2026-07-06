@@ -1,3 +1,7 @@
+use crate::model_credentials::{
+    MODEL_PROVIDER_PRESETS, env_var_non_empty, model_provider_preset_env_names,
+    resolve_model_credentials,
+};
 use crate::{ExitClass, FlowManifest, normalize_relative, write_json_pretty};
 use serde::Serialize;
 use std::fmt::{self, Display};
@@ -80,6 +84,7 @@ pub(crate) fn run_doctor(options: DoctorOptions) -> DoctorReceipt {
         node_check,
         check_playwright(worker_resolution.as_ref().ok(), &out_dir),
         check_target(options.manifest_path.as_deref(), node_ok),
+        check_model(options.manifest_path.as_deref()),
     ];
 
     checks.sort_by(|left, right| left.name.cmp(&right.name));
@@ -496,6 +501,102 @@ fetch(url, { signal: controller.signal })
     }
 }
 
+/// Reports whether agentic (vision-model) review will actually run, and if
+/// not, why — model-only findings never block a release, but a silent
+/// `model.enabled: false` should never be a mystery.
+fn check_model(manifest_path: Option<&Path>) -> DoctorCheck {
+    let Some(manifest_path) = manifest_path else {
+        return DoctorCheck {
+            name: "model".to_string(),
+            status: DoctorCheckStatus::Warn,
+            detail: "no manifest supplied; model policy was not checked".to_string(),
+            fix: Some(
+                "Run `allie doctor --manifest .allie/manifest.yml` after `allie init`.".to_string(),
+            ),
+        };
+    };
+    if !manifest_path.exists() {
+        return DoctorCheck {
+            name: "model".to_string(),
+            status: DoctorCheckStatus::Warn,
+            detail: format!("manifest {} does not exist", manifest_path.display()),
+            fix: Some(
+                "Run `allie init` or pass --manifest to an existing flow manifest.".to_string(),
+            ),
+        };
+    }
+
+    let manifest = match FlowManifest::load(manifest_path) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return DoctorCheck {
+                name: "model".to_string(),
+                status: DoctorCheckStatus::Fail,
+                detail: error.to_string(),
+                fix: Some("Fix the manifest, then rerun `allie doctor`.".to_string()),
+            };
+        }
+    };
+
+    if !manifest.model.enabled {
+        return match resolve_model_credentials() {
+            Some(preset) => DoctorCheck {
+                name: "model".to_string(),
+                status: DoctorCheckStatus::Warn,
+                detail: format!(
+                    "model review is off in the manifest, but {} resolves in this environment",
+                    preset.api_key_env
+                ),
+                fix: Some(
+                    "Rerun `allie init --force` to pick it up automatically, or set model.enabled: true and model.provider_allowlist in the manifest.".to_string(),
+                ),
+            },
+            None => DoctorCheck {
+                name: "model".to_string(),
+                status: DoctorCheckStatus::Warn,
+                detail: format!(
+                    "model review is off: no resolvable API key found (checked {})",
+                    model_provider_preset_env_names()
+                ),
+                fix: Some(format!(
+                    "Set one of {} in the environment, then rerun `allie init --force` to enable agentic review.",
+                    model_provider_preset_env_names()
+                )),
+            },
+        };
+    }
+
+    let api_key_env = manifest
+        .model
+        .api_key_env
+        .as_deref()
+        .unwrap_or(MODEL_PROVIDER_PRESETS[0].api_key_env);
+    if env_var_non_empty(api_key_env) {
+        DoctorCheck {
+            name: "model".to_string(),
+            status: DoctorCheckStatus::Ok,
+            detail: format!(
+                "model review enabled via {} ({api_key_env})",
+                manifest
+                    .model
+                    .provider
+                    .as_deref()
+                    .unwrap_or(MODEL_PROVIDER_PRESETS[0].provider)
+            ),
+            fix: None,
+        }
+    } else {
+        DoctorCheck {
+            name: "model".to_string(),
+            status: DoctorCheckStatus::Warn,
+            detail: format!(
+                "model.enabled is true but {api_key_env} is not set in this environment"
+            ),
+            fix: Some(format!("Export {api_key_env}, then rerun `allie doctor`.")),
+        }
+    }
+}
+
 fn doctor_status(checks: &[DoctorCheck]) -> DoctorStatus {
     if checks
         .iter()
@@ -557,96 +658,4 @@ fn stderr_or_stdout(output: &std::process::Output) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn worker_script_resolves_from_installed_lib_asset_dir_without_env() {
-        let temp = tempdir().unwrap();
-        let exe_path = temp.path().join("bin/allie");
-        let worker_path = temp.path().join("lib/allie/workers/browser/run.mjs");
-        std::fs::create_dir_all(exe_path.parent().unwrap()).unwrap();
-        std::fs::create_dir_all(worker_path.parent().unwrap()).unwrap();
-        std::fs::write(&worker_path, "console.log('worker');\n").unwrap();
-
-        let resolution = resolve_worker_script_from(
-            None,
-            &exe_path,
-            &temp.path().join("missing-source-checkout"),
-        )
-        .unwrap();
-
-        assert_eq!(resolution.path, std::fs::canonicalize(worker_path).unwrap());
-        assert_eq!(resolution.source, "installed lib directory");
-    }
-
-    #[test]
-    fn worker_script_resolves_from_bundled_distribution_root() {
-        let temp = tempdir().unwrap();
-        let exe_path = temp.path().join("allie/bin/allie");
-        let worker_path = temp.path().join("allie/workers/browser/run.mjs");
-        std::fs::create_dir_all(exe_path.parent().unwrap()).unwrap();
-        std::fs::create_dir_all(worker_path.parent().unwrap()).unwrap();
-        std::fs::write(&worker_path, "console.log('worker');\n").unwrap();
-
-        let resolution = resolve_worker_script_from(
-            None,
-            &exe_path,
-            &temp.path().join("missing-source-checkout"),
-        )
-        .unwrap();
-
-        assert_eq!(resolution.path, std::fs::canonicalize(worker_path).unwrap());
-        assert_eq!(resolution.source, "bundled distribution root");
-    }
-
-    #[test]
-    fn worker_script_env_override_is_authoritative() {
-        let temp = tempdir().unwrap();
-        let env_path = temp.path().join("custom-worker.mjs");
-        let packaged_path = temp.path().join("lib/allie/workers/browser/run.mjs");
-        std::fs::create_dir_all(packaged_path.parent().unwrap()).unwrap();
-        std::fs::write(&packaged_path, "console.log('packaged');\n").unwrap();
-        std::fs::write(&env_path, "console.log('env');\n").unwrap();
-
-        let resolution = resolve_worker_script_from(
-            Some(env_path.clone()),
-            &temp.path().join("bin/allie"),
-            temp.path(),
-        )
-        .unwrap();
-
-        assert_eq!(resolution.path, std::fs::canonicalize(env_path).unwrap());
-        assert_eq!(resolution.source, BROWSER_WORKER_ENV);
-    }
-
-    #[test]
-    fn missing_env_override_does_not_silently_fallback() {
-        let temp = tempdir().unwrap();
-        let missing_env_path = temp.path().join("missing-worker.mjs");
-        let packaged_path = temp.path().join("lib/allie/workers/browser/run.mjs");
-        std::fs::create_dir_all(packaged_path.parent().unwrap()).unwrap();
-        std::fs::write(&packaged_path, "console.log('packaged');\n").unwrap();
-
-        let search = resolve_worker_script_from(
-            Some(missing_env_path.clone()),
-            &temp.path().join("bin/allie"),
-            temp.path(),
-        )
-        .unwrap_err();
-
-        assert!(search.message.contains(BROWSER_WORKER_ENV));
-        assert_eq!(search.searched_paths, vec![missing_env_path]);
-    }
-
-    #[test]
-    fn explicit_missing_manifest_is_a_failed_target_check() {
-        let temp = tempdir().unwrap();
-        let check = check_target(Some(&temp.path().join("missing.yml")), true);
-
-        assert_eq!(check.name, "target");
-        assert_eq!(check.status, DoctorCheckStatus::Fail);
-        assert!(check.detail.contains("does not exist"));
-    }
-}
+mod tests;

@@ -2,9 +2,13 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
+
+/// Serializes tests across every module that mutate the model provider API
+/// key env vars — process-wide, so a per-module guard is not enough.
+pub(crate) static MODEL_ENV_GUARD: Mutex<()> = Mutex::new(());
 
 pub(crate) fn write_live_discovery_manifest(root: &Path, base_url: &str) -> PathBuf {
     let manifest_path = root.join("live-flow.yml");
