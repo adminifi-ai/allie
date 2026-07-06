@@ -209,16 +209,26 @@ pub(super) fn run_init(options: InitOptions) -> Result<InitReceipt> {
     // A `model:` section the user (or a prior init) already wrote is
     // explicit config, not a scaffold default; --force must not silently
     // flip a deliberately-disabled model back on. Only a manifest with no
-    // `model:` key at all (or none on disk yet) gets a fresh scaffold.
-    let preserved_model = existing_model_policy(&options.manifest_path);
+    // `model:` key at all (or none on disk yet) gets a fresh scaffold; a
+    // present-but-malformed `model:` section is a hard error, not a silent
+    // overwrite — it's still deliberate config, just broken.
     let mut manifest = scaffold_manifest(&options);
-    let model_note = preserved_model.map(|existing| {
-        manifest.model = existing;
-        format!(
-            "Preserved the existing model: policy from {} — edit model: in the manifest directly to change it.",
-            options.manifest_path.display()
-        )
-    });
+    let model_note = match existing_model_policy(&options.manifest_path) {
+        ExistingModel::Absent => None,
+        ExistingModel::Preserved(existing) => {
+            manifest.model = existing;
+            Some(format!(
+                "Preserved the existing model: policy from {} — edit model: in the manifest directly to change it.",
+                options.manifest_path.display()
+            ))
+        }
+        ExistingModel::Malformed(detail) => {
+            return Err(AllieError::InvalidManifest(format!(
+                "manifest {} has a model: section that failed to parse ({detail}); fix it or remove the model: section, then rerun `allie init --force`. Nothing was overwritten.",
+                options.manifest_path.display()
+            )));
+        }
+    };
     manifest.validate()?;
     let yaml = serde_yaml::to_string(&manifest).map_err(|source| AllieError::Yaml {
         context: format!("serialize manifest {}", options.manifest_path.display()),
@@ -234,14 +244,33 @@ pub(super) fn run_init(options: InitOptions) -> Result<InitReceipt> {
     })
 }
 
-/// The model policy `manifest_path` explicitly declares, if any — `None`
-/// when there's no prior file, no `model:` key, or it fails to deserialize,
-/// in which case a fresh scaffold is the right fallback.
-fn existing_model_policy(manifest_path: &Path) -> Option<ModelPolicy> {
-    let text = fs::read_to_string(manifest_path).ok()?;
-    let value: serde_yaml::Value = serde_yaml::from_str(&text).ok()?;
-    let model_value = value.get("model")?;
-    serde_yaml::from_value(model_value.clone()).ok()
+/// What `manifest_path`'s current `model:` key (if any) means for `--force`.
+enum ExistingModel {
+    /// No prior file, unparseable YAML overall, or no `model:` key at all —
+    /// nothing explicit to preserve, so a fresh scaffold is correct.
+    Absent,
+    /// A `model:` key that deserializes cleanly; preserve it verbatim.
+    Preserved(ModelPolicy),
+    /// A `model:` key that exists but doesn't deserialize into a
+    /// `ModelPolicy` — still deliberate config, just broken, so this must
+    /// fail loud rather than silently scaffold over it.
+    Malformed(String),
+}
+
+fn existing_model_policy(manifest_path: &Path) -> ExistingModel {
+    let Ok(text) = fs::read_to_string(manifest_path) else {
+        return ExistingModel::Absent;
+    };
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&text) else {
+        return ExistingModel::Absent;
+    };
+    let Some(model_value) = value.get("model") else {
+        return ExistingModel::Absent;
+    };
+    match serde_yaml::from_value::<ModelPolicy>(model_value.clone()) {
+        Ok(policy) => ExistingModel::Preserved(policy),
+        Err(error) => ExistingModel::Malformed(error.to_string()),
+    }
 }
 
 pub(super) fn run_verify(options: VerifyOptions) -> Result<VerifyReceipt> {
@@ -312,7 +341,7 @@ fn scaffold_manifest(options: &InitOptions) -> FlowManifest {
             redaction_status: "not_redacted_local".to_string(),
             retention_class: "local_ephemeral".to_string(),
         },
-        model: ModelPolicy::scaffold(),
+        model: model_credentials::scaffold_model_policy(),
         known_nondeterminism: Vec::new(),
         browser: BrowserSettings {
             viewport: Viewport {

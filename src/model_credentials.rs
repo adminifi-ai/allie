@@ -3,6 +3,8 @@
 //! `ModelPolicy` itself still lives) so this table and its tests don't grow
 //! the crate root's line count.
 
+use crate::ModelPolicy;
+
 /// A provider preset the agentic model gateway (`workers/agentic/review.mjs`)
 /// can call: it speaks a generic OpenAI-compatible `/chat/completions` API
 /// keyed off whatever `model.api_key_env` names, so more presets can be added
@@ -54,11 +56,29 @@ pub(crate) fn env_var_non_empty(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// The model policy `allie init` scaffolds: enabled + provider_allowlist
+/// filled when a key resolves (never enabled with an empty allowlist — that
+/// fails the manifest's fail-closed preflight gate), else default.
+pub(crate) fn scaffold_model_policy() -> ModelPolicy {
+    match resolve_model_credentials() {
+        Some(preset) => ModelPolicy {
+            enabled: true,
+            provider_allowlist: vec![preset.provider.to_string()],
+            provider: Some(preset.provider.to_string()),
+            model: Some(preset.model.to_string()),
+            api_key_env: Some(preset.api_key_env.to_string()),
+            base_url: Some(preset.base_url.to_string()),
+            ..ModelPolicy::default()
+        },
+        None => ModelPolicy::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FlowManifest;
     use crate::test_support::MODEL_ENV_GUARD;
-    use crate::{FlowManifest, ModelPolicy};
     use std::path::Path;
 
     fn clear_model_credential_env() {
@@ -142,7 +162,7 @@ mod tests {
             std::env::set_var("OPENROUTER_API_KEY", "sk-or-test");
         }
 
-        let policy = ModelPolicy::scaffold();
+        let policy = scaffold_model_policy();
 
         clear_model_credential_env();
 
@@ -161,7 +181,7 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear_model_credential_env();
 
-        let policy = ModelPolicy::scaffold();
+        let policy = scaffold_model_policy();
 
         assert!(!policy.enabled);
         assert!(policy.provider_allowlist.is_empty());
@@ -178,7 +198,7 @@ mod tests {
         }
 
         let mut manifest = FlowManifest::load(Path::new("examples/login-flow.yml")).unwrap();
-        manifest.model = ModelPolicy::scaffold();
+        manifest.model = scaffold_model_policy();
         let failures = manifest.preflight_failures();
 
         clear_model_credential_env();

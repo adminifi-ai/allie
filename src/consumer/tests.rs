@@ -240,3 +240,71 @@ flow:
     assert_eq!(after.model.provider.as_deref(), Some("openrouter"));
     assert!(receipt.model_note.is_none());
 }
+
+#[test]
+fn force_reinit_fails_loud_on_a_malformed_model_section_without_overwriting() {
+    let _guard = MODEL_ENV_GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_model_credential_env();
+    unsafe {
+        std::env::set_var("OPENROUTER_API_KEY", "sk-or-test");
+    }
+    let temp = tempdir().unwrap();
+    let manifest_path = temp.path().join("manifest.yml");
+    // A `model:` key that exists but is broken (wrong types for enabled,
+    // provider_allowlist, zdr_required) — deliberate config, just malformed.
+    let original = r#"id: malformed-model-section
+name: Malformed model section fixture
+app_name: Malformed Model Section
+environment: local
+target:
+  kind: local_fixture
+  fixture_dir: .
+policy:
+  profile: wcag22-aa
+  blocking_classes:
+    - deterministic
+model:
+  enabled: "yes please"
+  provider_allowlist: openrouter
+  zdr_required: 12345
+browser:
+  viewport:
+    width: 1280
+    height: 900
+  color_scheme: light
+  reduced_motion: reduce
+  locale: en-US
+  zoom: 1.0
+flow:
+  id: malformed-model-section-path
+  description: fixture
+  states:
+    - id: home
+      path: /
+      description: home
+      required: true
+      axe: true
+      screenshot: true
+      dom_snapshot: true
+      accessibility_tree: true
+      keyboard: true
+      video: false
+      trace: true
+"#;
+    fs::write(&manifest_path, original).unwrap();
+
+    let error = run_init(forced_init_options(manifest_path.clone())).unwrap_err();
+    let after = fs::read_to_string(&manifest_path).unwrap();
+
+    clear_model_credential_env();
+
+    let message = error.to_string();
+    assert!(message.contains("model:"));
+    assert!(message.contains("Nothing was overwritten"));
+    assert_eq!(
+        after, original,
+        "a malformed model: section must not be silently overwritten"
+    );
+}

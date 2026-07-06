@@ -1140,24 +1140,6 @@ impl ModelPolicy {
         }
         Ok(())
     }
-
-    /// The model policy `allie init` scaffolds: enabled + provider_allowlist
-    /// filled when a key resolves (never enabled with an empty allowlist —
-    /// that fails the manifest's fail-closed preflight gate), else default.
-    fn scaffold() -> Self {
-        match model_credentials::resolve_model_credentials() {
-            Some(preset) => Self {
-                enabled: true,
-                provider_allowlist: vec![preset.provider.to_string()],
-                provider: Some(preset.provider.to_string()),
-                model: Some(preset.model.to_string()),
-                api_key_env: Some(preset.api_key_env.to_string()),
-                base_url: Some(preset.base_url.to_string()),
-                ..Self::default()
-            },
-            None => Self::default(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2257,8 +2239,7 @@ mod tests {
     use crate::runtime;
     use crate::standards::{criterion_level, criterion_principle, criterion_source_url};
     use crate::test_support::{
-        MODEL_ENV_GUARD, start_live_discovery_site, unused_local_base_url,
-        write_live_discovery_manifest,
+        start_live_discovery_site, unused_local_base_url, write_live_discovery_manifest,
     };
     use std::process::Command;
     use std::sync::Mutex;
