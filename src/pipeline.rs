@@ -2,9 +2,9 @@ use crate::agentic::AgenticReviewSummary;
 use crate::{
     AgentRunnerKind, AllieError, ComplianceReportReceipt, DiscoveryOptions, DiscoveryReceipt,
     ExitClass, FlowManifest, MapOptions, MapReceipt, PromoteFlowOptions, PromoteFlowReceipt,
-    ReleaseOptions, ReleaseReceipt, ReportOptions, Result, ReviewOptions, RunOptions, RunReceipt,
+    ReleaseOptions, ReleaseReceipt, ReportOptions, Result, RunOptions, RunReceipt,
     default_project_root_for_manifest, run_compliance_report, run_discovery, run_map,
-    run_promote_flow, run_release, run_review, run_v0, status_for_exit_class,
+    run_promote_flow, run_release, run_v0, status_for_exit_class,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,6 @@ pub(crate) struct PipelineOptions {
     pub(crate) project_root: Option<PathBuf>,
     pub(crate) agent_runner: AgentRunnerKind,
     pub(crate) paths: PipelinePaths,
-    pub(crate) disabled_model_review: DisabledModelReview,
     pub(crate) stale_after_days: i64,
 }
 
@@ -25,7 +24,6 @@ pub(crate) struct PipelinePaths {
     generated_flow_path: PathBuf,
     map_dir: PathBuf,
     run_dir: PathBuf,
-    review_dir: PathBuf,
     report_dir: PathBuf,
     release_dir: PathBuf,
 }
@@ -37,7 +35,6 @@ impl PipelinePaths {
             generated_flow_path: out_dir.join("flow/generated-flow.yml"),
             map_dir: out_dir.join("map"),
             run_dir: out_dir.join("run"),
-            review_dir: out_dir.join("review"),
             report_dir: out_dir.join("report"),
             release_dir: out_dir.join("release"),
         }
@@ -50,17 +47,10 @@ impl PipelinePaths {
             discovery_dir,
             map_dir: job_dir.join("steps/map"),
             run_dir: job_dir.join("steps/run"),
-            review_dir: job_dir.join("steps/review"),
             report_dir: job_dir.join("steps/report"),
             release_dir: job_dir.join("steps/release"),
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum DisabledModelReview {
-    KeepRunPacket,
-    WriteOfflineReview,
 }
 
 #[derive(Debug)]
@@ -394,7 +384,7 @@ fn run_pipeline_replay(
 }
 
 fn run_pipeline_review(
-    options: &PipelineOptions,
+    _options: &PipelineOptions,
     promoted: &PromoteFlowReceipt,
     run: &RunReceipt,
 ) -> Result<PipelineReviewReceipt> {
@@ -412,26 +402,12 @@ fn run_pipeline_review(
         });
     }
 
-    match options.disabled_model_review {
-        DisabledModelReview::KeepRunPacket => Ok(PipelineReviewReceipt {
-            packet_path: run.evidence_path.clone(),
-            report_path: None,
-            message: "agentic review disabled; using replay evidence packet".to_string(),
-            agentic_summary: None,
-        }),
-        DisabledModelReview::WriteOfflineReview => {
-            let review = run_review(ReviewOptions {
-                packet_path: run.evidence_path.clone(),
-                out_dir: options.paths.review_dir.clone(),
-            })?;
-            Ok(PipelineReviewReceipt {
-                packet_path: review.packet_path,
-                report_path: Some(review.report_path),
-                message: "offline agentic review context written".to_string(),
-                agentic_summary: None,
-            })
-        }
-    }
+    Ok(PipelineReviewReceipt {
+        packet_path: run.evidence_path.clone(),
+        report_path: None,
+        message: "agentic review disabled; using replay evidence packet".to_string(),
+        agentic_summary: None,
+    })
 }
 
 fn run_pipeline_report(
@@ -478,7 +454,6 @@ mod tests {
                 project_root: None,
                 agent_runner: AgentRunnerKind::Local,
                 paths: PipelinePaths::verify(&out_dir),
-                disabled_model_review: DisabledModelReview::KeepRunPacket,
                 stale_after_days: 7,
             },
             |checkpoint| {
@@ -525,6 +500,49 @@ mod tests {
         assert!(
             !release_completed,
             "release must not complete after changed-surface resolution fails"
+        );
+    }
+
+    #[test]
+    fn workbench_review_step_keeps_run_packet_unchanged_when_model_disabled() {
+        let temp = tempdir().unwrap();
+        let job_dir = temp.path().join("job");
+        let evidence_path = job_dir.join("steps/run/evidence.json");
+        fs::create_dir_all(evidence_path.parent().unwrap()).unwrap();
+        fs::write(&evidence_path, r#"{"findings":[],"review":[]}"#).unwrap();
+
+        let options = PipelineOptions {
+            manifest_path: PathBuf::from("examples/autonomous-workbench.yml"),
+            project_root: None,
+            agent_runner: AgentRunnerKind::Local,
+            paths: PipelinePaths::workbench(&job_dir),
+            stale_after_days: 7,
+        };
+        let promoted = PromoteFlowReceipt {
+            manifest_path: PathBuf::from("examples/autonomous-workbench.yml"),
+        };
+        let run = RunReceipt {
+            run_id: "test-run".to_string(),
+            exit_class: ExitClass::Success,
+            evidence_path: evidence_path.clone(),
+            report_path: job_dir.join("steps/run/report.html"),
+        };
+
+        let review = run_pipeline_review(&options, &promoted, &run).unwrap();
+
+        assert_eq!(review.packet_path, evidence_path);
+        assert!(review.report_path.is_none());
+        assert!(review.agentic_summary.is_none());
+
+        let packet: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&evidence_path).unwrap()).unwrap();
+        assert!(
+            packet["findings"].as_array().unwrap().is_empty(),
+            "model-off workbench review must not fabricate findings"
+        );
+        assert!(
+            !job_dir.join("steps/review").exists(),
+            "model-off workbench review must not write an offline review artifact directory"
         );
     }
 }

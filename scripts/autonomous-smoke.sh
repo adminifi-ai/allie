@@ -3,7 +3,6 @@ set -eu
 
 DISCOVERY_DIR=.allie/discovery/autonomous-smoke
 RUN_DIR=.allie/runs/autonomous-smoke
-REVIEW_DIR=.allie/reviews/autonomous-smoke
 RELEASE_DIR=.allie/releases/autonomous-smoke
 JOB_DIR=.allie/jobs/autonomous-smoke
 AGENTIC_JOB_DIR=.allie/jobs/autonomous-agentic-smoke
@@ -11,7 +10,7 @@ AGENTIC_ERROR_JOB_DIR=.allie/jobs/autonomous-agentic-error-smoke
 AGENTIC_ERROR_WORKER=.allie/jobs/autonomous-agentic-error-worker.cjs
 LEGACY_REMEDIATION_DIR=.allie/remediation/autonomous-smoke
 
-rm -rf "$DISCOVERY_DIR" "$RUN_DIR" "$REVIEW_DIR" "$RELEASE_DIR" "$JOB_DIR" "$AGENTIC_JOB_DIR" "$AGENTIC_ERROR_JOB_DIR" "$LEGACY_REMEDIATION_DIR"
+rm -rf "$DISCOVERY_DIR" "$RUN_DIR" "$RELEASE_DIR" "$JOB_DIR" "$AGENTIC_JOB_DIR" "$AGENTIC_ERROR_JOB_DIR" "$LEGACY_REMEDIATION_DIR"
 rm -f "$AGENTIC_ERROR_WORKER"
 
 cargo run --locked -- discover \
@@ -57,13 +56,9 @@ run_status=$?
 set -e
 test "$run_status" -eq 1
 
-cargo run --locked -- review \
-  --packet "$RUN_DIR/evidence.json" \
-  --out "$REVIEW_DIR"
-
 set +e
 cargo run --locked -- release \
-  --packet "$REVIEW_DIR/evidence-reviewed.json" \
+  --packet "$RUN_DIR/evidence.json" \
   --out "$RELEASE_DIR" \
   --changed-surface settings
 release_status=$?
@@ -97,7 +92,7 @@ if (!settingsDom.includes('id="email-preview"') || !settingsDom.includes('data-r
   throw new Error('generated settings DOM did not capture the ready email preview');
 }
 NODE
-node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$REVIEW_DIR/evidence-reviewed.json','utf8')); if(!p.review.length) process.exit(1); if(!p.findings.some(f=>f.evidence_class==='agentic')) process.exit(1);"
+node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$RUN_DIR/evidence.json','utf8')); if(p.review.length) process.exit(1); if(p.findings.some(f=>f.evidence_class==='agentic')) process.exit(1);"
 node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync('$RELEASE_DIR/release-summary.json','utf8')); if(r.status!=='blocked') process.exit(1);"
 
 set +e
@@ -117,10 +112,11 @@ test -f "$JOB_DIR/steps/discovery/discovery.json"
 test -f "$JOB_DIR/steps/map/product-map.json"
 test -f "$JOB_DIR/steps/run/evidence.json"
 test -f "$JOB_DIR/steps/report/compliance-report.json"
-test -f "$JOB_DIR/steps/review/evidence-reviewed.json"
+test ! -d "$JOB_DIR/steps/review"
 test ! -d "$JOB_DIR/steps/remediation"
 test ! -d "$LEGACY_REMEDIATION_DIR"
 test -f "$JOB_DIR/steps/release/release-summary.json"
+node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('$JOB_DIR/steps/run/evidence.json','utf8')); if(p.review.length) process.exit(1); if(p.findings.some(f=>f.evidence_class==='agentic')) process.exit(1);"
 
 set +e
 env -u ALLIE_AGENTIC_WORKBENCH_SMOKE_KEY cargo run --locked -- workbench start \

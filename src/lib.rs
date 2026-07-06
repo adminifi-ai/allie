@@ -161,12 +161,6 @@ struct ReleaseOptions {
     stale_after_days: i64,
 }
 
-#[derive(Debug)]
-struct ReviewOptions {
-    packet_path: PathBuf,
-    out_dir: PathBuf,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AgentRunnerKind {
     Local,
@@ -208,12 +202,6 @@ struct ReleaseReceipt {
     exit_class: ExitClass,
     summary_path: PathBuf,
     check_path: PathBuf,
-    report_path: PathBuf,
-}
-
-#[derive(Debug)]
-struct ReviewReceipt {
-    packet_path: PathBuf,
     report_path: PathBuf,
 }
 
@@ -528,38 +516,6 @@ fn parse_promote_flow_options(args: &[String]) -> std::result::Result<PromoteFlo
     })
 }
 
-fn parse_review_options(args: &[String]) -> std::result::Result<ReviewOptions, String> {
-    let mut packet_path = None;
-    let mut out_dir = None;
-    let mut index = 0;
-
-    while index < args.len() {
-        match args[index].as_str() {
-            "--packet" => {
-                index += 1;
-                let value = args
-                    .get(index)
-                    .ok_or_else(|| "--packet requires a path".to_string())?;
-                packet_path = Some(PathBuf::from(value));
-            }
-            "--out" => {
-                index += 1;
-                let value = args
-                    .get(index)
-                    .ok_or_else(|| "--out requires a directory".to_string())?;
-                out_dir = Some(PathBuf::from(value));
-            }
-            unexpected => return Err(format!("unexpected argument: {unexpected}")),
-        }
-        index += 1;
-    }
-
-    Ok(ReviewOptions {
-        packet_path: packet_path.ok_or_else(|| "--packet is required".to_string())?,
-        out_dir: out_dir.ok_or_else(|| "--out is required".to_string())?,
-    })
-}
-
 fn run_v0(options: RunOptions) -> Result<RunReceipt> {
     let manifest = FlowManifest::load(&options.manifest_path)?;
     manifest.validate()?;
@@ -693,148 +649,6 @@ pub(crate) fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<St
         }
     }
     output
-}
-
-fn run_review(options: ReviewOptions) -> Result<ReviewReceipt> {
-    fs::create_dir_all(&options.out_dir).map_err(|source| AllieError::Io {
-        context: format!(
-            "create review output directory {}",
-            options.out_dir.display()
-        ),
-        source,
-    })?;
-    let mut packet: EvidencePacket = read_json_file(&options.packet_path)?;
-    release::validate_release_packet(&packet)?;
-
-    let artifacts_dir = options.out_dir.join("artifacts");
-    fs::create_dir_all(&artifacts_dir).map_err(|source| AllieError::Io {
-        context: format!(
-            "create review artifacts directory {}",
-            artifacts_dir.display()
-        ),
-        source,
-    })?;
-    let prompt_path = artifacts_dir.join("model-prompt-review-1.txt");
-    let response_path = artifacts_dir.join("model-response-review-1.json");
-    let redaction_path = artifacts_dir.join("redaction-receipt-review-1.json");
-    let prompt = format!(
-        "Review Allie packet {} for WCAG criteria that need visual or contextual judgment. Return hypotheses only; do not claim legal compliance.",
-        packet.run.id
-    );
-    write_string(&prompt_path, &(prompt.clone() + "\n"))?;
-    let response = serde_json::json!({
-        "schema": "allie.offline-model-response.v0",
-        "provider": "offline-recorded",
-        "model": "allie-vision-fixture",
-        "finding": {
-            "title": "Agentic visual review requested",
-            "description": "Offline vision review recommends human confirmation for visual order, focus visibility, and label usefulness.",
-            "standard_obligation": "wcag22-aa:2.4.7-focus-visible",
-            "confidence": "agent_inferred"
-        }
-    });
-    write_json_pretty(&response_path, &response)?;
-    let redaction = serde_json::json!({
-        "schema": "allie.redaction-receipt.v0",
-        "status": "redacted",
-        "source_packet": options.packet_path,
-        "artifacts_reviewed": packet.artifacts.iter().map(|artifact| artifact.id.clone()).collect::<Vec<_>>(),
-        "egress": "none-offline-recorded"
-    });
-    write_json_pretty(&redaction_path, &redaction)?;
-
-    let artifact_policy = ArtifactPolicy {
-        redaction_status: "redacted_by_receipt".to_string(),
-        retention_class: "local_review".to_string(),
-    };
-    let timestamp = now_utc();
-    let prompt_artifact = artifact_for_path(
-        "model-prompt-review-1",
-        "model_prompt",
-        &options.out_dir,
-        &prompt_path,
-        None,
-        "allie-model-gateway",
-        &artifact_policy,
-        timestamp,
-    )?;
-    let response_artifact = artifact_for_path(
-        "model-response-review-1",
-        "model_response",
-        &options.out_dir,
-        &response_path,
-        None,
-        "allie-model-gateway",
-        &artifact_policy,
-        timestamp,
-    )?;
-    let redaction_artifact = artifact_for_path(
-        "redaction-receipt-review-1",
-        "redaction_receipt",
-        &options.out_dir,
-        &redaction_path,
-        None,
-        "allie-model-gateway",
-        &artifact_policy,
-        timestamp,
-    )?;
-    packet.artifacts.extend([
-        prompt_artifact.clone(),
-        response_artifact.clone(),
-        redaction_artifact.clone(),
-    ]);
-    packet.review.push(ReviewAttempt {
-        id: "review-1".to_string(),
-        provider: "offline-recorded".to_string(),
-        model: "allie-vision-fixture".to_string(),
-        prompt_artifact: prompt_artifact.id.clone(),
-        response_artifact: response_artifact.id.clone(),
-        redaction_receipt: redaction_artifact.id.clone(),
-        status: "needs_review".to_string(),
-        confidence: "agent_inferred".to_string(),
-        promotion_state: "model_hypothesis".to_string(),
-    });
-    packet.findings.push(Finding {
-        id: "agentic-review-1".to_string(),
-        title: "Agentic visual review requested".to_string(),
-        description: "Offline vision review recommends human confirmation for visual order, focus visibility, and label usefulness.".to_string(),
-        evidence_class: "agentic".to_string(),
-        standard_obligation: "wcag22-aa:2.4.7-focus-visible".to_string(),
-        severity: "review".to_string(),
-        status: "needs_review".to_string(),
-        confidence: "agent_inferred".to_string(),
-        source: "offline-recorded-vision-review".to_string(),
-        affected_route: packet
-            .coverage
-            .routes_visited
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "run".to_string()),
-        affected_state: packet
-            .coverage
-            .states_captured
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "run".to_string()),
-        artifact_refs: vec![prompt_artifact.id, response_artifact.id, redaction_artifact.id],
-        replay_command: packet.replay.command.clone(),
-    });
-
-    let packet_path = options.out_dir.join("evidence-reviewed.json");
-    let report_path = options.out_dir.join("review-report.html");
-    write_json_pretty(&packet_path, &packet)?;
-    write_string(&report_path, &render_review_report(&packet))?;
-    Ok(ReviewReceipt {
-        packet_path,
-        report_path,
-    })
-}
-
-fn render_review_report(packet: &EvidencePacket) -> String {
-    format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Allie Agentic Review</title></head><body><main><h1>Agentic review</h1><p>Review attempts: {}</p><p>Model-only findings stay neutral until promoted by scripted proof or human attestation.</p></main></body></html>"#,
-        packet.review.len()
-    )
 }
 
 pub(crate) fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
@@ -3920,7 +3734,10 @@ mod tests {
         assert!(job_dir.join("steps/map/product-map.json").exists());
         assert!(job_dir.join("steps/run/evidence.json").exists());
         assert!(job_dir.join("steps/report/compliance-report.json").exists());
-        assert!(job_dir.join("steps/review/evidence-reviewed.json").exists());
+        assert!(
+            !job_dir.join("steps/review").exists(),
+            "model-off workbench review must not write an offline review artifact directory"
+        );
         assert!(!job_dir.join("steps/remediation").exists());
         assert!(job_dir.join("steps/release/release-summary.json").exists());
 
@@ -3941,8 +3758,29 @@ mod tests {
             "steps/report/compliance-report.json"
         );
         assert_eq!(
+            job["pointers"]["reviewed_packet"],
+            "steps/run/evidence.json"
+        );
+        assert_eq!(
             job["pointers"]["release_summary"],
             "steps/release/release-summary.json"
+        );
+
+        let evidence: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(job_dir.join("steps/run/evidence.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            evidence["review"].as_array().unwrap().is_empty(),
+            "model-off workbench review must not fabricate a review attempt"
+        );
+        assert!(
+            !evidence["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|finding| finding["evidence_class"] == "agentic"),
+            "model-off workbench review must not fabricate an agentic finding"
         );
 
         let events = fs::read_to_string(events_path).unwrap();
@@ -4109,51 +3947,14 @@ mod tests {
     }
 
     #[test]
-    fn review_cli_adds_agentic_context_without_blocking_release() {
-        let temp = tempdir().unwrap();
-        let packet_path = write_passing_evidence_packet(&temp.path().join("run"));
-        let review_dir = temp.path().join("review");
+    fn review_is_not_a_dispatchable_command() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
 
-        let code = run_cli_with_io(
-            vec![
-                "review".to_string(),
-                "--packet".to_string(),
-                packet_path.to_string_lossy().to_string(),
-                "--out".to_string(),
-                review_dir.to_string_lossy().to_string(),
-            ],
-            &mut stdout,
-            &mut stderr,
-        );
+        let code = run_cli_with_io(vec!["review".to_string()], &mut stdout, &mut stderr);
 
-        assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
-        let reviewed_packet_path = review_dir.join("evidence-reviewed.json");
-        assert!(reviewed_packet_path.exists());
-        assert!(
-            review_dir
-                .join("artifacts/model-prompt-review-1.txt")
-                .exists()
-        );
-        assert!(
-            review_dir
-                .join("artifacts/model-response-review-1.json")
-                .exists()
-        );
-        assert!(
-            review_dir
-                .join("artifacts/redaction-receipt-review-1.json")
-                .exists()
-        );
-        let reviewed: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(reviewed_packet_path).unwrap()).unwrap();
-        assert_eq!(reviewed["review"][0]["provider"], "offline-recorded");
-        assert_eq!(reviewed["findings"][0]["evidence_class"], "agentic");
-
-        let projection = project_release_value(&reviewed, &release_options(vec!["login-form"]));
-        assert_eq!(projection.exit_class, ExitClass::Success);
-        assert_eq!(projection.summary.status, "needs_review");
+        assert_eq!(code, ExitClass::Usage.code());
+        assert!(String::from_utf8_lossy(&stderr).contains("unknown command"));
     }
 
     #[test]
