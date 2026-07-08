@@ -13,6 +13,7 @@ mod model;
 
 mod agentic;
 mod auth;
+mod axe_pass;
 mod cli;
 mod compliance;
 mod consumer;
@@ -56,7 +57,6 @@ const JOB_SCHEMA: &str = "allie.job.v0";
 const DEFAULT_WORKER_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_WORKBENCH_MAX_RUNTIME_MS: u64 = 24 * 60 * 60 * 1000;
 const DEFAULT_WORKBENCH_IDLE_TIMEOUT_MS: u64 = 10 * 60 * 1000;
-
 #[derive(Debug)]
 pub enum AllieError {
     Io {
@@ -76,7 +76,6 @@ pub enum AllieError {
     Runtime(String),
     Worker(String),
 }
-
 impl Display for AllieError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -90,7 +89,6 @@ impl Display for AllieError {
         }
     }
 }
-
 impl Error for AllieError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
@@ -103,9 +101,7 @@ impl Error for AllieError {
         }
     }
 }
-
 pub(crate) type Result<T> = std::result::Result<T, AllieError>;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitClass {
     Success,
@@ -1480,6 +1476,11 @@ fn aggregate_features<'a>(
         if features.reflow_checked {
             agg.reflow_checked = true;
         }
+        if features.mobile_viewport_checked {
+            agg.mobile_viewport_checked = true;
+            agg.mobile_viewport_width = features.mobile_viewport_width;
+            agg.mobile_viewport_height = features.mobile_viewport_height;
+        }
     }
     agg.lang = saw_state && lang_all;
     agg
@@ -1554,6 +1555,10 @@ fn verdicts_from_findings(
                     affected_states: vec![finding.affected_state.clone()],
                     finding_refs: vec![finding.id.clone()],
                 });
+                continue;
+            }
+            if let Some(verdict) = axe_pass::verdict(manifest, response, obligation) {
+                verdicts.push(verdict);
                 continue;
             }
             let method = criterion["method"].as_str().unwrap_or("human_review");
@@ -4498,6 +4503,7 @@ flow:
                 trace_path: None,
                 keyboard_focus_order: Vec::new(),
                 axe_violations: Vec::new(),
+                axe_passes: Vec::new(),
                 console_errors: Vec::new(),
                 network_errors: Vec::new(),
                 state_errors: Vec::new(),

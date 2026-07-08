@@ -10,6 +10,8 @@ set -eu
 
 RUN_DIR=.allie/runs/axe-named-rules-smoke
 NEGATING_LABEL_RUN_DIR=.allie/runs/axe-negating-label-in-name-smoke
+TARGET_SIZE_PASS_RUN_DIR=.allie/runs/axe-target-size-pass-smoke
+TARGET_SIZE_EMPTY_RUN_DIR=.allie/runs/axe-target-size-empty-smoke
 
 rm -rf "$RUN_DIR"
 
@@ -149,4 +151,66 @@ assert(
 console.log('axe negating-label-in-name regression guard passed: 2.5.3 stayed needs_review, not a false machine-proven pass');
 NODE
 
-echo "axe-named-rules smoke passed: $RUN_DIR/evidence.json and $NEGATING_LABEL_RUN_DIR/evidence.json"
+rm -rf "$TARGET_SIZE_PASS_RUN_DIR"
+cargo run --locked -- run --manifest examples/axe-target-size-pass-flow.yml --out "$TARGET_SIZE_PASS_RUN_DIR"
+
+node - "$TARGET_SIZE_PASS_RUN_DIR/evidence.json" <<'NODE'
+const fs = require('fs');
+const packet = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+const targetSize = packet.verdicts.find((item) => item.obligation === 'wcag22-aa:2.5.8-target-size-minimum');
+assert(targetSize, 'expected a verdict for wcag22-aa:2.5.8-target-size-minimum');
+assert(
+  targetSize.status === 'pass',
+  `expected target-size to pass when axe evaluated a matching control, got ${targetSize.status}`,
+);
+assert(
+  targetSize.confidence === 'machine_proven',
+  `target-size pass must be machine_proven, got ${targetSize.confidence}`,
+);
+assert(
+  targetSize.source === 'axe-core:target-size',
+  `target-size pass must identify the trusted axe rule source, got ${targetSize.source}`,
+);
+assert(
+  targetSize.affected_states.includes('target-size-pass'),
+  'target-size pass must be scoped to the state where axe evaluated matching controls',
+);
+
+console.log('axe target-size pass guard passed: evaluated matching controls can produce a machine pass');
+NODE
+
+rm -rf "$TARGET_SIZE_EMPTY_RUN_DIR"
+cargo run --locked -- run --manifest examples/axe-target-size-empty-flow.yml --out "$TARGET_SIZE_EMPTY_RUN_DIR"
+
+node - "$TARGET_SIZE_EMPTY_RUN_DIR/evidence.json" <<'NODE'
+const fs = require('fs');
+const packet = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+const targetSize = packet.verdicts.find((item) => item.obligation === 'wcag22-aa:2.5.8-target-size-minimum');
+assert(targetSize, 'expected a verdict for wcag22-aa:2.5.8-target-size-minimum');
+assert(
+  targetSize.status === 'needs_review',
+  `expected target-size with no matching axe evaluation to stay needs_review, got ${targetSize.status}`,
+);
+assert(
+  targetSize.source === 'allie-mobile-web-viewport-audit',
+  `target-size empty evaluation must keep mobile evidence attached, got source ${targetSize.source}`,
+);
+assert(
+  packet.artifacts.some((artifact) => artifact.id === 'mobile-screenshot-target-size-empty'),
+  'target-size empty run must retain mobile screenshot evidence',
+);
+
+console.log('axe target-size empty guard passed: no matching elements stayed needs_review with mobile evidence');
+NODE
+
+echo "axe-named-rules smoke passed: $RUN_DIR/evidence.json, $NEGATING_LABEL_RUN_DIR/evidence.json, $TARGET_SIZE_PASS_RUN_DIR/evidence.json, and $TARGET_SIZE_EMPTY_RUN_DIR/evidence.json"

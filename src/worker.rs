@@ -323,6 +323,8 @@ pub(crate) struct WorkerStateResult {
     #[serde(default)]
     pub(crate) axe_violations: Vec<AxeViolation>,
     #[serde(default)]
+    pub(crate) axe_passes: Vec<AxeEvaluation>,
+    #[serde(default)]
     pub(crate) console_errors: Vec<String>,
     #[serde(default)]
     pub(crate) network_errors: Vec<String>,
@@ -343,6 +345,8 @@ pub(crate) struct AxeViolation {
     #[serde(default)]
     pub(crate) nodes: usize,
 }
+
+pub(crate) type AxeEvaluation = AxeViolation;
 
 #[derive(Clone, Debug)]
 pub(crate) struct RunFailure {
