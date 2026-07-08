@@ -33,3 +33,10 @@ Make Allie easy to adopt from a fresh checkout or release bundle by proving inst
 - `README.md` already describes release install paths, while the repository currently has no public tags or GitHub releases.
 - This epic is adoption and distribution polish, not hosted SaaS work.
 - All docs must preserve the boundary: Allie audits, maps, reports, and hands off evidence; it does not remediate.
+
+## Groom findings (2026-07-08, mega-sweep)
+Board of record: Habitat (this epic = AL-007). Plan: `docs/plans/032-mega-groom-execution.html`.
+- **Blocking prerequisite (P0, carded as AL-118):** the agentic worker resolves via a compile-time `env!("CARGO_MANIFEST_DIR")` path (src/agentic.rs:40-46) baked on the build machine, `package-release.sh:23-31` never copies `workers/agentic`, and doctor's `check_model` verifies credentials but not script resolution — so any release bundle ships a model-review layer that cannot run and a doctor that green-lights it. Fix before the first tag; the fresh-directory adoption smoke (child 6) must assert the agentic worker resolves inside a packaged bundle.
+- Child 5 (platform matrix): scope macOS arm64+x64 into `release.yml` before the first tag — `package-release.sh:9-14` already has Darwin branches CI never runs. Codesigning/notarization is a documented-workaround follow-up, not a v0.1.0 blocker.
+- Release integrity (checksums, signing, dependency audit) carded as AL-120; GitHub Action distribution as AL-126; `allie init` .gitignore scaffold as AL-119. `allie init` also has zero environment auto-detection (src/consumer.rs:69-129, silent placeholder base_url) — fold into child 1's quickstart acceptance.
+- AL-108 (license DECISION) blocks any public tag: Cargo.toml says UNLICENSED while VISION says public OSS. Operator-only call.

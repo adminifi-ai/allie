@@ -42,3 +42,11 @@ Source: `docs/dogfood/025-vanity-vs-olympus-cross-target.md`. The dogfood ladder
 - R4: Headline counts are not a safe cross-run diff signal — two identical Vanity runs gave pass 37 vs 39 / needs_review 4 vs 2 from agentic drift alone. The diff must classify deterministic vs agentic-advisory changes (child 3).
 - R5: `allie verify` does not clean/namespace `--out`; stale artifacts from a prior run (an obsolete `remediation/` stage the tool no longer emits) persisted and could appear to contradict the no-remediation invariant. Emit a per-run file manifest or clean/version the out-dir so the packet dir describes exactly one run.
 - R6 (minor): Manifests under-declare `known_nondeterminism` (`[]`) despite demonstrable agentic variance; fold into report-quality checks.
+
+## Groom findings (2026-07-08, mega-sweep)
+Board of record: Habitat (this epic = AL-003). Plan: `docs/plans/032-mega-groom-execution.html`.
+- R3 is half-fixed: AL-090 unified review-count *computation*, but `src/consumer.rs:547,726,732` still prints unlabeled, indistinguishable review numbers → **AL-123**.
+- R5 verified still unfixed and ungated (all write sites `create_dir_all`, never clean) → **AL-117**.
+- R4 root fix carded: split deterministic vs agentic-advisory counts on every summary surface → **AL-124** (also answers the Codex premise review's verdict-blending objection without abandoning committed verdicts).
+- HTML report omits the `replay_command`/`evidence_refs`/`artifact_refs` the JSON already carries (report.rs:248-282, 376-394) — reinforces AL-093; SARIF emits one synthetic rollup result total (consumer.rs:839-884) → **AL-121**; findings lack selectors — reinforces AL-092.
+- Child 4 scope note: grouping/calibration (presentation) is a different swimlane from *reducing* needs_review via probes — the probe floor lives in AL-066/AL-116 (model-off 11/55 → ~16/55), sequenced independently.

@@ -31,3 +31,10 @@ Create repo-local agent instructions and runbooks that let a cold agent run Alli
 ## Notes
 - There is currently a strong root `AGENTS.md`, but no repo-local Allie QA skill/runbook was found in the checkout.
 - This epic should reduce future operator supervision, not create a second workflow engine.
+
+## Groom findings (2026-07-08, mega-sweep)
+Board of record: Habitat (this epic = AL-006). Plan: `docs/plans/032-mega-groom-execution.html`.
+- AGENTS.md gate list has drifted from `scripts/verify.sh`: it omits `distribution:smoke` and `agentic:precision` — a cold agent following it ships a partial gate and calls it green. This is AL-102's exact scope; make it the first deliverable of child 5.
+- `docs/verification.md` spot-checked current (3/3 command claims verified) — it is the real onboarding surface; name it as the verification runbook from AGENTS.md instead of writing a new one.
+- Receipt template (child 2): seed from `docs/dogfood/olympus/025-olympus-dashboard-dogfood.md` rather than writing from scratch — it already demonstrates the Date/Ticket/Target/Commands/before-after-git-status convention all four existing receipts loosely share.
+- Product-side agent contract gaps found by the same lane were carded outside this epic: per-finding SARIF + report schema (AL-121), content-fingerprint finding IDs (AL-122). An MCP server stays premature until those contracts are schema-stable.
