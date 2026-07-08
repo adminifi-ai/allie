@@ -2,6 +2,24 @@ use crate::FlowManifest;
 use std::path::Path;
 
 #[test]
+fn enforce_rejects_empty_effective_allowlist() {
+    for provider_allowlist in [Vec::new(), vec![" ".to_string(), "\t\n".to_string()]] {
+        let mut manifest = FlowManifest::load(Path::new("examples/login-flow.yml")).unwrap();
+        manifest.model.enabled = true;
+        manifest.model.provider_allowlist = provider_allowlist;
+
+        let error = manifest.enforce_model_provider_allowlist().unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("model calls are enabled but provider_allowlist is empty"),
+            "enabled model with no effective provider_allowlist must fail closed: {error}"
+        );
+    }
+}
+
+#[test]
 fn rejects_provider_not_in_allowlist() {
     let mut manifest = FlowManifest::load(Path::new("examples/login-flow.yml")).unwrap();
     manifest.model.enabled = true;

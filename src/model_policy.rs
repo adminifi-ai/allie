@@ -4,6 +4,9 @@ use crate::{AllieError, FlowManifest, ModelPolicy, Result};
 
 impl FlowManifest {
     pub(crate) fn enforce_model_provider_allowlist(&self) -> Result<()> {
+        if let Some(failure) = self.model.provider_allowlist_incomplete_failure() {
+            return Err(AllieError::InvalidManifest(failure.message));
+        }
         if let Some(failure) = self.model.provider_allowlist_failure() {
             return Err(AllieError::InvalidManifest(failure.message));
         }
@@ -26,23 +29,29 @@ impl ModelPolicy {
         })
     }
 
+    pub(crate) fn provider_allowlist_incomplete_failure(&self) -> Option<RunFailure> {
+        if self.enabled && self.effective_provider_allowlist().is_empty() {
+            return Some(RunFailure::new(
+                "model-policy-incomplete",
+                "model-policy",
+                "model calls are enabled but provider_allowlist is empty".to_string(),
+            ));
+        }
+        None
+    }
+
     /// Allowlist entries are canonical provider preset IDs. A model route is
     /// allowed only when the resolved provider is listed and the resolved
     /// base_url matches that provider preset; provider-name allowlisting alone
     /// must not bless a hostile endpoint override.
     pub(crate) fn provider_allowlist_failure(&self) -> Option<RunFailure> {
-        if !self.enabled || self.provider_allowlist.is_empty() {
+        let allowlist = self.effective_provider_allowlist();
+        if !self.enabled || allowlist.is_empty() {
             return None;
         }
 
         let provider = self.resolved_provider();
         let base_url = self.resolved_base_url();
-        let allowlist = self
-            .provider_allowlist
-            .iter()
-            .map(|entry| entry.trim())
-            .filter(|entry| !entry.is_empty())
-            .collect::<Vec<_>>();
         let preset = match model_provider_preset(&provider) {
             Some(preset) => preset,
             None => {
@@ -80,6 +89,14 @@ impl ModelPolicy {
         }
 
         None
+    }
+
+    fn effective_provider_allowlist(&self) -> Vec<&str> {
+        self.provider_allowlist
+            .iter()
+            .map(|entry| entry.trim())
+            .filter(|entry| !entry.is_empty())
+            .collect()
     }
 }
 

@@ -60,6 +60,66 @@ fs.writeFileSync(process.argv[responseIndex], JSON.stringify({
     );
 }
 
+#[test]
+fn rejects_empty_allowlist_before_request_write_or_worker_spawn() {
+    let _guard = AGENTIC_WORKER_ENV_GUARD
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let temp = tempdir().unwrap();
+    let worker_path = temp.path().join("marker-agentic-worker.cjs");
+    let marker_path = temp.path().join("worker-spawned");
+    fs::write(
+        &worker_path,
+        r#"
+const fs = require('node:fs');
+fs.writeFileSync(process.env.ALLIE_AGENTIC_MARKER, 'spawned');
+const responseIndex = process.argv.indexOf('--response') + 1;
+fs.writeFileSync(process.argv[responseIndex], JSON.stringify({
+  schema: 'allie.agentic.response.v0',
+  status: 'skipped',
+  provider: 'openrouter',
+  model: 'test',
+  calls: 0,
+  assessments: [],
+  errors: []
+}, null, 2));
+"#,
+    )
+    .unwrap();
+    let packet_path = temp.path().join("evidence.json");
+    write_json_pretty(&packet_path, &minimal_agentic_packet()).unwrap();
+    let mut manifest =
+        FlowManifest::load(Path::new("examples/autonomous-workbench-agentic.yml")).unwrap();
+    manifest.model.enabled = true;
+    manifest.model.provider_allowlist = Vec::new();
+    manifest.model.provider = Some("openrouter".to_string());
+    manifest.model.base_url = Some("https://attacker.invalid/api/v1".to_string());
+
+    unsafe {
+        std::env::set_var("ALLIE_AGENTIC_WORKER", worker_path.as_os_str());
+        std::env::set_var("ALLIE_AGENTIC_MARKER", marker_path.as_os_str());
+    }
+    let error = run_agentic_review_with_timeout(&manifest, &packet_path, Duration::from_secs(5))
+        .unwrap_err();
+    unsafe {
+        std::env::remove_var("ALLIE_AGENTIC_MARKER");
+        std::env::remove_var("ALLIE_AGENTIC_WORKER");
+    }
+
+    assert!(
+        error.to_string().contains("provider_allowlist is empty"),
+        "empty provider_allowlist must be reported as model-policy-incomplete: {error}"
+    );
+    assert!(
+        !temp.path().join("agentic-request.json").exists(),
+        "policy failure must happen before the worker request is written"
+    );
+    assert!(
+        !marker_path.exists(),
+        "policy failure must happen before the agentic worker is spawned"
+    );
+}
+
 fn minimal_agentic_packet() -> serde_json::Value {
     serde_json::json!({
         "schema": "allie.evidence.v0",
