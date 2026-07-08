@@ -92,8 +92,10 @@ leaves:
 
 `npm run evidence:smoke` proves the Rust CLI, worker, packet writer, and report
 writer work together. The smoke freezes the run clock with `SOURCE_DATE_EPOCH`,
-sets an explicit fixture port for the local fixture server, runs the fixture
-twice, and byte-compares the resulting `evidence.json` and `report.html`. It
+runs the fixture once on an OS-assigned ephemeral port (so concurrent gate
+runs never collide on a fixed port), pins the second run to that same
+discovered port, and byte-compares the resulting `evidence.json` and
+`report.html`. It
 also asserts the packet schema, pass summary, non-empty Git provenance, stable
 fixture URL, captured state metadata, artifact hashes, distinct confidence
 classes, explicit `needs_review` and `not_applicable` verdicts, and the report's
