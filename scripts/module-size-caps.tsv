@@ -28,7 +28,7 @@
 # EvidencePacket.review field, and the offline-fabrication fallback are
 # gone, plus pipeline tests extracted to src/pipeline/tests.rs — lib.rs's
 # cap is re-lowered here to hold the result.
-src/lib.rs	4530
+src/lib.rs	4500
 src/compliance.rs	1280
 src/discovery.rs	990
 src/consumer.rs	960
@@ -39,7 +39,9 @@ src/worker_runtime.rs	670
 src/model.rs	600
 src/pipeline.rs	440
 src/pipeline/tests.rs	110
-src/worker.rs	510
+src/worker.rs	490
+src/worker/axe.rs	40
+src/worker/tests.rs	50
 src/standards.rs	450
 src/discovery/live.rs	420
 src/cli.rs	360

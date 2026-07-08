@@ -262,6 +262,21 @@ function summarizeAxeViolations(violations) {
   }));
 }
 
+function summarizeAxePasses(viewportResults) {
+  const entries = [];
+  for (const { result, viewport } of viewportResults) {
+    const byRule = new Map();
+    for (const pass of result?.passes ?? []) {
+      const current = byRule.get(pass.id) ?? { id: pass.id, tags: [], nodes: 0 };
+      current.nodes += pass.nodes?.length ?? 0;
+      current.tags = [...new Set([...current.tags, ...(pass.tags ?? [])])];
+      byRule.set(pass.id, current);
+    }
+    entries.push(...[...byRule.values()].map((entry) => ({ ...entry, viewport })));
+  }
+  return entries.sort((left, right) => left.id.localeCompare(right.id) || left.viewport.localeCompare(right.viewport));
+}
+
 async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMarker, determinism) {
   const page = await context.newPage();
   const pageVideo = page.video();
@@ -356,6 +371,7 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
   let axeJsonPath = null;
   let axeViolations = [];
   let desktopRawViolations = [];
+  let desktopAxeResult = null;
   if (state.axe) {
     const axeResult = await runAxeAudit(page);
     if (determinism?.timestamp) {
@@ -364,6 +380,7 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
     axeJsonPath = path.join(artifactsDir, `axe-${state.id}.json`);
     await fs.writeFile(axeJsonPath, `${JSON.stringify(axeResult, null, 2)}\n`);
     desktopRawViolations = axeResult.violations;
+    desktopAxeResult = axeResult;
   }
 
   const mobileAudit = await captureMobileWebAudit(page, state, artifactsDir, determinism);
@@ -427,6 +444,10 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
     trace_path: runRelativePath(tracePath),
     keyboard_focus_order: keyboardFocusOrder,
     axe_violations: axeViolations,
+    axe_passes: summarizeAxePasses([
+      { result: desktopAxeResult, viewport: 'desktop' },
+      { result: mobileAudit.axeResult, viewport: 'mobile' },
+    ]),
     console_errors: consoleErrors,
     network_errors: networkErrors,
     state_errors: stateErrors,
@@ -450,6 +471,7 @@ async function captureMobileWebAudit(page, state, artifactsDir, determinism) {
     // and dedupe against the desktop pass before summarizing. See
     // mergeViewportViolations.
     violations: [],
+    axeResult: null,
     error: null,
   };
   try {
@@ -467,6 +489,7 @@ async function captureMobileWebAudit(page, state, artifactsDir, determinism) {
       result.axeJsonPath = path.join(artifactsDir, `axe-mobile-${state.id}.json`);
       await fs.writeFile(result.axeJsonPath, `${JSON.stringify(axeResult, null, 2)}\n`);
       result.violations = axeResult.violations;
+      result.axeResult = axeResult;
     }
     result.checked = true;
   } catch (error) {

@@ -56,7 +56,8 @@
     "wcag258": {
       "obligation": "wcag22-aa:2.5.8-target-size-minimum",
       "title": "Target size (minimum)",
-      "axe_rule": "target-size"
+      "axe_rule": "target-size",
+      "pass_trustworthy": true
     },
     "wcag135": {
       "obligation": "wcag22-aa:1.3.5-identify-input-purpose",
@@ -542,7 +543,7 @@
       "guideline": "2.5",
       "guideline_handle": "Input Modalities",
       "method": "human_review",
-      "coverage_note": "axe-core target-size (tag wcag258, wired via axe_tag_map) deterministically flags an undersized/insufficiently-spaced touch target as a machine-proven fail, and docs/criteria-assessability-research.md bucket A rates the underlying bounding-box + spacing-exception math fully 'Deterministic'. The method still stays human_review because src/standards.rs is_mobile_web_criterion already routes a clean run for this criterion through the mobile-web-viewport-audit path (needs_review) regardless of method; promoting it to axe would misreport that a clean run is a machine-proven pass. Removing 2.5.8 from that override so a clean axe run resolves to pass is a reasonable follow-up but is out of scope for this change (touches src/standards.rs verdict dispatch, not the axe rule config this ticket targets).",
+      "coverage_note": "axe-core target-size (tag wcag258, wired via axe_tag_map) deterministically flags an undersized/insufficiently-spaced touch target as a machine-proven fail, and docs/criteria-assessability-research.md bucket A rates the underlying bounding-box + spacing-exception math fully 'Deterministic'. Its pass side is explicitly annotated pass_trustworthy, but Allie only reports a machine pass when axe's passes data shows target-size evaluated matching elements; an empty evaluation remains needs_review with mobile viewport evidence.",
       "source_url": "https://www.w3.org/TR/WCAG22/#target-size-minimum"
     },
     {
