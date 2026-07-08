@@ -19,6 +19,7 @@ mod compliance;
 mod consumer;
 mod discovery;
 mod model_credentials;
+mod out_dir;
 mod pipeline;
 mod release;
 mod report;
@@ -524,10 +525,7 @@ fn run_v0(options: RunOptions) -> Result<RunReceipt> {
     let context =
         RunContext::from_manifest_path(&options.manifest_path, options.project_root.as_deref())?;
     let started_at = context.now();
-    fs::create_dir_all(&options.out_dir).map_err(|source| AllieError::Io {
-        context: format!("create output directory {}", options.out_dir.display()),
-        source,
-    })?;
+    out_dir::prepare_out_dir(&options.out_dir, "run")?;
 
     let run_id = context.new_run_id();
     // Absolutize the worker handshake paths. The bundled Node worker resolves
@@ -561,13 +559,7 @@ fn run_v0(options: RunOptions) -> Result<RunReceipt> {
 }
 
 fn run_release(options: ReleaseOptions) -> Result<ReleaseReceipt> {
-    fs::create_dir_all(&options.out_dir).map_err(|source| AllieError::Io {
-        context: format!(
-            "create release output directory {}",
-            options.out_dir.display()
-        ),
-        source,
-    })?;
+    out_dir::prepare_out_dir(&options.out_dir, "release")?;
 
     let packet = release::read_release_packet(&options.packet_path)?;
 
@@ -582,6 +574,7 @@ fn run_release(options: ReleaseOptions) -> Result<ReleaseReceipt> {
         &release::render_release_report(&projection.summary),
     )?;
 
+    out_dir::finalize_out_dir_manifest(&options.out_dir, "release")?;
     Ok(ReleaseReceipt {
         status: projection.summary.status.clone(),
         exit_class: projection.exit_class,
@@ -600,13 +593,7 @@ fn status_for_exit_class(exit_class: ExitClass) -> &'static str {
 }
 
 fn run_compliance_report(options: ReportOptions) -> Result<ComplianceReportReceipt> {
-    fs::create_dir_all(&options.out_dir).map_err(|source| AllieError::Io {
-        context: format!(
-            "create compliance report output directory {}",
-            options.out_dir.display()
-        ),
-        source,
-    })?;
+    out_dir::prepare_out_dir(&options.out_dir, "report")?;
     let map: ProductMapPacket = read_json_file(&options.map_path)?;
     if map.schema != PRODUCT_MAP_SCHEMA {
         return Err(AllieError::InvalidManifest(format!(
@@ -635,6 +622,7 @@ fn run_compliance_report(options: ReportOptions) -> Result<ComplianceReportRecei
     )?;
     write_string(&summary_path, &report::render_compliance_summary(&report))?;
 
+    out_dir::finalize_out_dir_manifest(&options.out_dir, "report")?;
     Ok(ComplianceReportReceipt {
         report_json_path,
         report_html_path,
@@ -1215,6 +1203,7 @@ fn write_packet_and_report(
     let evidence_path = out_dir.join("evidence.json");
     write_json_pretty(&evidence_path, &packet)?;
 
+    out_dir::finalize_out_dir_manifest(out_dir, "run")?;
     Ok(RunReceipt {
         run_id,
         exit_class,
@@ -1887,7 +1876,7 @@ pub(crate) fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<
     write_string(path, &(json + "\n"))
 }
 
-fn write_string_atomic(path: &Path, contents: &str) -> Result<()> {
+pub(crate) fn write_string_atomic(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| AllieError::Io {
             context: format!("create directory {}", parent.display()),

@@ -28,7 +28,18 @@
 # EvidencePacket.review field, and the offline-fabrication fallback are
 # gone, plus pipeline tests extracted to src/pipeline/tests.rs — lib.rs's
 # cap is re-lowered here to hold the result.
-src/lib.rs	4500
+#
+# AL-117 replaced the four raw fs::create_dir_all out-dir call sites (run,
+# release, report in lib.rs; verify in consumer.rs) with one-line calls into
+# the new src/out_dir.rs manifest-cleanup module, net-shrinking both
+# lib.rs and consumer.rs; caps re-lowered here to hold the smaller size.
+# Adversarial review of AL-117 then hardened out_dir.rs (two-phase
+# in_progress/complete manifest for crash recovery, manifest validation
+# against path escapes and cross-command reuse, symlink-safe cleanup walk)
+# and grew its regression suite from 6 to 12 tests; both out_dir caps were
+# set for that reviewed, deliberate growth. lib.rs cap re-measured after
+# rebasing on the AL-116 extraction (4480 actual post-merge).
+src/lib.rs	4490
 src/compliance.rs	1280
 src/discovery.rs	990
 src/consumer.rs	960
@@ -47,8 +58,10 @@ src/discovery/live.rs	420
 src/cli.rs	360
 src/release.rs	330
 src/consumer/tests.rs	320
+src/out_dir/tests.rs	450
 src/discovery/steps.rs	250
 src/worker_runtime/tests.rs	250
+src/out_dir.rs	250
 src/model_credentials.rs	220
 src/runtime.rs	200
 src/test_support.rs	170
