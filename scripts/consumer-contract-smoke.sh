@@ -9,20 +9,19 @@ set -eu
 unset OPENROUTER_API_KEY OPENAI_API_KEY
 
 OUT=.allie/consumer-contract-smoke
-MANIFEST="$OUT/manifest.yml"
+# The manifest lives beside --out, not inside it, matching the documented
+# consumer layout (docs/ci/github-allie-verify.yml: .allie/manifest.yml next
+# to --out .allie/verify/latest as two separate paths). Allie's own out-dir
+# hygiene (AL-117) refuses a --out directory that already has files it did
+# not write and cannot account for via its run manifest, so a flow manifest
+# colocated inside --out would trip that refusal on every rerun.
+MANIFEST_DIR=.allie/consumer-contract-smoke-config
+MANIFEST="$MANIFEST_DIR/manifest.yml"
 FIXTURE_DIR="../../fixtures/login"
 VERIFY_CMD="allie verify --manifest .allie/manifest.yml --out .allie/verify/latest"
 
-mkdir -p "$OUT"
-rm -rf \
-  "$MANIFEST" \
-  "$OUT/discovery" \
-  "$OUT/flow" \
-  "$OUT/map" \
-  "$OUT/run" \
-  "$OUT/report" \
-  "$OUT/release" \
-  "$OUT/reporters"
+mkdir -p "$MANIFEST_DIR"
+rm -rf "$MANIFEST" "$OUT"
 
 cargo run --locked -- init \
   --manifest "$MANIFEST" \

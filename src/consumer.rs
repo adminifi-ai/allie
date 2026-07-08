@@ -274,19 +274,14 @@ fn existing_model_policy(manifest_path: &Path) -> ExistingModel {
 }
 
 pub(super) fn run_verify(options: VerifyOptions) -> Result<VerifyReceipt> {
-    fs::create_dir_all(&options.out_dir).map_err(|source| AllieError::Io {
-        context: format!(
-            "create verify output directory {}",
-            options.out_dir.display()
-        ),
-        source,
-    })?;
+    crate::out_dir::prepare_out_dir(&options.out_dir, "verify")?;
 
     let pipeline = run_verify_pipeline(&options)?;
     let reporters = write_verify_reporters(&options, &pipeline)?;
     let exit_class = verify_exit_class(pipeline.run.exit_class, pipeline.release.exit_class);
     let status = verify_status(&pipeline.release.status, exit_class);
 
+    crate::out_dir::finalize_out_dir_manifest(&options.out_dir, "verify")?;
     Ok(VerifyReceipt {
         status,
         exit_class,

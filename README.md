@@ -78,6 +78,15 @@ and release-projection primitives, then writes stable reporter files:
 .allie/verify/latest/reporters/allie.sarif
 ```
 
+Every `--out` directory (`run`, `report`, `release`, `verify`) describes
+exactly one run: each writes a small `allie-run-manifest.json` listing the
+files it produced, and a rerun into the same directory deletes exactly those
+files before writing fresh output, so stale artifacts from an older run (or
+a retired code path) never linger next to current evidence. A directory that
+already has content and no `allie-run-manifest.json` is refused outright —
+point `--out` at a fresh or empty directory rather than one Allie cannot
+account for.
+
 GitHub and Azure examples live in [docs/ci](docs/ci). They call the same
 `allie verify` command and upload the full `.allie/verify/latest` artifact root
 so HTML drilldowns can reach the map, evidence, WCAG report, release summary,
