@@ -33,3 +33,12 @@ Make Allie's quality floor more semantic, faster to diagnose, performance-aware,
 - `scripts/verify.sh` is broad and valuable; the next quality step is semantic depth, not fewer checks.
 - `scripts/module-size-gate.sh` currently says "all files under src/" but only loops over `src/*.rs`.
 - Do not lower gates or replace deterministic checks with model-only assurances.
+
+## Groom findings (2026-07-08, mega-sweep)
+Board of record: Habitat (this epic = AL-004). Plan: `docs/plans/032-mega-groom-execution.html`.
+- Child 2 is partially done: `evidence-smoke.sh` (JSON assertions + frozen double-run byte `cmp`) and `coverage-matrix-smoke.sh` are ahead of spec; consumer-contract, distribution, release, autonomous smokes remain mostly `test -f`. Scope remaining work to those four.
+- Children 1 (timing) and 6 (fast/full split) have zero implementation; CI runs the full local gate verbatim (`ci.yml:19`).
+- Byte-stability is proven for one fixture only — no general determinism gate across report/release/map artifacts (AL-076/AL-088 cover the extension).
+- `agentic:precision` is a 2-scenario synthetic smoke proving gate arithmetic, not model calibration — AL-106 (labeled corpus, real precision/recall) is the credibility spine of the product's core claim; resequence it early.
+- New gate holes carded: worker/CLI version skew (**AL-128**); schema-validator gate on real outputs (AL-104); out-dir hygiene regression (**AL-117**); child 5's known-bad/known-good fixture pair is cheap and unstarted — pull it forward.
+- Note: `module-size-gate.sh` recursion was fixed by AL-033 (merged); the second Notes bullet above is stale.

@@ -33,3 +33,11 @@ Complete the behavior-preserving extraction of Allie's core seams so `src/lib.rs
 - The old epic 019 reduced `src/lib.rs` dramatically, but it is still 4,700+ lines and remains the largest accumulation point.
 - The roadmap already names typed verdicts and more decomposition as code-health work.
 - This is not a rewrite and not a CLI-framework migration. Move cohesive code to existing homes first.
+
+## Groom findings (2026-07-08, mega-sweep)
+Board of record: Habitat (this epic = AL-005). Plan: `docs/plans/032-mega-groom-execution.html`.
+- All seven children still open. lib.rs is 4,523 lines with **7 lines of ratchet headroom** (`scripts/module-size-caps.tsv:31`) — sequence the pure-move children first to buy room: child 2 (`parse_*_options` → the already-existing but pass-through `src/cli.rs`) and child 5 (`render_report` at lib.rs:1700 → the already-existing `src/report.rs`). No new module design needed for either.
+- Child 4 is under-scoped: `"pass"/"fail"/"needs_review"` literals appear 36× in lib.rs alone, and `compliance.rs:423` + `release.rs:156` independently re-derive stringly status/policy — the typed enum must land across lib.rs, compliance.rs, and release.rs or it re-stringifies at the boundary.
+- The VISION's two strategic seams are unequal: the Playwright/axe worker boundary is real and contained (worker.rs/worker_runtime.rs DTO-only); the "typed model gateway" does not exist in Rust — no HTTP client in src/, no prompt version, no audit event, ZDR is a reminder string (discovery.rs:785). Enforcement work carded as AL-059/AL-060/**AL-125**; if any leg is deliberately deferred, amend VISION wording instead of overclaiming.
+- `discovery/live.rs` (414 lines, near its own cap) is a hand-rolled HTTP client at the wrong layer — deletion proposal tied to AL-114 recall parity (see epic 026 addendum).
+- Minor: `use crate::model::*` glob imports in lib.rs:39 and discovery.rs:1 obscure extraction diffs; convert to explicit imports during the moves.
