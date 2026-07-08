@@ -14,17 +14,28 @@ cleanup() {
 trap cleanup EXIT
 
 run_fixture() {
-  rm -rf "$RUN_DIR"
   ALLIE_FIXTURE_PORT="$FREEZE_PORT" \
   SOURCE_DATE_EPOCH="$FREEZE_EPOCH" \
     cargo run --locked -- run --manifest examples/login-flow.yml --out "$RUN_DIR"
 }
 
+rm -rf "$RUN_DIR"
 run_fixture
 cp "$RUN_DIR/evidence.json" "$FIRST/evidence.json"
 cp "$RUN_DIR/report.html" "$FIRST/report.html"
 
+# AL-117 out-dir hygiene, run path, end to end: plant a stale artifact from a
+# retired stage, then rerun into the SAME dirty --out with no rm -rf. Allie's
+# own manifest-based cleanup must remove it, and the rerun must still be
+# byte-stable against the fresh-directory first run.
+mkdir -p "$RUN_DIR/remediation"
+printf '%s\n' '{"stale": true}' > "$RUN_DIR/remediation/legacy-finding.json"
+
 run_fixture
+if [ -e "$RUN_DIR/remediation" ]; then
+  echo "stale remediation sentinel survived a rerun into a dirty --out" >&2
+  exit 1
+fi
 cmp "$FIRST/evidence.json" "$RUN_DIR/evidence.json"
 cmp "$FIRST/report.html" "$RUN_DIR/report.html"
 

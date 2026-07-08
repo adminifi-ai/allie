@@ -1876,7 +1876,7 @@ pub(crate) fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<
     write_string(path, &(json + "\n"))
 }
 
-fn write_string_atomic(path: &Path, contents: &str) -> Result<()> {
+pub(crate) fn write_string_atomic(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| AllieError::Io {
             context: format!("create directory {}", parent.display()),

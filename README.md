@@ -79,13 +79,18 @@ and release-projection primitives, then writes stable reporter files:
 ```
 
 Every `--out` directory (`run`, `report`, `release`, `verify`) describes
-exactly one run: each writes a small `allie-run-manifest.json` listing the
-files it produced, and a rerun into the same directory deletes exactly those
-files before writing fresh output, so stale artifacts from an older run (or
-a retired code path) never linger next to current evidence. A directory that
-already has content and no `allie-run-manifest.json` is refused outright —
-point `--out` at a fresh or empty directory rather than one Allie cannot
-account for.
+exactly one run. A small `allie-run-manifest.json` marks the directory as
+owned by that command: it is written with `phase: "in_progress"` when the
+run starts and rewritten with `phase: "complete"` plus the full file list
+when the run finishes, so a crashed run stays visible and never wedges the
+directory. A rerun into a manifested directory removes everything in it
+before writing fresh output — stale artifacts from older runs or retired
+code paths, partial output from a crashed run, and any files you dropped in
+by hand are all absorbed and cleaned. Treat managed out-dirs as Allie's,
+not scratch space. A directory that already has content and no
+`allie-run-manifest.json`, or whose manifest belongs to a different
+command, is refused outright with nothing deleted — point `--out` at a
+fresh or empty directory rather than one Allie cannot account for.
 
 GitHub and Azure examples live in [docs/ci](docs/ci). They call the same
 `allie verify` command and upload the full `.allie/verify/latest` artifact root
