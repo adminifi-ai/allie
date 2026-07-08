@@ -46,7 +46,7 @@ use crate::standards::{
 };
 #[cfg(test)]
 use crate::worker::{AxeViolation, WorkerStateResult};
-use crate::worker::{RunFailure, WorkerResponse, WorkerRunStatus};
+use crate::worker::{RunFailure, WorkerResponse, WorkerRunStatus, aggregate_features};
 
 const PRODUCT_LINE: &str = "Allie: accessibility evidence for every release.";
 const NEXT_STEP: &str = "Next implementation target: allie run --manifest <flow.yml>";
@@ -57,6 +57,7 @@ const JOB_SCHEMA: &str = "allie.job.v0";
 const DEFAULT_WORKER_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_WORKBENCH_MAX_RUNTIME_MS: u64 = 24 * 60 * 60 * 1000;
 const DEFAULT_WORKBENCH_IDLE_TIMEOUT_MS: u64 = 10 * 60 * 1000;
+
 #[derive(Debug)]
 pub enum AllieError {
     Io {
@@ -76,6 +77,7 @@ pub enum AllieError {
     Runtime(String),
     Worker(String),
 }
+
 impl Display for AllieError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -89,6 +91,7 @@ impl Display for AllieError {
         }
     }
 }
+
 impl Error for AllieError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
@@ -101,7 +104,9 @@ impl Error for AllieError {
         }
     }
 }
+
 pub(crate) type Result<T> = std::result::Result<T, AllieError>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitClass {
     Success,
@@ -1441,49 +1446,6 @@ fn findings_from_response(
     }
 
     findings
-}
-
-/// Combine the per-state feature inventories into one page-level view: counts
-/// sum, `lang` holds only if every inspected state declared it, and a reflow
-/// overflow on any state counts as an overflow.
-fn aggregate_features<'a>(
-    states: impl IntoIterator<Item = Option<&'a PageFeatures>>,
-) -> PageFeatures {
-    let mut agg = PageFeatures::default();
-    let mut saw_state = false;
-    let mut lang_all = true;
-    for state in states {
-        let Some(features) = state else { continue };
-        saw_state = true;
-        agg.audio += features.audio;
-        agg.video += features.video;
-        agg.forms += features.forms;
-        agg.inputs += features.inputs;
-        agg.draggable += features.draggable;
-        agg.iframes += features.iframes;
-        agg.images += features.images;
-        agg.links += features.links;
-        agg.headings += features.headings;
-        if !features.lang {
-            lang_all = false;
-        }
-        if agg.lang_value.is_empty() && !features.lang_value.is_empty() {
-            agg.lang_value = features.lang_value.clone();
-        }
-        if features.reflow_overflow {
-            agg.reflow_overflow = true;
-        }
-        if features.reflow_checked {
-            agg.reflow_checked = true;
-        }
-        if features.mobile_viewport_checked {
-            agg.mobile_viewport_checked = true;
-            agg.mobile_viewport_width = features.mobile_viewport_width;
-            agg.mobile_viewport_height = features.mobile_viewport_height;
-        }
-    }
-    agg.lang = saw_state && lang_all;
-    agg
 }
 
 fn verdicts_from_findings(

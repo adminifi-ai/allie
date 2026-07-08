@@ -262,17 +262,19 @@ function summarizeAxeViolations(violations) {
   }));
 }
 
-function summarizeAxePasses(results) {
-  const byRule = new Map();
-  for (const result of results) {
+function summarizeAxePasses(viewportResults) {
+  const entries = [];
+  for (const { result, viewport } of viewportResults) {
+    const byRule = new Map();
     for (const pass of result?.passes ?? []) {
       const current = byRule.get(pass.id) ?? { id: pass.id, tags: [], nodes: 0 };
       current.nodes += pass.nodes?.length ?? 0;
       current.tags = [...new Set([...current.tags, ...(pass.tags ?? [])])];
       byRule.set(pass.id, current);
     }
+    entries.push(...[...byRule.values()].map((entry) => ({ ...entry, viewport })));
   }
-  return [...byRule.values()].sort((left, right) => left.id.localeCompare(right.id));
+  return entries.sort((left, right) => left.id.localeCompare(right.id) || left.viewport.localeCompare(right.viewport));
 }
 
 async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMarker, determinism) {
@@ -442,7 +444,10 @@ async function inspectState(context, baseUrl, state, artifactsDir, zoom, authMar
     trace_path: runRelativePath(tracePath),
     keyboard_focus_order: keyboardFocusOrder,
     axe_violations: axeViolations,
-    axe_passes: summarizeAxePasses([desktopAxeResult, mobileAudit.axeResult]),
+    axe_passes: summarizeAxePasses([
+      { result: desktopAxeResult, viewport: 'desktop' },
+      { result: mobileAudit.axeResult, viewport: 'mobile' },
+    ]),
     console_errors: consoleErrors,
     network_errors: networkErrors,
     state_errors: stateErrors,

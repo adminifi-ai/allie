@@ -12,6 +12,12 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
+mod axe;
+#[cfg(test)]
+mod tests;
+
+pub(crate) use axe::{AxeEvaluation, AxeViewport, AxeViolation};
+
 pub(crate) const WORKER_RESPONSE_SCHEMA: &str = "allie.worker.response.v0";
 const WORKER_REQUEST_SCHEMA: &str = "allie.worker.request.v0";
 const WORKER_CREATION_TOOL: &str = "playwright-axe-worker";
@@ -334,19 +340,48 @@ pub(crate) struct WorkerStateResult {
     pub(crate) features: Option<PageFeatures>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-pub(crate) struct AxeViolation {
-    pub(crate) id: String,
-    pub(crate) impact: Option<String>,
-    pub(crate) help: Option<String>,
-    pub(crate) description: Option<String>,
-    #[serde(default)]
-    pub(crate) tags: Vec<String>,
-    #[serde(default)]
-    pub(crate) nodes: usize,
+/// Combine the per-state feature inventories into one page-level view: counts
+/// sum, `lang` holds only if every inspected state declared it, and a reflow
+/// overflow on any state counts as an overflow.
+pub(crate) fn aggregate_features<'a>(
+    states: impl IntoIterator<Item = Option<&'a PageFeatures>>,
+) -> PageFeatures {
+    let mut agg = PageFeatures::default();
+    let mut saw_state = false;
+    let mut lang_all = true;
+    for state in states {
+        let Some(features) = state else { continue };
+        saw_state = true;
+        agg.audio += features.audio;
+        agg.video += features.video;
+        agg.forms += features.forms;
+        agg.inputs += features.inputs;
+        agg.draggable += features.draggable;
+        agg.iframes += features.iframes;
+        agg.images += features.images;
+        agg.links += features.links;
+        agg.headings += features.headings;
+        if !features.lang {
+            lang_all = false;
+        }
+        if agg.lang_value.is_empty() && !features.lang_value.is_empty() {
+            agg.lang_value = features.lang_value.clone();
+        }
+        if features.reflow_overflow {
+            agg.reflow_overflow = true;
+        }
+        if features.reflow_checked {
+            agg.reflow_checked = true;
+        }
+        if features.mobile_viewport_checked {
+            agg.mobile_viewport_checked = true;
+            agg.mobile_viewport_width = features.mobile_viewport_width;
+            agg.mobile_viewport_height = features.mobile_viewport_height;
+        }
+    }
+    agg.lang = saw_state && lang_all;
+    agg
 }
-
-pub(crate) type AxeEvaluation = AxeViolation;
 
 #[derive(Clone, Debug)]
 pub(crate) struct RunFailure {
@@ -452,55 +487,4 @@ fn invoke_worker(
         "worker-adapter",
         format!("worker exited with {}; stderr: {}", status, stderr.trim()),
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::FlowManifest;
-    use std::sync::Mutex;
-    use tempfile::tempdir;
-
-    static AUTH_ENV_GUARD: Mutex<()> = Mutex::new(());
-
-    #[test]
-    fn worker_request_carries_auth_env_names_not_secret_values() {
-        let _guard = AUTH_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
-        let sentinel = "sentinel-secret-do-not-serialize-7f3c";
-        unsafe {
-            std::env::set_var("ALLIE_AUTH_FIXTURE_PASSWORD", sentinel);
-            std::env::set_var("ALLIE_AUTH_FIXTURE_USER", "qa@example.test");
-        }
-
-        let manifest = FlowManifest::load(Path::new("examples/auth-fixture-flow.yml")).unwrap();
-        assert!(
-            manifest.preflight_failures().is_empty(),
-            "preflight should pass with both auth env vars set"
-        );
-
-        let temp = tempdir().unwrap();
-        let request = WorkerRequest::from_manifest(
-            "run-auth-secret",
-            &manifest,
-            Path::new("examples/auth-fixture-flow.yml"),
-            &temp.path().join("artifacts"),
-            None,
-        )
-        .unwrap();
-        let json = serde_json::to_string_pretty(&request).unwrap();
-
-        unsafe {
-            std::env::remove_var("ALLIE_AUTH_FIXTURE_PASSWORD");
-            std::env::remove_var("ALLIE_AUTH_FIXTURE_USER");
-        }
-
-        assert!(
-            json.contains("ALLIE_AUTH_FIXTURE_PASSWORD"),
-            "request must carry the env NAME so the worker can read it"
-        );
-        assert!(
-            !json.contains(sentinel),
-            "request must NOT carry the secret VALUE (secrets stay off disk)"
-        );
-    }
 }

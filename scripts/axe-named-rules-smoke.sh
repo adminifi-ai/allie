@@ -12,6 +12,7 @@ RUN_DIR=.allie/runs/axe-named-rules-smoke
 NEGATING_LABEL_RUN_DIR=.allie/runs/axe-negating-label-in-name-smoke
 TARGET_SIZE_PASS_RUN_DIR=.allie/runs/axe-target-size-pass-smoke
 TARGET_SIZE_EMPTY_RUN_DIR=.allie/runs/axe-target-size-empty-smoke
+TARGET_SIZE_DESKTOP_ONLY_RUN_DIR=.allie/runs/axe-target-size-desktop-only-smoke
 
 rm -rf "$RUN_DIR"
 
@@ -213,4 +214,47 @@ assert(
 console.log('axe target-size empty guard passed: no matching elements stayed needs_review with mobile evidence');
 NODE
 
-echo "axe-named-rules smoke passed: $RUN_DIR/evidence.json, $NEGATING_LABEL_RUN_DIR/evidence.json, $TARGET_SIZE_PASS_RUN_DIR/evidence.json, and $TARGET_SIZE_EMPTY_RUN_DIR/evidence.json"
+rm -rf "$TARGET_SIZE_DESKTOP_ONLY_RUN_DIR"
+cargo run --locked -- run --manifest examples/axe-target-size-desktop-only-flow.yml --out "$TARGET_SIZE_DESKTOP_ONLY_RUN_DIR"
+
+node - "$TARGET_SIZE_DESKTOP_ONLY_RUN_DIR/evidence.json" "$TARGET_SIZE_DESKTOP_ONLY_RUN_DIR/worker-response.json" "$TARGET_SIZE_DESKTOP_ONLY_RUN_DIR/artifacts/axe-mobile-target-size-desktop-only.json" <<'NODE'
+const fs = require('fs');
+const packet = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const response = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+const mobileAxe = JSON.parse(fs.readFileSync(process.argv[4], 'utf8'));
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+const targetSize = packet.verdicts.find((item) => item.obligation === 'wcag22-aa:2.5.8-target-size-minimum');
+assert(targetSize, 'expected a verdict for wcag22-aa:2.5.8-target-size-minimum');
+assert(
+  targetSize.status === 'needs_review',
+  `desktop-only target-size evidence must not machine-pass mobile-web 2.5.8, got ${targetSize.status}`,
+);
+assert(
+  targetSize.source === 'allie-mobile-web-viewport-audit',
+  `desktop-only target-size evidence must keep mobile evidence attached, got source ${targetSize.source}`,
+);
+
+const state = response.states?.find((item) => item.id === 'target-size-desktop-only');
+assert(state, 'expected worker_response state for target-size-desktop-only');
+assert(
+  state.axe_passes?.some((item) => item.id === 'target-size' && item.viewport === 'desktop' && item.nodes > 0),
+  'desktop axe pass evidence must be retained with desktop viewport provenance',
+);
+assert(
+  !state.axe_passes?.some((item) => item.id === 'target-size' && item.viewport === 'mobile' && item.nodes > 0),
+  'mobile axe pass evidence must not report matching target-size nodes for a hidden mobile control',
+);
+const mobileTargetSizePass = mobileAxe.passes?.find((item) => item.id === 'target-size');
+assert(
+  !mobileTargetSizePass || (mobileTargetSizePass.nodes?.length ?? 0) === 0,
+  'mobile raw axe result must evaluate zero matching target-size nodes',
+);
+
+console.log('axe target-size desktop-only guard passed: desktop-only evidence stayed needs_review');
+NODE
+
+echo "axe-named-rules smoke passed: $RUN_DIR/evidence.json, $NEGATING_LABEL_RUN_DIR/evidence.json, $TARGET_SIZE_PASS_RUN_DIR/evidence.json, $TARGET_SIZE_EMPTY_RUN_DIR/evidence.json, and $TARGET_SIZE_DESKTOP_ONLY_RUN_DIR/evidence.json"

@@ -112,7 +112,7 @@ pub(crate) fn profile_obligation_list(policy_profile: &str, key: &str) -> Vec<St
         .unwrap_or_default()
 }
 
-fn wcag22_profile() -> &'static serde_json::Value {
+pub(crate) fn wcag22_profile() -> &'static serde_json::Value {
     static PROFILE: OnceLock<serde_json::Value> = OnceLock::new();
     PROFILE.get_or_init(|| {
         serde_json::from_str(WCAG22_AA_PROFILE_JSON)
@@ -379,7 +379,7 @@ pub(crate) fn criterion_feature_verdict(
     }
 }
 
-fn is_mobile_web_criterion(obligation: &str) -> bool {
+pub(crate) fn is_mobile_web_criterion(obligation: &str) -> bool {
     matches!(
         obligation,
         "wcag22-aa:1.3.4-orientation"
