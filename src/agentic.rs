@@ -8,10 +8,15 @@ use std::fmt::{self, Display};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(test)]
+use std::sync::Mutex;
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
 const AGENTIC_WORKER_TIMEOUT: Duration = Duration::from_secs(300);
+
+#[cfg(test)]
+static AGENTIC_WORKER_ENV_GUARD: Mutex<()> = Mutex::new(());
 
 #[derive(Debug)]
 pub(crate) struct AgenticReviewSummary {
@@ -113,6 +118,7 @@ fn run_agentic_review_with_timeout(
             status: AgenticReviewOutcome::Skipped,
         });
     }
+    manifest.enforce_model_provider_allowlist()?;
 
     let criteria = obligations
         .iter()
@@ -165,10 +171,10 @@ fn run_agentic_review_with_timeout(
             "locale": manifest.browser.locale,
         },
         "model": {
-            "provider": agentic_model_setting(&manifest.model.provider, "openrouter"),
+            "provider": manifest.model.resolved_provider(),
             "model": agentic_model_setting(&manifest.model.model, "google/gemini-3.5-flash"),
             "api_key_env": agentic_model_setting(&manifest.model.api_key_env, "OPENROUTER_API_KEY"),
-            "base_url": agentic_model_setting(&manifest.model.base_url, "https://openrouter.ai/api/v1"),
+            "base_url": manifest.model.resolved_base_url(),
             "max_calls": manifest.model.max_model_calls.unwrap_or(4),
             "reasoning_effort": manifest.model.reasoning_effort.clone(),
         },
@@ -411,10 +417,7 @@ fn agentic_artifact_type(kind: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tempfile::tempdir;
-
-    static AGENTIC_WORKER_ENV_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
     fn agentic_promoted_status_only_promotes_fail_with_precision_gate() {
@@ -661,3 +664,6 @@ mod tests {
         })
     }
 }
+
+#[cfg(test)]
+mod allowlist_tests;
