@@ -39,15 +39,21 @@
 # and grew its regression suite from 6 to 12 tests; both out_dir caps were
 # set for that reviewed, deliberate growth. lib.rs cap re-measured after
 # rebasing on the AL-116 extraction (4480 actual post-merge).
+#
+# AL-123 extracted verify Markdown/HTML rendering + labeled review-grain
+# presentation into src/consumer/verify_report.rs so consumer.rs stays under
+# its ratchet while the three review grains get a durable presentation home.
+# consumer.rs and consumer/tests.rs caps re-lowered to the post-extract sizes.
 src/lib.rs	4490
 src/compliance.rs	1280
 src/discovery.rs	990
-src/consumer.rs	960
+src/consumer.rs	750
 src/workbench.rs	810
 src/report.rs	740
 src/agentic.rs	670
 src/worker_runtime.rs	670
 src/model.rs	600
+src/consumer/verify_report.rs	530
 src/pipeline.rs	440
 src/pipeline/tests.rs	110
 src/worker.rs	490

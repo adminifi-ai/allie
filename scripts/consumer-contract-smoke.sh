@@ -102,6 +102,54 @@ for (const [, href] of html.matchAll(/href="([^"]+)"/g)) {
   }
 }
 
+// AL-123: review grain labels — a reader of allie-report.md/.html must tell
+// why two "review" numbers differ without opening source. Each grain carries
+// a one-line label at the point of print; all three appear once in a single
+// reconciled "what still needs review and why" block.
+const markdown = fs.readFileSync('.allie/consumer-contract-smoke/reporters/allie-report.md', 'utf8');
+const review = summary.why && summary.why.review;
+if (!review) {
+  throw new Error('allie-report.json must surface why.review with the three grains');
+}
+const grains = [
+  ['verdict_review_needed_obligations', 'verdict', 'Verdict-grain'],
+  ['criteria_needs_review', 'criterion', 'Criterion-grain'],
+  ['profile_human_review_scope', 'profile', 'Profile-scope'],
+];
+for (const [key, grain, namePrefix] of grains) {
+  const entry = review[key];
+  if (!entry || typeof entry.count !== 'number') {
+    throw new Error(`why.review.${key} must carry a numeric count`);
+  }
+  if (entry.grain !== grain) {
+    throw new Error(`why.review.${key}.grain expected ${grain}, got ${entry.grain}`);
+  }
+  if (typeof entry.label !== 'string' || !entry.label.includes(namePrefix.split('-')[0])) {
+    throw new Error(`why.review.${key}.label must be a one-line ${namePrefix} description, got ${entry.label}`);
+  }
+  if (!markdown.includes(entry.label)) {
+    throw new Error(`allie-report.md must print the ${key} grain label at the point of print`);
+  }
+  if (!html.includes(entry.label)) {
+    throw new Error(`allie-report.html must print the ${key} grain label at the point of print`);
+  }
+}
+if (!markdown.includes('Review scope — what still needs review, and why')) {
+  throw new Error('allie-report.md must carry a single reconciled review-scope block');
+}
+if (!html.includes('Review scope — what still needs review, and why')) {
+  throw new Error('allie-report.html must carry a single reconciled review-scope block');
+}
+if (!html.includes('Review needed (verdict-grain)')) {
+  throw new Error('allie-report.html blocking tile must label verdict-grain, not bare "Review needed"');
+}
+if (!html.includes('Needs review (criterion-grain)')) {
+  throw new Error('allie-report.html WCAG tile must label criterion-grain, not bare "Needs review"');
+}
+if (/\bReview needed\b(?! \(verdict-grain\))/.test(html.replace(/Review needed \(verdict-grain\)/g, ''))) {
+  throw new Error('allie-report.html must not print a bare "Review needed" tile without a grain label');
+}
+
 const ciFiles = [
   'docs/ci/github-allie-verify.yml',
   'docs/ci/azure-pipelines-allie-verify.yml',
