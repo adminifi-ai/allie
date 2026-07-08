@@ -25,10 +25,6 @@ const AXE_RULES_REQUIRING_EXPLICIT_ENABLE = [
   'css-orientation-lock',
   'label-content-name-mismatch',
 ];
-// The macOS agent sandbox rejects Chromium's multiprocess Mach rendezvous; the
-// worker uses one browser context per run, so single-process keeps the local
-// proof loop runnable without changing the evidence contract.
-const CHROMIUM_LAUNCH_OPTIONS = { headless: true, args: ['--single-process'] };
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
 
@@ -85,7 +81,7 @@ async function runWorker(request) {
     const target = await resolveTarget(request.target, determinism);
     fixtureServer = target.server;
 
-    browser = await chromium.launch(CHROMIUM_LAUNCH_OPTIONS);
+    browser = await chromium.launch({ headless: true });
     const wantsVideo = request.states.some((state) => state.video);
     const contextOptions = {
       viewport: request.browser.viewport,

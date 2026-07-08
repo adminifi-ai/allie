@@ -21,10 +21,6 @@ const RESPONSE_SCHEMA = 'allie.agentic.response.v0';
 const MAX_REVIEW_ACTIONS = 3;
 const MAX_MODEL_RETRIES = 1;
 const ALLOWED_REVIEW_KEYS = new Set(['Tab']);
-// The macOS agent sandbox rejects Chromium's multiprocess Mach rendezvous.
-// Agentic review opens isolated browsers for each capture segment because
-// reusing one single-process browser across many contexts is unstable.
-const CHROMIUM_LAUNCH_OPTIONS = { headless: true, args: ['--single-process'] };
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
 
@@ -46,17 +42,19 @@ async function run(request) {
   const artifactsDir = path.resolve(repoRoot, request.artifacts_dir);
   await fs.mkdir(artifactsDir, { recursive: true });
 
+  let browser = null;
   let fixtureServer = null;
   const errors = [];
   try {
     const target = await resolveTarget(request.target);
     fixtureServer = target.server;
+    browser = await chromium.launch({ headless: true });
 
     const contextOptions = browserContextOptions(request.browser);
     const surfaces = reviewSurfaces(request, target.baseUrl);
     const surfaceEvidence = [];
     for (const surface of surfaces) {
-      surfaceEvidence.push(await captureEvidenceWithRetry(surface, contextOptions, artifactsDir, errors));
+      surfaceEvidence.push(await captureEvidenceWithRetry(browser, surface, contextOptions, artifactsDir, errors));
     }
 
     const groups = groupCriteria(request.criteria || []);
@@ -74,6 +72,7 @@ async function run(request) {
           if (apiKey && calls < maxCalls) {
             try {
               const result = await assessGroupWithReviewLoop(request.model, apiKey, { ...group, items: batch }, groupMedia, {
+                browser,
                 surface: evidence.surface,
                 contextOptions,
                 artifactsDir,
@@ -112,6 +111,9 @@ async function run(request) {
     }
     const assessments = finalizeAssessments(request.criteria || [], assessmentResults, artifactsDir);
 
+    await browser.close();
+    browser = null;
+
     const status = errors.length === 0 ? 'ok' : 'degraded';
     return {
       schema: RESPONSE_SCHEMA,
@@ -127,6 +129,7 @@ async function run(request) {
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : String(error));
   } finally {
+    if (browser) await browser.close().catch(() => {});
     if (fixtureServer) await new Promise((resolve) => fixtureServer.close(resolve)).catch(() => {});
   }
 }
@@ -178,11 +181,11 @@ function emptySurfaceEvidence(surface) {
   return { surface, fullpage: null, focus: [], focusClip: null, motionClip: null, motionFrames: [] };
 }
 
-async function captureEvidenceWithRetry(surface, contextOptions, artifactsDir, errors) {
+async function captureEvidenceWithRetry(browser, surface, contextOptions, artifactsDir, errors) {
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      return await captureEvidence(surface, contextOptions, artifactsDir, errors);
+      return await captureEvidence(browser, surface, contextOptions, artifactsDir, errors);
     } catch (error) {
       lastError = error;
       if (attempt === 0) errors.push(`capture for ${surface.id} failed once; retrying: ${error.message}`);
@@ -192,15 +195,13 @@ async function captureEvidenceWithRetry(surface, contextOptions, artifactsDir, e
   return emptySurfaceEvidence(surface);
 }
 
-async function captureEvidence(surface, contextOptions, artifactsDir, errors) {
+async function captureEvidence(browser, surface, contextOptions, artifactsDir, errors) {
   const media = emptySurfaceEvidence(surface);
   const prefix = `review-${surface.slug}`;
 
   // Full-page screenshot.
-  let browser = null;
   let context = null;
   try {
-    browser = await launchReviewBrowser();
     context = await browser.newContext(contextOptions);
     const page = await context.newPage();
     await page.goto(surface.url, { waitUntil: 'networkidle' });
@@ -223,11 +224,10 @@ async function captureEvidence(surface, contextOptions, artifactsDir, errors) {
     }
   } finally {
     if (context) await context.close().catch(() => {});
-    if (browser) await closeReviewBrowser(browser);
   }
 
   // Focus clip: record tabbing through the page.
-  media.focusClip = await recordClip(surface, contextOptions, artifactsDir, `${prefix}-focus-clip`, async (clipPage) => {
+  media.focusClip = await recordClip(browser, surface, contextOptions, artifactsDir, `${prefix}-focus-clip`, async (clipPage) => {
     for (let i = 0; i < 8; i += 1) {
       await clipPage.keyboard.press('Tab');
       await clipPage.waitForTimeout(220);
@@ -235,7 +235,7 @@ async function captureEvidence(surface, contextOptions, artifactsDir, errors) {
   }, 'Keyboard focus moving through the page', errors);
 
   // Motion clip: let the page sit so any animation/auto-updating content plays.
-  media.motionClip = await recordClip(surface, contextOptions, artifactsDir, `${prefix}-motion-clip`, async (clipPage) => {
+  media.motionClip = await recordClip(browser, surface, contextOptions, artifactsDir, `${prefix}-motion-clip`, async (clipPage) => {
     await clipPage.waitForTimeout(2600);
   }, 'The page over ~2.5s (motion / auto-updating content)', errors);
 
@@ -246,11 +246,9 @@ async function captureEvidence(surface, contextOptions, artifactsDir, errors) {
   // model-only; the report keeps the clip (better for a human than four stills).
   // Note: this DELIBERATELY overrides the manifest's reduced_motion (which the
   // motion clip above honors) — judging 2.2.x needs motion present to observe.
-  let motionBrowser = null;
   let motionContext = null;
   try {
-    motionBrowser = await launchReviewBrowser();
-    motionContext = await motionBrowser.newContext({ ...contextOptions, reducedMotion: 'no-preference' });
+    motionContext = await browser.newContext({ ...contextOptions, reducedMotion: 'no-preference' });
     const motionPage = await motionContext.newPage();
     await motionPage.goto(surface.url, { waitUntil: 'networkidle' });
     for (let i = 0; i < 4; i += 1) {
@@ -263,7 +261,6 @@ async function captureEvidence(surface, contextOptions, artifactsDir, errors) {
     errors.push(`motion montage for ${surface.id} failed: ${error.message}`);
   } finally {
     if (motionContext) await motionContext.close().catch(() => {});
-    if (motionBrowser) await closeReviewBrowser(motionBrowser);
   }
 
   return media;
@@ -280,11 +277,9 @@ function mediaEntry(surface, role, kind, caption, absPath, extra = {}) {
   };
 }
 
-async function recordClip(surface, contextOptions, artifactsDir, name, actions, caption, errors) {
-  let browser = null;
+async function recordClip(browser, surface, contextOptions, artifactsDir, name, actions, caption, errors) {
   let context = null;
   try {
-    browser = await launchReviewBrowser();
     context = await browser.newContext({
       ...contextOptions,
       recordVideo: { dir: artifactsDir, size: contextOptions.viewport },
@@ -306,7 +301,6 @@ async function recordClip(surface, contextOptions, artifactsDir, name, actions, 
     return null;
   } finally {
     if (context) await context.close().catch(() => {});
-    if (browser) await closeReviewBrowser(browser);
   }
 }
 
@@ -492,11 +486,9 @@ async function assessGroupWithReviewLoop(model, apiKey, group, groupMedia, conte
   return { verdicts: finalResult.verdicts, usage, calls, media };
 }
 
-async function captureReviewActionMedia({ surface, contextOptions, artifactsDir, errors, groupKind, attempt, actions }) {
-  let browser = null;
+async function captureReviewActionMedia({ browser, surface, contextOptions, artifactsDir, errors, groupKind, attempt, actions }) {
   let context = null;
   try {
-    browser = await launchReviewBrowser();
     context = await browser.newContext(contextOptions);
     const page = await context.newPage();
     await page.goto(surface.url, { waitUntil: 'networkidle' });
@@ -516,19 +508,7 @@ async function captureReviewActionMedia({ surface, contextOptions, artifactsDir,
     return [];
   } finally {
     if (context) await context.close().catch(() => {});
-    if (browser) await closeReviewBrowser(browser);
   }
-}
-
-async function launchReviewBrowser() {
-  return chromium.launch(CHROMIUM_LAUNCH_OPTIONS);
-}
-
-async function closeReviewBrowser(browser) {
-  await Promise.race([
-    browser.close().catch(() => {}),
-    new Promise((resolve) => setTimeout(resolve, 1000)),
-  ]);
 }
 
 function safeReviewActions(actions) {
