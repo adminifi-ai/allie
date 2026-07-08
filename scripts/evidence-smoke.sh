@@ -1,12 +1,19 @@
 #!/bin/sh
 # V0 evidence smoke: run the checked-in fixture, prove important packet content,
 # and ensure frozen-clock reruns are byte-stable for packet + HTML report.
+#
+# The local fixture HTTP server always binds an OS-assigned ephemeral port
+# (port 0) so two concurrent `npm run verify` runs never collide on a fixed
+# port (see AL-129). To keep the byte-stability check below meaningful, the
+# second of the two runs pins ALLIE_FIXTURE_PORT to whatever port the OS
+# actually handed the first run, so both legs of this script observe the
+# exact same port and every port-derived byte (base_url, state urls, axe
+# JSON, report HTML) matches without needing to normalize anything.
 set -eu
 
 RUN_DIR=.allie/runs/v0-smoke
 FREEZE_EPOCH=1700000000
 FREEZE_RFC3339="2023-11-14T22:13:20+00:00"
-FREEZE_PORT=43100
 FIRST="$(mktemp -d)"
 cleanup() {
   rm -rf "$FIRST"
@@ -14,24 +21,50 @@ cleanup() {
 trap cleanup EXIT
 
 run_fixture() {
-  ALLIE_FIXTURE_PORT="$FREEZE_PORT" \
-  SOURCE_DATE_EPOCH="$FREEZE_EPOCH" \
-    cargo run --locked -- run --manifest examples/login-flow.yml --out "$RUN_DIR"
+  # No rm of $RUN_DIR here: the second invocation deliberately reruns into
+  # the dirty --out so allie's own manifest cleanup (AL-117) is what removes
+  # stale content. Pass a port to pin ALLIE_FIXTURE_PORT (byte-stability
+  # leg); omit it for an OS-assigned ephemeral bind (AL-129).
+  port="${1:-}"
+  if [ -n "$port" ]; then
+    ALLIE_FIXTURE_PORT="$port" \
+    SOURCE_DATE_EPOCH="$FREEZE_EPOCH" \
+      cargo run --locked -- run --manifest examples/login-flow.yml --out "$RUN_DIR"
+  else
+    SOURCE_DATE_EPOCH="$FREEZE_EPOCH" \
+      cargo run --locked -- run --manifest examples/login-flow.yml --out "$RUN_DIR"
+  fi
+}
+
+extract_fixture_port() {
+  node - "$1" <<'NODE'
+import fs from 'node:fs';
+
+const [packetPath] = process.argv.slice(2);
+const packet = JSON.parse(fs.readFileSync(packetPath, 'utf8'));
+const match = /^http:\/\/127\.0\.0\.1:(\d+)\/$/.exec(packet.target.base_url);
+if (!match) {
+  throw new Error(`could not extract fixture port from base_url ${packet.target.base_url}`);
+}
+process.stdout.write(match[1]);
+NODE
 }
 
 rm -rf "$RUN_DIR"
 run_fixture
+FREEZE_PORT="$(extract_fixture_port "$RUN_DIR/evidence.json")"
 cp "$RUN_DIR/evidence.json" "$FIRST/evidence.json"
 cp "$RUN_DIR/report.html" "$FIRST/report.html"
 
 # AL-117 out-dir hygiene, run path, end to end: plant a stale artifact from a
 # retired stage, then rerun into the SAME dirty --out with no rm -rf. Allie's
 # own manifest-based cleanup must remove it, and the rerun must still be
-# byte-stable against the fresh-directory first run.
+# byte-stable against the fresh-directory first run (pinned to the same
+# discovered port so every port-derived byte matches — AL-129).
 mkdir -p "$RUN_DIR/remediation"
 printf '%s\n' '{"stale": true}' > "$RUN_DIR/remediation/legacy-finding.json"
 
-run_fixture
+run_fixture "$FREEZE_PORT"
 if [ -e "$RUN_DIR/remediation" ]; then
   echo "stale remediation sentinel survived a rerun into a dirty --out" >&2
   exit 1

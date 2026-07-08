@@ -2052,7 +2052,7 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
             std::env::set_var("SOURCE_DATE_EPOCH", "1700000000");
-            std::env::set_var("ALLIE_FIXTURE_PORT", "43100");
+            std::env::set_var("ALLIE_FIXTURE_PORT", "51423");
         }
 
         let manifest = FlowManifest::load(Path::new("examples/login-flow.yml")).unwrap();
@@ -2067,7 +2067,7 @@ mod tests {
             determinism.timestamp.as_deref(),
             Some("2023-11-14T22:13:20.000Z")
         );
-        assert_eq!(determinism.fixture_port, Some(43100));
+        assert_eq!(determinism.fixture_port, Some(51423));
 
         unsafe {
             std::env::remove_var("SOURCE_DATE_EPOCH");
