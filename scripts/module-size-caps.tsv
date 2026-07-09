@@ -53,7 +53,7 @@ src/report.rs	740
 src/agentic.rs	670
 src/worker_runtime.rs	670
 src/model.rs	600
-src/consumer/verify_report.rs	530
+src/consumer/verify_report.rs	380
 src/pipeline.rs	440
 src/pipeline/tests.rs	110
 src/worker.rs	490
