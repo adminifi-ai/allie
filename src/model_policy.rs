@@ -14,19 +14,27 @@ impl FlowManifest {
     }
 }
 
-impl ModelPolicy {
-    pub(crate) fn resolved_provider(&self) -> String {
-        normalized_model_setting(&self.provider)
-            .unwrap_or_else(|| default_model_provider_preset().provider.to_string())
-    }
+pub(crate) struct ResolvedModelRoute {
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) api_key_env: String,
+    pub(crate) base_url: String,
+}
 
-    pub(crate) fn resolved_base_url(&self) -> String {
-        normalized_model_setting(&self.base_url).unwrap_or_else(|| {
-            model_provider_preset(&self.resolved_provider())
-                .unwrap_or_else(default_model_provider_preset)
-                .base_url
-                .to_string()
-        })
+impl ModelPolicy {
+    pub(crate) fn resolved_route(&self) -> ResolvedModelRoute {
+        let provider = normalized_model_setting(&self.provider)
+            .unwrap_or_else(|| default_model_provider_preset().provider.to_string());
+        let preset = model_provider_preset(&provider).unwrap_or_else(default_model_provider_preset);
+        ResolvedModelRoute {
+            provider,
+            model: normalized_model_setting(&self.model)
+                .unwrap_or_else(|| preset.model.to_string()),
+            api_key_env: normalized_model_setting(&self.api_key_env)
+                .unwrap_or_else(|| preset.api_key_env.to_string()),
+            base_url: normalized_model_setting(&self.base_url)
+                .unwrap_or_else(|| preset.base_url.to_string()),
+        }
     }
 
     pub(crate) fn provider_allowlist_incomplete_failure(&self) -> Option<RunFailure> {
@@ -50,40 +58,42 @@ impl ModelPolicy {
             return None;
         }
 
-        let provider = self.resolved_provider();
-        let base_url = self.resolved_base_url();
-        let preset = match model_provider_preset(&provider) {
+        let route = self.resolved_route();
+        let preset = match model_provider_preset(&route.provider) {
             Some(preset) => preset,
             None => {
                 return Some(RunFailure::new(
                     "model-policy-not-allowed",
                     "model-policy",
                     format!(
-                        "model provider {provider} is not a known provider preset; provider_allowlist entries must name one of: {}",
+                        "model provider {} is not a known provider preset; provider_allowlist entries must name one of: {}",
+                        route.provider,
                         model_provider_preset_names()
                     ),
                 ));
             }
         };
 
-        if !allowlist.contains(&provider.as_str()) {
+        if !allowlist.contains(&route.provider.as_str()) {
             return Some(RunFailure::new(
                 "model-policy-not-allowed",
                 "model-policy",
                 format!(
-                    "model provider {provider} is not allowed by provider_allowlist [{}]; add {provider} or choose an allowlisted provider preset",
-                    allowlist.join(", ")
+                    "model provider {} is not allowed by provider_allowlist [{}]; add {} or choose an allowlisted provider preset",
+                    route.provider,
+                    allowlist.join(", "),
+                    route.provider
                 ),
             ));
         }
 
-        if normalize_base_url(&base_url) != normalize_base_url(preset.base_url) {
+        if normalize_base_url(&route.base_url) != normalize_base_url(preset.base_url) {
             return Some(RunFailure::new(
                 "model-policy-not-allowed",
                 "model-policy",
                 format!(
-                    "model provider {provider} is allowlisted only for preset base_url {}; resolved base_url {base_url} is not allowed",
-                    preset.base_url
+                    "model provider {} is allowlisted only for preset base_url {}; resolved base_url {} is not allowed",
+                    route.provider, preset.base_url, route.base_url
                 ),
             ));
         }

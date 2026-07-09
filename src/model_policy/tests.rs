@@ -76,3 +76,22 @@ fn accepts_allowlisted_provider_with_preset_base_url() {
         "on-allowlist provider and preset endpoint should proceed: {failures:?}"
     );
 }
+
+#[test]
+fn resolves_the_entire_route_from_the_selected_provider_preset() {
+    let mut manifest = FlowManifest::load(Path::new("examples/login-flow.yml")).unwrap();
+    manifest.model.enabled = true;
+    manifest.model.provider_allowlist = vec!["openai".to_string()];
+    manifest.model.provider = Some("openai".to_string());
+    manifest.model.model = None;
+    manifest.model.api_key_env = None;
+    manifest.model.base_url = None;
+
+    manifest.enforce_model_provider_allowlist().unwrap();
+    let route = manifest.model.resolved_route();
+
+    assert_eq!(route.provider, "openai");
+    assert_eq!(route.model, "gpt-4o-mini");
+    assert_eq!(route.api_key_env, "OPENAI_API_KEY");
+    assert_eq!(route.base_url, "https://api.openai.com/v1");
+}

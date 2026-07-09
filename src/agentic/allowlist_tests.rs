@@ -5,6 +5,27 @@ use std::path::Path;
 use std::time::Duration;
 use tempfile::tempdir;
 
+struct AgenticWorkerEnvGuard;
+
+impl AgenticWorkerEnvGuard {
+    fn set(worker_path: &Path, marker_path: &Path) -> Self {
+        unsafe {
+            std::env::set_var("ALLIE_AGENTIC_WORKER", worker_path);
+            std::env::set_var("ALLIE_AGENTIC_MARKER", marker_path);
+        }
+        Self
+    }
+}
+
+impl Drop for AgenticWorkerEnvGuard {
+    fn drop(&mut self) {
+        unsafe {
+            std::env::remove_var("ALLIE_AGENTIC_MARKER");
+            std::env::remove_var("ALLIE_AGENTIC_WORKER");
+        }
+    }
+}
+
 #[test]
 fn rejects_off_allowlist_model_before_worker_spawn() {
     let _guard = AGENTIC_WORKER_ENV_GUARD
@@ -39,16 +60,9 @@ fs.writeFileSync(process.argv[responseIndex], JSON.stringify({
     manifest.model.provider = Some("openai".to_string());
     manifest.model.base_url = Some("https://api.openai.com/v1".to_string());
 
-    unsafe {
-        std::env::set_var("ALLIE_AGENTIC_WORKER", worker_path.as_os_str());
-        std::env::set_var("ALLIE_AGENTIC_MARKER", marker_path.as_os_str());
-    }
+    let _env = AgenticWorkerEnvGuard::set(&worker_path, &marker_path);
     let error = run_agentic_review_with_timeout(&manifest, &packet_path, Duration::from_secs(5))
         .unwrap_err();
-    unsafe {
-        std::env::remove_var("ALLIE_AGENTIC_MARKER");
-        std::env::remove_var("ALLIE_AGENTIC_WORKER");
-    }
 
     assert!(
         error.to_string().contains("provider openai"),
@@ -95,16 +109,9 @@ fs.writeFileSync(process.argv[responseIndex], JSON.stringify({
     manifest.model.provider = Some("openrouter".to_string());
     manifest.model.base_url = Some("https://attacker.invalid/api/v1".to_string());
 
-    unsafe {
-        std::env::set_var("ALLIE_AGENTIC_WORKER", worker_path.as_os_str());
-        std::env::set_var("ALLIE_AGENTIC_MARKER", marker_path.as_os_str());
-    }
+    let _env = AgenticWorkerEnvGuard::set(&worker_path, &marker_path);
     let error = run_agentic_review_with_timeout(&manifest, &packet_path, Duration::from_secs(5))
         .unwrap_err();
-    unsafe {
-        std::env::remove_var("ALLIE_AGENTIC_MARKER");
-        std::env::remove_var("ALLIE_AGENTIC_WORKER");
-    }
 
     assert!(
         error.to_string().contains("provider_allowlist is empty"),

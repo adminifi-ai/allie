@@ -50,14 +50,6 @@ fn agentic_worker_script() -> PathBuf {
         })
 }
 
-fn agentic_model_setting(value: &Option<String>, fallback: &str) -> String {
-    value
-        .as_ref()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| fallback.to_string())
-}
-
 #[derive(serde::Serialize)]
 struct AgenticReviewSurface {
     id: String,
@@ -158,6 +150,7 @@ fn run_agentic_review_with_timeout(
             .or_else(|| manifest.target.base_url.clone())
     };
 
+    let model_route = manifest.model.resolved_route();
     let request = serde_json::json!({
         "schema": "allie.agentic.request.v0",
         "target": {
@@ -171,10 +164,10 @@ fn run_agentic_review_with_timeout(
             "locale": manifest.browser.locale,
         },
         "model": {
-            "provider": manifest.model.resolved_provider(),
-            "model": agentic_model_setting(&manifest.model.model, "google/gemini-3.5-flash"),
-            "api_key_env": agentic_model_setting(&manifest.model.api_key_env, "OPENROUTER_API_KEY"),
-            "base_url": manifest.model.resolved_base_url(),
+            "provider": model_route.provider,
+            "model": model_route.model,
+            "api_key_env": model_route.api_key_env,
+            "base_url": model_route.base_url,
             "max_calls": manifest.model.max_model_calls.unwrap_or(4),
             "reasoning_effort": manifest.model.reasoning_effort.clone(),
         },
