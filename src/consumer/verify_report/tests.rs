@@ -112,7 +112,9 @@ fn verify_html_labels_each_review_grain_and_reconciles_all_three() {
     assert!(html.contains("Verdict-grain — 7"));
     assert!(html.contains("Criterion-grain — 2"));
     assert!(html.contains("Profile-scope — 46"));
-    assert!(html.contains(".statgrid, .statgrid.statgrid-3"));
+    assert!(html.contains(
+        "@media (max-width: 720px) { .statgrid, .statgrid.statgrid-3 { grid-template-columns: repeat(2, 1fr); } }"
+    ));
     assert!(
         !html
             .to_lowercase()

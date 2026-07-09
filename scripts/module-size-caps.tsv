@@ -43,7 +43,9 @@
 # AL-123 extracted verify Markdown/HTML rendering + labeled review-grain
 # presentation into src/consumer/verify_report.rs so consumer.rs stays under
 # its ratchet while the three review grains get a durable presentation home.
-# consumer.rs and consumer/tests.rs caps re-lowered to the post-extract sizes.
+# consumer.rs was re-lowered to its post-extract size; the new production
+# renderer is capped below the default while consumer/tests.rs keeps its
+# existing ratchet.
 src/lib.rs	4490
 src/compliance.rs	1280
 src/discovery.rs	990
