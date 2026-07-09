@@ -1,7 +1,7 @@
 use super::{AGENTIC_WORKER_ENV_GUARD, run_agentic_review_with_timeout};
 use crate::{FlowManifest, write_json_pretty};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tempfile::tempdir;
 
@@ -26,32 +26,39 @@ impl Drop for AgenticWorkerEnvGuard {
     }
 }
 
+fn write_marker_worker(directory: &Path, provider: &str) -> (PathBuf, PathBuf) {
+    let worker_path = directory.join("marker-agentic-worker.cjs");
+    let marker_path = directory.join("worker-spawned");
+    fs::write(
+        &worker_path,
+        format!(
+            r#"
+const fs = require('node:fs');
+fs.writeFileSync(process.env.ALLIE_AGENTIC_MARKER, 'spawned');
+const responseIndex = process.argv.indexOf('--response') + 1;
+fs.writeFileSync(process.argv[responseIndex], JSON.stringify({{
+  schema: 'allie.agentic.response.v0',
+  status: 'skipped',
+  provider: '{provider}',
+  model: 'test',
+  calls: 0,
+  assessments: [],
+  errors: []
+}}, null, 2));
+"#
+        ),
+    )
+    .unwrap();
+    (worker_path, marker_path)
+}
+
 #[test]
 fn rejects_off_allowlist_model_before_worker_spawn() {
     let _guard = AGENTIC_WORKER_ENV_GUARD
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let temp = tempdir().unwrap();
-    let worker_path = temp.path().join("marker-agentic-worker.cjs");
-    let marker_path = temp.path().join("worker-spawned");
-    fs::write(
-        &worker_path,
-        r#"
-const fs = require('node:fs');
-fs.writeFileSync(process.env.ALLIE_AGENTIC_MARKER, 'spawned');
-const responseIndex = process.argv.indexOf('--response') + 1;
-fs.writeFileSync(process.argv[responseIndex], JSON.stringify({
-  schema: 'allie.agentic.response.v0',
-  status: 'skipped',
-  provider: 'openai',
-  model: 'test',
-  calls: 0,
-  assessments: [],
-  errors: []
-}, null, 2));
-"#,
-    )
-    .unwrap();
+    let (worker_path, marker_path) = write_marker_worker(temp.path(), "openai");
     let packet_path = temp.path().join("evidence.json");
     write_json_pretty(&packet_path, &minimal_agentic_packet()).unwrap();
     let mut manifest =
@@ -69,8 +76,47 @@ fs.writeFileSync(process.argv[responseIndex], JSON.stringify({
         "error should name the rejected provider: {error}"
     );
     assert!(
+        !temp.path().join("agentic-request.json").exists(),
+        "policy failure must happen before the worker request is written"
+    );
+    assert!(
         !marker_path.exists(),
         "policy failure must happen before the agentic worker is spawned"
+    );
+}
+
+#[test]
+fn rejects_hostile_endpoint_before_request_write_or_worker_spawn() {
+    let _guard = AGENTIC_WORKER_ENV_GUARD
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let temp = tempdir().unwrap();
+    let (worker_path, marker_path) = write_marker_worker(temp.path(), "openrouter");
+    let packet_path = temp.path().join("evidence.json");
+    write_json_pretty(&packet_path, &minimal_agentic_packet()).unwrap();
+    let mut manifest =
+        FlowManifest::load(Path::new("examples/autonomous-workbench-agentic.yml")).unwrap();
+    manifest.model.provider_allowlist = vec!["openrouter".to_string()];
+    manifest.model.provider = Some("openrouter".to_string());
+    manifest.model.base_url = Some("https://attacker.invalid/api/v1".to_string());
+
+    let _env = AgenticWorkerEnvGuard::set(&worker_path, &marker_path);
+    let error = run_agentic_review_with_timeout(&manifest, &packet_path, Duration::from_secs(5))
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("resolved base_url https://attacker.invalid/api/v1 is not allowed"),
+        "error should identify the rejected endpoint binding: {error}"
+    );
+    assert!(
+        !temp.path().join("agentic-request.json").exists(),
+        "endpoint policy failure must happen before the worker request is written"
+    );
+    assert!(
+        !marker_path.exists(),
+        "endpoint policy failure must happen before the agentic worker is spawned"
     );
 }
 
@@ -80,26 +126,7 @@ fn rejects_empty_allowlist_before_request_write_or_worker_spawn() {
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let temp = tempdir().unwrap();
-    let worker_path = temp.path().join("marker-agentic-worker.cjs");
-    let marker_path = temp.path().join("worker-spawned");
-    fs::write(
-        &worker_path,
-        r#"
-const fs = require('node:fs');
-fs.writeFileSync(process.env.ALLIE_AGENTIC_MARKER, 'spawned');
-const responseIndex = process.argv.indexOf('--response') + 1;
-fs.writeFileSync(process.argv[responseIndex], JSON.stringify({
-  schema: 'allie.agentic.response.v0',
-  status: 'skipped',
-  provider: 'openrouter',
-  model: 'test',
-  calls: 0,
-  assessments: [],
-  errors: []
-}, null, 2));
-"#,
-    )
-    .unwrap();
+    let (worker_path, marker_path) = write_marker_worker(temp.path(), "openrouter");
     let packet_path = temp.path().join("evidence.json");
     write_json_pretty(&packet_path, &minimal_agentic_packet()).unwrap();
     let mut manifest =
