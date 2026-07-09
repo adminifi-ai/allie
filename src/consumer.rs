@@ -8,6 +8,9 @@ use std::convert::Infallible;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod verify_report;
+use verify_report::{attach_review_grains_from_packet, render_verify_html, render_verify_markdown};
+
 const VERIFY_SCHEMA: &str = "allie.verify.v0";
 
 #[derive(Debug)]
@@ -425,7 +428,7 @@ fn write_verify_reporters(
     let status = verify_status(&pipeline.release.status, exit_class);
     let release_summary: serde_json::Value = read_json_file(&pipeline.release.summary_path)?;
     let compliance_report: serde_json::Value = read_json_file(&pipeline.report.report_json_path)?;
-    let summary = verify_summary_value(
+    let mut summary = verify_summary_value(
         options,
         pipeline,
         &reporters,
@@ -433,6 +436,14 @@ fn write_verify_reporters(
         &compliance_report,
         &status,
         exit_class,
+    );
+    // AL-123: attach labeled review grains from the one shared definition so
+    // Markdown/HTML/JSON can't independently drift (see verify_report).
+    let evidence_packet: EvidencePacket = read_json_file(&pipeline.run.evidence_path)?;
+    attach_review_grains_from_packet(
+        &mut summary,
+        &evidence_packet,
+        json_u64(&compliance_report["summary"]["needs_review"]),
     );
 
     write_json_pretty(&reporters.summary_json_path, &summary)?;
@@ -535,228 +546,6 @@ fn verify_summary_value(
             "legal_claim": "evidence visibility only; not a legal compliance guarantee"
         }
     })
-}
-
-fn render_verify_markdown(summary: &serde_json::Value) -> String {
-    format!(
-        "# Allie Verification Summary\n\nStatus: `{}`\n\nWhy: {}\n\nManifest: `{}`\nProject root: `{}`\n\nBlocking evidence: deterministic failures {}, scripted failures {}, infrastructure failures {}, missing required evidence {}.\nReview evidence: review-needed obligations {}, not-tested obligations {}.\nWCAG matrix: pass {}, fail {}, needs review {}, not tested {}.\n\nReporters:\n- JSON summary: `{}`\n- WCAG JSON: `{}`\n- HTML: `{}`\n- Markdown: `{}`\n- JUnit: `{}`\n- SARIF: `{}`\n\nEvidence packet: `{}`\nProduct map: `{}`\nWCAG HTML: `{}`\nRelease summary: `{}`\n\nThis is evidence visibility for accessibility engineering review, not a legal compliance guarantee.\n",
-        summary["status"].as_str().unwrap_or("unknown"),
-        summary["why"]["summary"].as_str().unwrap_or("unknown"),
-        summary["policy_source"].as_str().unwrap_or("unknown"),
-        summary["project_root"].as_str().unwrap_or("unknown"),
-        summary["why"]["blocking"]["deterministic_failures"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["why"]["blocking"]["scripted_failures"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["why"]["blocking"]["infrastructure_failures"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["why"]["blocking"]["missing_required_evidence"]
-            .as_array()
-            .map(|values| values.len())
-            .unwrap_or_default(),
-        summary["why"]["review_needed_obligations"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["why"]["not_tested_obligations"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["why"]["compliance_summary"]["pass"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["why"]["compliance_summary"]["fail"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["why"]["compliance_summary"]["needs_review"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["why"]["compliance_summary"]["not_tested"]
-            .as_u64()
-            .unwrap_or_default(),
-        summary["reporters"]["json"].as_str().unwrap_or(""),
-        summary["reporters"]["wcag_json"].as_str().unwrap_or(""),
-        summary["reporters"]["html"].as_str().unwrap_or(""),
-        summary["reporters"]["markdown"].as_str().unwrap_or(""),
-        summary["reporters"]["junit"].as_str().unwrap_or(""),
-        summary["reporters"]["sarif"].as_str().unwrap_or(""),
-        summary["artifacts"]["evidence_json"].as_str().unwrap_or(""),
-        summary["artifacts"]["product_map_json"]
-            .as_str()
-            .unwrap_or(""),
-        summary["artifacts"]["compliance_html"]
-            .as_str()
-            .unwrap_or(""),
-        summary["artifacts"]["release_summary_json"]
-            .as_str()
-            .unwrap_or("")
-    )
-}
-
-fn render_verify_html(summary: &serde_json::Value, out_dir: &Path) -> String {
-    let status = summary["status"].as_str().unwrap_or("unknown");
-    let links = [
-        (
-            "JSON summary",
-            summary["reporters"]["json"].as_str().unwrap_or(""),
-        ),
-        (
-            "WCAG JSON",
-            summary["reporters"]["wcag_json"].as_str().unwrap_or(""),
-        ),
-        (
-            "Markdown",
-            summary["reporters"]["markdown"].as_str().unwrap_or(""),
-        ),
-        (
-            "JUnit",
-            summary["reporters"]["junit"].as_str().unwrap_or(""),
-        ),
-        (
-            "SARIF",
-            summary["reporters"]["sarif"].as_str().unwrap_or(""),
-        ),
-        (
-            "WCAG report",
-            summary["artifacts"]["compliance_html"]
-                .as_str()
-                .unwrap_or(""),
-        ),
-        (
-            "Product map",
-            summary["artifacts"]["surface_map_html"]
-                .as_str()
-                .unwrap_or(""),
-        ),
-        (
-            "Release projection",
-            summary["artifacts"]["release_html"].as_str().unwrap_or(""),
-        ),
-    ]
-    .into_iter()
-    .map(|(label, path)| {
-        let href = if path.starts_with("reporters/") {
-            path.trim_start_matches("reporters/").to_string()
-        } else {
-            format!("../{path}")
-        };
-        format!(
-            "<li><a href=\"{}\">{}<code>{}</code></a></li>",
-            escape_html(&href),
-            escape_html(label),
-            escape_html(path)
-        )
-    })
-    .collect::<Vec<_>>()
-    .join("");
-    let why = summary["why"]["summary"].as_str().unwrap_or("unknown");
-    let deterministic_failures = summary["why"]["blocking"]["deterministic_failures"]
-        .as_u64()
-        .unwrap_or_default();
-    let scripted_failures = summary["why"]["blocking"]["scripted_failures"]
-        .as_u64()
-        .unwrap_or_default();
-    let infrastructure_failures = summary["why"]["blocking"]["infrastructure_failures"]
-        .as_u64()
-        .unwrap_or_default();
-    let missing_required = summary["why"]["blocking"]["missing_required_evidence"]
-        .as_array()
-        .map(|values| values.len())
-        .unwrap_or_default();
-    let review_needed = summary["why"]["review_needed_obligations"]
-        .as_u64()
-        .unwrap_or_default();
-    let not_tested = summary["why"]["not_tested_obligations"]
-        .as_u64()
-        .unwrap_or_default();
-    let wcag_pass = summary["why"]["compliance_summary"]["pass"]
-        .as_u64()
-        .unwrap_or_default();
-    let wcag_fail = summary["why"]["compliance_summary"]["fail"]
-        .as_u64()
-        .unwrap_or_default();
-    let wcag_review = summary["why"]["compliance_summary"]["needs_review"]
-        .as_u64()
-        .unwrap_or_default();
-    let wcag_not_tested = summary["why"]["compliance_summary"]["not_tested"]
-        .as_u64()
-        .unwrap_or_default();
-    let (bcls, dot) = match status {
-        "blocked" | "failed" => ("b-fail", "#d23b30"),
-        "approved" | "pass" => ("b-pass", "#1a9457"),
-        _ => ("b-review", "#d8a32f"),
-    };
-    format!(
-        r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Allie verification — {status}</title>
-  <style>{css}
-    .statgrid {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 18px 0 6px; }}
-    .stat {{ background: #fff; border: 1px solid #e4e8ef; border-radius: 13px; padding: 13px 15px; }}
-    .stat .n {{ font-size: 23px; font-weight: 700; font-variant-numeric: tabular-nums; }}
-    .stat .k {{ font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: #5a6473; margin-top: 3px; }}
-    ul.links {{ list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }}
-    ul.links a {{ display: block; background: #fff; border: 1px solid #e4e8ef; border-radius: 11px; padding: 12px 14px; font-weight: 600; }}
-    ul.links code {{ display: block; color: #5a6473; font-weight: 400; margin-top: 4px; font-size: 11px; background: none; }}
-    @media (max-width: 720px) {{ .statgrid {{ grid-template-columns: repeat(2, 1fr); }} }}
-  </style>
-</head>
-<body>
-  <main>
-    <p class="eyebrow">Allie · host-agnostic verification</p>
-    <h1>Verification</h1>
-    <p class="sub">Manifest <code>{manifest}</code> · output <code>{out}</code> · evidence visibility, not a legal compliance guarantee</p>
-    <div class="banner {bcls}"><span class="dot" style="background:{dot}"></span><div><h2>Status: {status_label}</h2><p>{why}</p></div></div>
-    <section>
-      <h2 class="sh">Blocking evidence</h2>
-      <div class="statgrid">
-        <div class="stat"><div class="n">{deterministic_failures}</div><div class="k">Deterministic fails</div></div>
-        <div class="stat"><div class="n">{scripted_failures}</div><div class="k">Scripted fails</div></div>
-        <div class="stat"><div class="n">{infrastructure_failures}</div><div class="k">Infra fails</div></div>
-        <div class="stat"><div class="n">{missing_required}</div><div class="k">Missing evidence</div></div>
-        <div class="stat"><div class="n">{review_needed}</div><div class="k">Review needed</div></div>
-      </div>
-      <h2 class="sh">WCAG 2.2 matrix</h2>
-      <div class="statgrid">
-        <div class="stat"><div class="n">{wcag_pass}</div><div class="k">Pass</div></div>
-        <div class="stat"><div class="n">{wcag_fail}</div><div class="k">Fail</div></div>
-        <div class="stat"><div class="n">{wcag_review}</div><div class="k">Needs review</div></div>
-        <div class="stat"><div class="n">{not_tested}</div><div class="k">Not-tested obligations</div></div>
-        <div class="stat"><div class="n">{wcag_not_tested}</div><div class="k">WCAG not tested</div></div>
-      </div>
-    </section>
-    <section>
-      <h2 class="sh">Reporter artifacts</h2>
-      <ul class="links">{links}</ul>
-    </section>
-  </main>
-</body>
-</html>
-"#,
-        css = crate::report::REPORT_CSS,
-        status = escape_html(status),
-        status_label = escape_html(&crate::report::cr_status_label(status)),
-        bcls = bcls,
-        dot = dot,
-        why = escape_html(why),
-        manifest = escape_html(summary["policy_source"].as_str().unwrap_or("unknown")),
-        out = escape_html(&out_dir.to_string_lossy()),
-        deterministic_failures = deterministic_failures,
-        scripted_failures = scripted_failures,
-        infrastructure_failures = infrastructure_failures,
-        missing_required = missing_required,
-        review_needed = review_needed,
-        not_tested = not_tested,
-        wcag_pass = wcag_pass,
-        wcag_fail = wcag_fail,
-        wcag_review = wcag_review,
-        wcag_not_tested = wcag_not_tested,
-        links = links
-    )
 }
 
 fn verify_reason(
