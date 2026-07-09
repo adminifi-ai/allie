@@ -19,6 +19,7 @@ mod compliance;
 mod consumer;
 mod discovery;
 mod model_credentials;
+mod model_policy;
 mod out_dir;
 mod pipeline;
 mod release;
@@ -831,12 +832,10 @@ impl FlowManifest {
             }
         }
 
-        if self.model.enabled && self.model.provider_allowlist.is_empty() {
-            failures.push(RunFailure::new(
-                "model-policy-incomplete",
-                "model-policy",
-                "model calls are enabled but provider_allowlist is empty".to_string(),
-            ));
+        if let Some(failure) = self.model.provider_allowlist_incomplete_failure() {
+            failures.push(failure);
+        } else if let Some(failure) = self.model.provider_allowlist_failure() {
+            failures.push(failure);
         }
 
         failures

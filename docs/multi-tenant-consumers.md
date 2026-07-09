@@ -47,15 +47,15 @@ A common, demanding deployment target:
    (**platform code vs client theme vs client content**) and likely action owner
    — would be high-value audit context and is not modeled today.
 
-3. **Provider allowlist + data-retention must be *enforced*, not just declared.**
-   The manifest already carries `provider_allowlist` and `zdr_required`, but as
-   of this writing they are only validated for non-emptiness and recorded into
-   the packet — **the gateway does not verify that the selected model is in the
-   allowlist, nor that zero-data-retention holds.** For any governed consumer
-   this is a correctness gap worth closing regardless of roadmap. It also means
-   the agentic model is a *per-consumer* choice (a consumer may forbid the
-   default), reinforcing that model selection belongs in the manifest, not as a
-   universal default.
+3. **Provider allowlist is enforced; data-retention still needs verification.**
+   The gateway fails closed unless the selected provider is in
+   `provider_allowlist` and its resolved endpoint matches that provider's
+   canonical preset. It enforces the same policy during preflight and again
+   before writing the worker request or spawning the worker. `zdr_required` is
+   still declared and recorded rather than independently verified, so governed
+   consumers must treat retention attestation as an open correctness gap. The
+   agentic model remains a *per-consumer* choice, reinforcing that model
+   selection belongs in the manifest rather than a universal default.
 
 4. **Run modes: changed-scope vs full sweep.** A regression-prevention mode that
    scans only the surfaces affected by a PR's changes, plus a periodic full

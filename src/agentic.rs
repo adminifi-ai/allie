@@ -8,10 +8,15 @@ use std::fmt::{self, Display};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(test)]
+use std::sync::Mutex;
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
 const AGENTIC_WORKER_TIMEOUT: Duration = Duration::from_secs(300);
+
+#[cfg(test)]
+static AGENTIC_WORKER_ENV_GUARD: Mutex<()> = Mutex::new(());
 
 #[derive(Debug)]
 pub(crate) struct AgenticReviewSummary {
@@ -43,14 +48,6 @@ fn agentic_worker_script() -> PathBuf {
         .unwrap_or_else(|| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("workers/agentic/review.mjs")
         })
-}
-
-fn agentic_model_setting(value: &Option<String>, fallback: &str) -> String {
-    value
-        .as_ref()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| fallback.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -113,6 +110,7 @@ fn run_agentic_review_with_timeout(
             status: AgenticReviewOutcome::Skipped,
         });
     }
+    manifest.enforce_model_provider_allowlist()?;
 
     let criteria = obligations
         .iter()
@@ -152,6 +150,7 @@ fn run_agentic_review_with_timeout(
             .or_else(|| manifest.target.base_url.clone())
     };
 
+    let model_route = manifest.model.resolved_route();
     let request = serde_json::json!({
         "schema": "allie.agentic.request.v0",
         "target": {
@@ -165,10 +164,10 @@ fn run_agentic_review_with_timeout(
             "locale": manifest.browser.locale,
         },
         "model": {
-            "provider": agentic_model_setting(&manifest.model.provider, "openrouter"),
-            "model": agentic_model_setting(&manifest.model.model, "google/gemini-3.5-flash"),
-            "api_key_env": agentic_model_setting(&manifest.model.api_key_env, "OPENROUTER_API_KEY"),
-            "base_url": agentic_model_setting(&manifest.model.base_url, "https://openrouter.ai/api/v1"),
+            "provider": model_route.provider,
+            "model": model_route.model,
+            "api_key_env": model_route.api_key_env,
+            "base_url": model_route.base_url,
             "max_calls": manifest.model.max_model_calls.unwrap_or(4),
             "reasoning_effort": manifest.model.reasoning_effort.clone(),
         },
@@ -411,10 +410,7 @@ fn agentic_artifact_type(kind: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tempfile::tempdir;
-
-    static AGENTIC_WORKER_ENV_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
     fn agentic_promoted_status_only_promotes_fail_with_precision_gate() {
@@ -661,3 +657,6 @@ mod tests {
         })
     }
 }
+
+#[cfg(test)]
+mod allowlist_tests;
