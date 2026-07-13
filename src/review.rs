@@ -1,7 +1,7 @@
 //! One reconciled definition of what "review" means in Allie.
 //!
 //! A 2026-07-01 dogfood run (`docs/dogfood/025-vanity-vs-olympus-cross-target.md`,
-//! folded into `backlog.d/027-raise-wcag-report-efficacy-and-quality.md` finding
+//! folded into Habitat work item 027 finding
 //! R3) surfaced three independently-computed "review" counts for the same run —
 //! `needs_review: 2` in the compliance summary, `review_needed_obligations: 7`
 //! in the release decision, and `obligations_requiring_human_review: 46` in the

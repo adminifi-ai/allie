@@ -2,7 +2,7 @@
 
 | Source | Fact | Provenance | Confidence | Use | Evidence / Notes |
 |---|---|---|---|---|---|
-| `backlog.d/024-adopt-misty-step-comic-ops-aesthetic.md` | Adopt a clean-atomic comic-ops baseline for Allie evidence reports and local HTML output. | provided | high | keep | Ticket oracle requires a design contract, representative rendered surface, Misty Step source decision, evidence clarity, and full verify. |
+| Habitat work item migrated from legacy ticket 024 | Adopt a clean-atomic comic-ops baseline for Allie evidence reports and local HTML output. | provided | high | keep | Ticket oracle requires a design contract, representative rendered surface, Misty Step source decision, evidence clarity, and full verify. |
 | `http://serenity.tail5f5eb4.ts.net:8788/allie-clean-atomic-concept.png` | Visual DNA: warm paper, ink borders, blue section tabs, yellow review tags, green/red status slabs, dense ledgers, proof strips, hard square panels. | provided | high | keep | Downloaded to `/tmp/allie-clean-atomic-concept.png` for inspection. Generated art is inspiration only. |
 | `http://serenity.tail5f5eb4.ts.net:8788/allie-clean-atomic-concept.png` | Exact illustrated layout, logo treatment, and decorative composition. | provided | high | do-not-copy | The ticket says generated art is inspiration only; rebuild product copy and UI from tokens. |
 | `https://cdn.jsdelivr.net/gh/misty-step/aesthetic@v2.5.1/aesthetic.css` | Reachable Misty Step aesthetic source with zero radius, tokenized ink/accent/status CSS variables, and motion restraint. | observed | medium | keep | `curl -I` returned HTTP 200. The generated report embeds a local subset so artifacts stay self-contained. |
