@@ -129,8 +129,8 @@ gate is unaffected, but the declaration is inaccurate.
 
 ## Proposed backlog actions
 
-- Epics 026 and 027 updated in place with a "Dogfood findings (2026-07-01)" note
-  pointing here (see `backlog.d/026-*.md`, `backlog.d/027-*.md`).
+- Habitat epics 026 and 027 were updated in place with a "Dogfood findings
+  (2026-07-01)" note pointing here.
 - No new standalone ticket is warranted yet: E1–E3 land inside 026's existing
   children; R1–R6 land inside 027's. Revisit if R1 (model-off report degradation)
   proves large enough to be its own slice.
