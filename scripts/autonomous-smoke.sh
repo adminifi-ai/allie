@@ -8,9 +8,10 @@ JOB_DIR=.allie/jobs/autonomous-smoke
 AGENTIC_JOB_DIR=.allie/jobs/autonomous-agentic-smoke
 AGENTIC_ERROR_JOB_DIR=.allie/jobs/autonomous-agentic-error-smoke
 AGENTIC_ERROR_WORKER=.allie/jobs/autonomous-agentic-error-worker.cjs
+LEGACY_REVIEW_DIR=.allie/reviews/autonomous-smoke
 LEGACY_REMEDIATION_DIR=.allie/remediation/autonomous-smoke
 
-rm -rf "$DISCOVERY_DIR" "$RUN_DIR" "$RELEASE_DIR" "$JOB_DIR" "$AGENTIC_JOB_DIR" "$AGENTIC_ERROR_JOB_DIR" "$LEGACY_REMEDIATION_DIR"
+rm -rf "$DISCOVERY_DIR" "$RUN_DIR" "$RELEASE_DIR" "$JOB_DIR" "$AGENTIC_JOB_DIR" "$AGENTIC_ERROR_JOB_DIR" "$LEGACY_REVIEW_DIR" "$LEGACY_REMEDIATION_DIR"
 rm -f "$AGENTIC_ERROR_WORKER"
 
 cargo run --locked -- discover \

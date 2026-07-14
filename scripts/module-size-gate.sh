@@ -5,13 +5,17 @@
 # 10055 lines down; extractions since (report.rs, agentic.rs, compliance.rs,
 # model.rs, workbench.rs, worker.rs, standards.rs, release.rs, cli.rs,
 # discovery.rs, ...) followed. This gate locks those wins in and covers every
-# *.rs file in the repo (excluding target/, node_modules/, .git/), not just
-# the top-level src/*.rs glob it used to check — that includes nested
-# modules such as src/discovery/*.rs and src/workbench/tests.rs today, and
-# any Rust source that lands outside src/ in the future.
+# tracked or nonignored untracked *.rs file in the canonical checkout, not just
+# the top-level src/*.rs glob it used to check. That includes nested modules
+# such as src/discovery/*.rs and src/workbench/tests.rs today, plus Rust sources
+# outside src/. Ignored caches, generated output, and nested worktrees are not
+# part of the canonical checkout's source set; tracked files remain in scope
+# regardless of directory name.
 #
 # scripts/module-size-caps.tsv records each known file's cap, keyed by its
-# path relative to the repo root. A file not listed there falls back to
+# path relative to the repo root. The canonical checkout scan follows Git's
+# tracked + nonignored-untracked file view, so ignored caches and nested
+# worktrees cannot leak into the result. A file not listed there falls back to
 # DEFAULT_CAP below, so a new module cannot silently balloon unnoticed just
 # because no one added it to the table.
 #
@@ -25,12 +29,11 @@
 #     — never raise DEFAULT_CAP, and never raise a cap silently.
 #
 # Correctness invariants this script holds itself to (see --self-test):
-#   - Filenames containing spaces or other shell-special characters must be
-#     handled as single, whole paths (`IFS= read -r` line iteration, never
-#     unquoted `for f in $files` word-splitting). This assumes no filename
-#     contains a literal newline, which is true in practice and lets the
-#     rest of the script stay portable /bin/sh (no `read -d`/`-print0`,
-#     which are bash/GNU extensions undefined in POSIX sh).
+#   - Filenames containing spaces must be handled as single, whole paths
+#     (`IFS= read -r` line iteration, never unquoted `for f in $files`
+#     word-splitting). Control characters, quotes, backslashes, and literal
+#     newlines fail closed as unreadable Git-quoted paths; supporting them
+#     transparently would require non-POSIX NUL-delimited reads.
 #   - The scan always resolves the repo root from the script's own location,
 #     never the caller's CWD, so `cd scripts && ./module-size-gate.sh` and
 #     `./scripts/module-size-gate.sh` from the repo root behave identically.
@@ -71,12 +74,32 @@ LIST_FILE=$(mktemp)
 add_cleanup "$LIST_FILE"
 
 # cap_for <caps_file> <path>
-# Prints the recorded cap for <path>, or nothing (exit 1) if unlisted.
+# Prints the recorded cap for <path>, or nothing if unlisted. I/O failure stays
+# nonzero so callers cannot confuse a missing policy file with a default cap.
 cap_for() {
   awk -F'\t' -v p="$2" '
     $1 == p { print $2; found = 1; exit }
-    END { if (!found) exit 1 }
   ' "$1"
+}
+
+# validate_caps_file <caps_file>
+# Refuses missing, empty, malformed, duplicate, or nonnumeric policy before any
+# source scan. Defaults apply only to paths absent from a valid policy file.
+validate_caps_file() {
+  caps_file=$1
+  if [ ! -r "$caps_file" ]; then
+    echo "FAIL: module-size caps policy is not readable: $caps_file"
+    return 1
+  fi
+  if ! awk -F'\t' '
+    /^[[:space:]]*($|#)/ { next }
+    NF != 2 || $1 == "" || $2 !~ /^[0-9]+$/ || seen[$1]++ { bad = 1 }
+    { rules += 1 }
+    END { if (bad || rules == 0) exit 1 }
+  ' "$caps_file"; then
+    echo "FAIL: module-size caps policy is empty or malformed: $caps_file"
+    return 1
+  fi
 }
 
 # count_lines <path>
@@ -87,32 +110,85 @@ count_lines() {
   awk 'END { print NR }' "$1"
 }
 
+# list_rust_files <root_dir>
+# Writes repository-relative Rust source paths to LIST_FILE. Git owns file
+# visibility: tracked files plus nonignored untracked files are included, while
+# ignored output and nested worktrees are excluded. Enumeration fails closed;
+# a partial list is never accepted.
+list_rust_files() {
+  if ! list_root=$(cd -- "$1" 2>/dev/null && pwd -P); then
+    echo "FAIL: cannot resolve scan root $1"
+    return 1
+  fi
+
+  if ! repo_top=$(git -C "$list_root" rev-parse --show-toplevel 2>/dev/null); then
+    echo "FAIL: cannot enumerate Rust sources: $list_root is not a readable Git worktree"
+    return 1
+  fi
+  if [ "$repo_top" != "$list_root" ]; then
+    echo "FAIL: scan root $list_root is not the Git worktree root $repo_top"
+    return 1
+  fi
+
+  if ! git -c core.quotePath=false -C "$list_root" \
+    ls-files --cached --others --exclude-standard -- '*.rs' >"$LIST_FILE"; then
+    echo "FAIL: Git Rust-source enumeration failed under $list_root; refusing a partial scan"
+    return 1
+  fi
+}
+
 # scan <root_dir> <caps_file>
-# Walks every *.rs file under <root_dir> (excluding target/, node_modules/,
-# .git/), checks it against its recorded cap (or DEFAULT_CAP if unlisted),
+# Checks every Rust source selected by list_rust_files against its recorded cap
+# (or DEFAULT_CAP if unlisted),
 # and prints a FAIL line for every violation. Sets SCAN_COUNT to the number
 # of files examined. Returns 1 if any file violates its cap, or if zero
 # files were found — a healthy run must find files, never look green by
 # accident.
 scan() {
-  root_dir=$1
+  scan_root=$1
   caps_file=$2
   status=0
   scanned=0
 
-  find "$root_dir" \( -name target -o -name node_modules -o -name .git \) -prune -o \
-    -type f -name '*.rs' -print >"$LIST_FILE" || true
+  if ! validate_caps_file "$caps_file"; then
+    return 1
+  fi
+  if ! list_rust_files "$scan_root"; then
+    return 1
+  fi
 
-  while IFS= read -r abs; do
+  while IFS= read -r relpath; do
     scanned=$((scanned + 1))
-    relpath=${abs#"$root_dir"/}
-    lines=$(count_lines "$abs")
-    if cap=$(cap_for "$caps_file" "$relpath"); then
+    abs="$scan_root/$relpath"
+    if ! lines=$(count_lines "$abs" 2>/dev/null); then
+      echo "FAIL: Git listed $relpath but the gate could not read it; refusing to skip a source file"
+      status=1
+      continue
+    fi
+    case "$lines" in
+      '' | *[!0-9]*)
+        echo "FAIL: could not determine a numeric line count for $relpath"
+        status=1
+        continue
+        ;;
+    esac
+    if ! cap=$(cap_for "$caps_file" "$relpath"); then
+      echo "FAIL: could not read module-size cap policy for $relpath"
+      status=1
+      continue
+    elif [ -n "$cap" ]; then
       origin="recorded cap"
     else
       cap=$DEFAULT_CAP
       origin="default cap"
     fi
+    case "$cap" in
+      '' | *[!0-9]*)
+        echo "FAIL: $relpath has an invalid non-numeric cap: $cap"
+        status=1
+        continue
+        ;;
+    esac
     if [ "$lines" -gt "$cap" ]; then
       echo "FAIL: $relpath is $lines lines ($origin $cap). Extract a cohesive module instead of growing it, or deliberately raise this file's entry in scripts/module-size-caps.tsv and say why."
       status=1
@@ -121,7 +197,7 @@ scan() {
 
   SCAN_COUNT=$scanned
   if [ "$scanned" -eq 0 ]; then
-    echo "FAIL: scanned 0 *.rs files under $root_dir. A healthy run must find files — this usually means the gate was pointed at the wrong root. Treat zero files found as a failure, never as green."
+    echo "FAIL: scanned 0 *.rs files under $scan_root. A healthy run must find files — this usually means the gate was pointed at the wrong root. Treat zero files found as a failure, never as green."
     return 1
   fi
 
@@ -129,17 +205,23 @@ scan() {
 }
 
 self_test() {
-  space_file="$REPO_ROOT/src/discovery/temp file with space.rs"
-  no_newline_file="$REPO_ROOT/src/discovery/__module_size_gate_selftest_no_newline__.rs"
-  empty_dir=$(mktemp -d)
-  add_cleanup "$space_file"
-  add_cleanup "$no_newline_file"
-  add_cleanup "$empty_dir"
+  fixture_repo=$(mktemp -d)
+  empty_repo=$(mktemp -d)
+  fake_bin=$(mktemp -d)
+  add_cleanup "$fixture_repo"
+  add_cleanup "$empty_repo"
+  add_cleanup "$fake_bin"
   out=$(mktemp)
   add_cleanup "$out"
 
   failures=0
   echo "== module-size-gate self-test =="
+
+  fixture_git() {
+    env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      git -c core.hooksPath=/dev/null -c commit.gpgsign=false \
+      -C "$fixture_repo" "$@"
+  }
 
   # 0. Baseline: the real tree, unmodified, must already be green and report
   #    a nonzero scanned-file count (self-evidencing, not just silent "ok").
@@ -157,65 +239,164 @@ self_test() {
     failures=$((failures + 1))
   fi
 
-  # 1. Filenames containing spaces must be handled as whole paths, not
-  #    word-split. An unlisted, over-DEFAULT_CAP file with a space in its
-  #    name, nested under src/discovery/, must be caught.
-  over_default=$((DEFAULT_CAP + 10))
-  awk -v n="$over_default" 'BEGIN { for (i = 0; i < n; i++) print "// selftest line" }' >"$space_file"
-  if scan "$REPO_ROOT" "$CAPS_FILE" >"$out" 2>&1; then
-    echo "FAIL: gate did not catch a nested, unlisted file with a space in its name exceeding DEFAULT_CAP ($DEFAULT_CAP)"
-    failures=$((failures + 1))
-  elif grep -qF "src/discovery/temp file with space.rs is $over_default lines (default cap $DEFAULT_CAP)" "$out"; then
-    echo "PASS: filename containing a space is scanned as one path and its cap violation is caught"
+  # Build every destructive fixture in a unique temporary Git repository.
+  # The real checkout is read-only throughout the self-test.
+  fixture_git init -q
+  mkdir -p "$fixture_repo/src"
+  printf '.ignored/\n.worktrees/\n!src/\n!src/*.rs\n' >"$fixture_repo/.gitignore"
+  printf '// tracked fixture\n' >"$fixture_repo/src/tracked.rs"
+  fixture_git add .gitignore src/tracked.rs
+  fixture_git -c user.name=allie-self-test \
+    -c user.email=allie-self-test@example.invalid commit -qm 'module-size fixture'
+  printf '// nonignored untracked fixture\n' >"$fixture_repo/src/untracked.rs"
+
+  if scan "$fixture_repo" "$CAPS_FILE" >"$out" 2>&1 && [ "$SCAN_COUNT" -eq 2 ]; then
+    fixture_count=$SCAN_COUNT
+    echo "PASS: fixture baseline includes tracked and nonignored untracked Rust files ($fixture_count files)"
   else
-    echo "FAIL: violation message missing expected file/size/cap detail for the space-in-name file:"
+    echo "FAIL: fixture baseline did not include exactly its tracked and nonignored untracked Rust files:"
+    cat "$out"
+    failures=$((failures + 1))
+    fixture_count=2
+  fi
+
+  # 1. A tracked file over cap must fail. This is independent of ambient repo
+  #    contents and proves the index half of the enumeration contract.
+  over_default=$((DEFAULT_CAP + 10))
+  awk -v n="$over_default" 'BEGIN { for (i = 0; i < n; i++) print "// tracked line" }' >"$fixture_repo/src/tracked.rs"
+  if scan "$fixture_repo" "$CAPS_FILE" >"$out" 2>&1; then
+    echo "FAIL: gate did not catch an oversized tracked Rust file"
+    failures=$((failures + 1))
+  elif grep -qF "src/tracked.rs is $over_default lines (default cap $DEFAULT_CAP)" "$out"; then
+    echo "PASS: oversized tracked Rust files fail the gate"
+  else
+    echo "FAIL: tracked-file violation lacked expected path/size/cap detail:"
+    cat "$out"
+    failures=$((failures + 1))
+  fi
+  printf '// tracked fixture\n' >"$fixture_repo/src/tracked.rs"
+
+  # 2. A nonignored untracked file with a space must remain one path and fail.
+  space_file="$fixture_repo/src/temp file with space.rs"
+  awk -v n="$over_default" 'BEGIN { for (i = 0; i < n; i++) print "// untracked line" }' >"$space_file"
+  if scan "$fixture_repo" "$CAPS_FILE" >"$out" 2>&1; then
+    echo "FAIL: gate did not catch an oversized nonignored untracked Rust file with a space"
+    failures=$((failures + 1))
+  elif grep -qF "src/temp file with space.rs is $over_default lines (default cap $DEFAULT_CAP)" "$out"; then
+    echo "PASS: nonignored untracked filenames containing spaces are scanned as one path"
+  else
+    echo "FAIL: untracked space-in-name violation lacked expected detail:"
     cat "$out"
     failures=$((failures + 1))
   fi
   rm -f -- "$space_file"
 
-  # 2. Scanning an empty directory must fail loudly, never report green.
-  #    This is the zero-file guard: a wrong root (e.g. a caller-relative
-  #    path resolved against the wrong CWD) must never look like a pass.
-  if scan "$empty_dir" "$CAPS_FILE" >"$out" 2>&1; then
-    echo "FAIL: scanning an empty directory reported success instead of failing loud"
-    failures=$((failures + 1))
-  elif grep -qF "scanned 0 *.rs files under $empty_dir" "$out"; then
-    echo "PASS: scanning zero files fails loud with a clear message"
+  # 3. Ignored files and a real linked worktree under an ignored directory
+  #    must not contaminate the source set.
+  mkdir -p "$fixture_repo/.ignored"
+  awk -v n="$over_default" 'BEGIN { for (i = 0; i < n; i++) print "// ignored line" }' >"$fixture_repo/.ignored/oversized.rs"
+  linked_worktree="$fixture_repo/.worktrees/linked"
+  if fixture_git worktree add --detach "$linked_worktree" HEAD >/dev/null 2>&1; then
+    awk -v n="$over_default" 'BEGIN { for (i = 0; i < n; i++) print "// linked worktree line" }' >"$linked_worktree/src/oversized.rs"
+    if scan "$fixture_repo" "$CAPS_FILE" >"$out" 2>&1 && [ "$SCAN_COUNT" -eq "$fixture_count" ]; then
+      echo "PASS: ignored files and a real ignored linked worktree do not contaminate the scan"
+    else
+      echo "FAIL: ignored files or linked worktree contaminated the source scan:"
+      cat "$out"
+      failures=$((failures + 1))
+    fi
+    fixture_git worktree remove --force "$linked_worktree" >/dev/null 2>&1 || true
   else
-    echo "FAIL: zero-file failure message missing expected detail:"
+    echo "FAIL: could not create the linked-worktree self-test fixture"
+    failures=$((failures + 1))
+  fi
+
+  # 4. A tracked path that disappears after enumeration must fail closed,
+  #    never count as scanned and then silently green.
+  rm -f -- "$fixture_repo/src/tracked.rs"
+  if scan "$fixture_repo" "$CAPS_FILE" >"$out" 2>&1; then
+    echo "FAIL: gate skipped a missing tracked Rust file and returned success"
+    failures=$((failures + 1))
+  elif grep -qF "Git listed src/tracked.rs but the gate could not read it" "$out"; then
+    echo "PASS: unreadable or missing listed Rust files fail closed"
+  else
+    echo "FAIL: missing tracked file did not produce the fail-closed diagnostic:"
+    cat "$out"
+    failures=$((failures + 1))
+  fi
+  printf '// tracked fixture\n' >"$fixture_repo/src/tracked.rs"
+
+  # 5. A Git enumeration that emits a partial list and exits nonzero must fail.
+  real_git=$(command -v git)
+  # shellcheck disable=SC2016 # these are literal lines of the fake git script
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'for arg do' \
+    '  if [ "$arg" = "ls-files" ]; then' \
+    '    printf "%s\\n" src/tracked.rs' \
+    '    exit 42' \
+    '  fi' \
+    'done' \
+    'exec "$REAL_GIT" "$@"' >"$fake_bin/git"
+  chmod +x "$fake_bin/git"
+  old_path=$PATH
+  REAL_GIT=$real_git
+  export REAL_GIT
+  PATH="$fake_bin:$PATH"
+  if scan "$fixture_repo" "$CAPS_FILE" >"$out" 2>&1; then
+    echo "FAIL: partial Git enumeration returned success"
+    failures=$((failures + 1))
+  elif grep -qF "Git Rust-source enumeration failed" "$out"; then
+    echo "PASS: partial Git enumeration fails closed"
+  else
+    echo "FAIL: partial Git enumeration lacked the fail-closed diagnostic:"
+    cat "$out"
+    failures=$((failures + 1))
+  fi
+  PATH=$old_path
+  unset REAL_GIT
+
+  # 6. Missing or malformed cap policy must fail closed instead of silently
+  #    applying DEFAULT_CAP to every path.
+  missing_caps="$fixture_repo/missing-caps.tsv"
+  if scan "$fixture_repo" "$missing_caps" >"$out" 2>&1; then
+    echo "FAIL: missing cap policy returned success"
+    failures=$((failures + 1))
+  elif grep -qF "caps policy is not readable" "$out"; then
+    echo "PASS: missing cap policy fails closed"
+  else
+    echo "FAIL: missing cap policy lacked the fail-closed diagnostic:"
     cat "$out"
     failures=$((failures + 1))
   fi
 
-  # 2b. The gate resolves its root from its own location, not the caller's
-  #     CWD: invoking it from an unrelated directory must still scan the
-  #     whole repo and report the same nonzero file count.
-  cwd_out=$(cd /tmp && "$SCRIPT_DIR/module-size-gate.sh") && cwd_status=0 || cwd_status=$?
-  if [ "$cwd_status" -ne 0 ]; then
-    echo "FAIL: invoking the gate from /tmp (unrelated CWD) did not exit 0:"
-    echo "$cwd_out"
+  # 7. A Git repository with zero Rust sources must fail loudly.
+  env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    git -c core.hooksPath=/dev/null -C "$empty_repo" init -q
+  if scan "$empty_repo" "$CAPS_FILE" >"$out" 2>&1; then
+    echo "FAIL: scanning a Git repository with zero Rust files returned success"
     failures=$((failures + 1))
-  elif echo "$cwd_out" | grep -qE "^module-size gate ok: $baseline_count \*\.rs files scanned"; then
-    echo "PASS: invoking the gate from an unrelated CWD (/tmp) still scans the full repo ($baseline_count files)"
+  elif grep -qF "scanned 0 *.rs files under $empty_repo" "$out"; then
+    echo "PASS: scanning zero Rust files fails loud"
   else
-    echo "FAIL: invoking the gate from /tmp did not report the expected scanned-file count:"
-    echo "$cwd_out"
+    echo "FAIL: zero-file failure lacked expected detail:"
+    cat "$out"
     failures=$((failures + 1))
   fi
 
-  # 3. A file whose final line has no trailing newline must still be
+  # 8. A file whose final line has no trailing newline must still be
   #    counted correctly. `wc -l` undercounts such a file by one line
   #    (it counts newline characters, not lines); this gate must not.
+  no_newline_file="$fixture_repo/src/no-trailing-newline.rs"
   awk -v n="$DEFAULT_CAP" 'BEGIN {
     for (i = 0; i < n; i++) printf "// selftest line\n"
     printf "// selftest final line without a trailing newline"
   }' >"$no_newline_file"
   expected_lines=$((DEFAULT_CAP + 1))
-  if scan "$REPO_ROOT" "$CAPS_FILE" >"$out" 2>&1; then
+  if scan "$fixture_repo" "$CAPS_FILE" >"$out" 2>&1; then
     echo "FAIL: gate did not catch a file over cap whose final line lacks a trailing newline (wc -l would have undercounted it by one)"
     failures=$((failures + 1))
-  elif grep -qF "src/discovery/__module_size_gate_selftest_no_newline__.rs is $expected_lines lines (default cap $DEFAULT_CAP)" "$out"; then
+  elif grep -qF "src/no-trailing-newline.rs is $expected_lines lines (default cap $DEFAULT_CAP)" "$out"; then
     echo "PASS: a file whose final line lacks a trailing newline is counted correctly ($expected_lines lines, not undercounted)"
   else
     echo "FAIL: violation message missing expected file/size/cap detail for the no-trailing-newline file:"
@@ -224,17 +405,30 @@ self_test() {
   fi
   rm -f -- "$no_newline_file"
 
-  # 4. Cleanup confirmation: once every injected file is gone, the real
-  #    tree is green again with the same scanned-file count as baseline.
+  # 9. The gate resolves its root from its own location, not the caller's CWD.
+  cwd_out=$(cd /tmp && "$SCRIPT_DIR/module-size-gate.sh") && cwd_status=0 || cwd_status=$?
+  if [ "$cwd_status" -ne 0 ]; then
+    echo "FAIL: invoking the gate from /tmp (unrelated CWD) did not exit 0:"
+    echo "$cwd_out"
+    failures=$((failures + 1))
+  elif echo "$cwd_out" | grep -qE "^module-size gate ok: $baseline_count tracked or nonignored untracked \*\.rs files scanned"; then
+    echo "PASS: unrelated CWD still resolves the canonical repo ($baseline_count files)"
+  else
+    echo "FAIL: unrelated-CWD invocation reported an unexpected source count:"
+    echo "$cwd_out"
+    failures=$((failures + 1))
+  fi
+
+  # 10. No self-test touched the real checkout; it must remain green and stable.
   if scan "$REPO_ROOT" "$CAPS_FILE" >"$out" 2>&1; then
     if [ "$SCAN_COUNT" -eq "$baseline_count" ]; then
-      echo "PASS: real repo tree is green again after cleanup ($SCAN_COUNT files scanned)"
+      echo "PASS: real checkout stayed unchanged throughout self-test ($SCAN_COUNT files scanned)"
     else
-      echo "FAIL: scanned file count after cleanup ($SCAN_COUNT) does not match baseline ($baseline_count)"
+      echo "FAIL: real checkout scan count changed from $baseline_count to $SCAN_COUNT"
       failures=$((failures + 1))
     fi
   else
-    echo "FAIL: real repo tree is not green after cleanup:"
+    echo "FAIL: real checkout is not green after isolated self-tests:"
     cat "$out"
     failures=$((failures + 1))
   fi
@@ -253,7 +447,7 @@ if [ "${1:-}" = "--self-test" ]; then
 fi
 
 if scan "$REPO_ROOT" "$CAPS_FILE"; then
-  echo "module-size gate ok: $SCAN_COUNT *.rs files scanned across the repo (excluding target/, node_modules/, .git/); every file is within its recorded (or default $DEFAULT_CAP-line) cap."
+  echo "module-size gate ok: $SCAN_COUNT tracked or nonignored untracked *.rs files scanned in the canonical checkout; every file is within its recorded (or default $DEFAULT_CAP-line) cap."
   exit 0
 fi
 exit 1
