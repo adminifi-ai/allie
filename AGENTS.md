@@ -11,6 +11,7 @@ cargo fmt --check
 cargo test --locked
 cargo clippy --locked -- -D warnings
 npm run secrets:smoke
+npm run landscape:smoke
 npm run worker:smoke
 npm run evidence:smoke
 npm run axe-rules:smoke
@@ -20,7 +21,9 @@ npm run visibility:smoke
 npm run coverage:smoke
 npm run consumer:smoke
 npm run consumer-cwd:smoke
+npm run distribution:smoke
 npm run agentic:smoke
+npm run agentic:precision
 npm run release:smoke
 npm run autonomous:smoke
 npm run size:smoke

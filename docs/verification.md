@@ -53,8 +53,10 @@ cargo fmt --check
 cargo test --locked
 cargo clippy --locked -- -D warnings
 npm run secrets:smoke
+npm run landscape:smoke
 npm run worker:smoke
 npm run evidence:smoke
+npm run axe-rules:smoke
 npm run action:smoke
 npm run auth:smoke
 npm run visibility:smoke
@@ -77,6 +79,10 @@ under the same lockfile as the tests.
 `npm run secrets:smoke` runs the repo-owned secret scan self-test and then scans
 tracked source, nonignored worktree files, the current commit message, and the
 GitHub event payload when present. Findings are printed with redacted matches.
+
+`npm run landscape:smoke` validates the competitive record shape, review age,
+approved source set, and roadmap linkage that the landscape document claims are
+machine-checked.
 
 `npm run worker:smoke` proves the Node worker can run Playwright plus axe. It
 leaves:
@@ -306,11 +312,12 @@ synthetic worker-error path proves agentic worker infrastructure failures fail
 the `review` step before report/release instead of being recorded as completed
 advisory review.
 
-`npm run size:smoke` enforces the Rust module-size ratchet. It recursively
-scans every `*.rs` file in the repo (excluding `target/`, `node_modules/`,
-`.git/`), including nested modules such as `src/discovery/*.rs` and
-`src/workbench/tests.rs`, not just the top-level `src/*.rs` glob it used to
-check. Each file's cap is recorded in `scripts/module-size-caps.tsv`, keyed by
+`npm run size:smoke` enforces the Rust module-size ratchet. In the canonical
+checkout it asks Git for every tracked and nonignored untracked `*.rs` file,
+including nested modules such as `src/discovery/*.rs` and
+`src/workbench/tests.rs`. Ignored build output, caches, and nested worktrees do
+not contaminate the scan. Each file's cap is recorded in
+`scripts/module-size-caps.tsv`, keyed by
 its path relative to the repo root; an unlisted file falls back to the
 script's `DEFAULT_CAP`. Shrinking a file is free — lower its recorded cap to
 lock the win in. Growing past a cap fails the gate; extract a cohesive module
@@ -318,10 +325,11 @@ instead of raising the cap, and never raise `DEFAULT_CAP` or a cap silently.
 The gate resolves the repo root from its own script location (not the
 caller's CWD) and treats scanning zero files as a hard failure, never a
 silent pass. `scripts/module-size-gate.sh --self-test` exercises this
-directly: filenames containing spaces, invocation from an unrelated working
-directory, an empty scan root, and a file whose final line lacks a trailing
-newline (which plain `wc -l` would undercount) all have dedicated checks
-against injected, cleaned-up fixture files.
+directly: nonignored untracked files, ignored nested worktrees, filenames
+containing spaces, invocation from an unrelated working directory, an empty
+scan root, and a file whose final line lacks a trailing newline (which plain
+`wc -l` would undercount) all have dedicated checks against injected,
+cleaned-up fixture files.
 
 ## Failure Meanings
 
