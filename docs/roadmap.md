@@ -24,12 +24,15 @@ staged-app crawling and live multimodal provider calls remain future work.
 
 ## Product Target
 
-Allie should let a compliance engineer point it at an application and receive:
+Allie should let a release-owning engineer dispatch it against a repository and
+let an accessibility engineer investigate the resulting report without either
+having to hand-author the product map. They receive:
 
 1. An autonomously discovered sitemap, product-surface inventory, and likely user
    stories.
-2. Generated Playwright and axe coverage that replays through real browser
-   evidence before it can enforce release policy.
+2. A compact, durable accessibility test plan whose generated static, unit,
+   integration, Playwright, axe, and agentic checks run ephemerally in an
+   isolated workspace before they can enforce release policy.
 3. A complete WCAG 2.2 A/AA obligation ledger with drilldown from criterion to
    state, finding, artifact, agentic context, waiver, and replay proof.
 4. Agentic vision review for criteria that require judgment, with redaction
@@ -49,12 +52,13 @@ Allie should let a compliance engineer point it at an application and receive:
 
 ## Next
 
-1. Add authenticated staged-app discovery and changed-surface inference once the
-   job and coverage contracts are explicit.
-2. Add hosted PR/check annotations as adapters over the existing reporter
-   outputs, without duplicating policy in CI-specific files.
+1. Make repository-only cold starts useful without requiring a manifest, then
+   deepen them through sandboxed staged-app, authenticated, and changed-surface
+   discovery.
+2. Add PR/check publishers as adapters over the existing reporter outputs,
+   without duplicating policy in CI-specific files.
 
-Before adding hosted, dashboard, browser-cloud, or AI-heavy work, refresh
+Before adding dashboard, browser-cloud, or AI-heavy work, refresh
 [competitive-landscape.md](competitive-landscape.md) and prefer roadmap slices
 that improve packet provenance, replayability, privacy governance, and
 criterion-by-surface drilldown over scanner-rule parity.
@@ -62,10 +66,12 @@ criterion-by-surface drilldown over scanner-rule parity.
 ## Later
 
 1. Enable approved live multimodal provider calls behind the model gateway.
-2. Wire GitHub Checks, PR comments, and hosted evidence viewer from the same
+2. Wire GitHub Checks, PR comments, Azure, and other publishers from the same
    packets.
-3. Add SME review workbench, reviewer attestations, and promotion workflows.
-4. Add browser extension capture companion, multi-repo dashboard, and trends.
+3. Ingest externally authored, append-only reviewer attestations and waivers;
+   keep the authoring workflow outside Allie.
+4. Let later viewers, dashboards, or investigation tools consume the portable
+   packets without becoming required Allie infrastructure.
 
 ## Code Health Backlog
 

@@ -1,18 +1,24 @@
 # Architecture
 
+`VISION.md` owns the product boundaries. This document describes the intended
+technical shape; when it conflicts with the vision, update this document rather
+than preserving a second direction.
+
 ## Recommended Shape
 
 Allie should be a Rust orchestrator with narrow worker adapters.
 
 ```text
 allie CLI
-  -> config and flow manifest parser
+  -> repository/context discovery + optional manifest overrides
   -> run planner and budget policy
+  -> isolated target/environment adapter
+  -> durable accessibility test plan
   -> Playwright/axe worker adapter
   -> evidence packet writer
   -> standards ledger
   -> model gateway
-  -> report and PR adapters
+  -> report bundle + publisher adapters
 ```
 
 ## Module Boundaries
@@ -22,9 +28,10 @@ allie CLI
 Rust owns:
 
 - CLI surface;
-- flow manifest schema;
+- discovered-context and optional flow-manifest schemas;
 - run planning;
 - policy and budgets;
+- accessibility test-plan schema and promotion state;
 - evidence packet schema and hashing;
 - standards profile mapping;
 - ledger indexing;
@@ -59,7 +66,21 @@ The model gateway owns:
 
 OpenRouter is an implementation detail behind this gateway, not a dependency that should spread through product logic.
 
-### Evidence Store
+### Target and Environment Boundary
+
+Allie receives a pinned, read-only checkout and, when available, a runnable
+application through narrow adapters. Builds, target processes, generated tests,
+and exploration execute inside a declared ephemeral sandbox. Production-like
+data remains governed by the consuming organization's sanitization policy; an
+environment adapter returns the endpoint, revision, configuration inventory,
+and sanitization attestation that Allie records.
+
+Generated executable tests are run from an Allie-owned workspace and discarded.
+The durable asset is the compact accessibility test plan: surfaces, states,
+variants, obligations, methods, and required evidence. A proposed permanent test
+patch may be published as an artifact, but the audit never applies it.
+
+### Evidence Store and Publishers
 
 V0 can write local files.
 
@@ -67,8 +88,11 @@ Later versions can add:
 
 - SQLite for local indexed runs;
 - object storage for large artifacts;
-- Postgres for hosted multi-tenant dashboards;
 - signed URLs for report sharing.
+
+Storage and publication are separate adapter boundaries. Local disk, GitHub,
+Azure, object storage, or a future system receive the same canonical packet and
+report bundle; host-specific adapters do not own accessibility policy.
 
 ## Form Factors
 
@@ -77,18 +101,24 @@ Build in this order:
 1. Rust CLI.
 2. Playwright/axe worker.
 3. Local HTML/JSON report.
-4. GitHub check / CI adapter.
-5. Hosted evidence viewer.
-6. Dashboard and trend ledger.
-7. SME review workbench.
-8. Browser extension capture companion.
+4. Zero-config repository discovery with optional manifest enrichment.
+5. Durable test-plan compiler with ephemeral generated tests.
+6. Sandboxed target/environment adapters.
+7. GitHub check / CI publisher, followed by host-neutral publishers.
+8. Optional ingestion of externally authored human-review packets.
+
+A hosted viewer, dashboard, interactive SME workbench, or browser extension is
+not a near-term core form factor. Such products may consume Allie's portable
+packets later without turning the contained actor into a service or interactive
+agent.
 
 ## Design Constraint
 
 The interface should stay deep and narrow:
 
-- one manifest in;
+- repository access in, with optional context and policy overrides;
 - one evidence packet out;
+- one progressively disclosed report bundle over that packet;
 - deterministic exit semantics;
 - optional model enrichment behind explicit policy.
 

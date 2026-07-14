@@ -1,24 +1,33 @@
 # Allie Product Spec
 
-Date: 2026-06-18
+Date: 2026-07-14
 
 ## Product Thesis
 
-Allie is accessibility release intelligence: a harness that proves what can be proven automatically, packages context for what still needs judgment, and keeps accessibility evidence tied to code changes and release decisions.
+Allie is point-and-shoot accessibility release intelligence: a contained,
+unattended harness that starts from repository access, proves what can be proven
+automatically, accounts explicitly for what it could not prove, and keeps
+accessibility evidence tied to code changes and release decisions.
 
 The core product is an evidence system, not a score and not a generic scanner.
 
 ## Target Users
 
-- Frontend engineers who need fast, reproducible feedback in CI and PRs.
+- Release-owning frontend and full-stack engineers who need fast, reproducible
+  feedback in CI and PRs.
 - QA engineers who need browser-flow coverage and regression evidence.
-- Accessibility specialists who need richer context and fewer manual setup steps.
+- Accessibility engineers who review PRs and need a report deep enough to launch
+  their own investigations without repeating Allie's work.
 - Product and engineering leaders who need release status and trends.
 - Compliance and audit stakeholders who need defensible evidence packets.
 
 ## Job To Be Done
 
-Before a release ships, prove which critical user journeys are accessible, identify what blocks release, explain what remains uncertain, and generate enough context for engineering, product, accessibility, and compliance stakeholders to trust the decision.
+Given a repository and whatever runnable environment and policy context are
+available, autonomously discover and test the meaningful accessibility surface;
+produce a complete standards obligation ledger with evidence or attempted-method
+diagnostics behind every status; identify what blocks release; and generate one
+portable report that release engineers and accessibility engineers can trust.
 
 ## Non-Goals
 
@@ -27,6 +36,10 @@ Before a release ships, prove which critical user journeys are accessible, ident
 - Allie is not a dashboard detached from CI and release workflows.
 - Allie is not a scanner that collapses the product into one vague score.
 - Allie is not SaaS-first before local replay and evidence contracts are stable.
+- Allie does not remediate, suggest fixes, apply patches, or own a remediation
+  queue.
+- Allie is not a conversational agent or interactive accessibility workbench.
+- Allie does not require GitHub, a hosted account, or a hand-authored product map.
 
 ## Core Bets
 
@@ -37,19 +50,43 @@ Before a release ships, prove which critical user journeys are accessible, ident
 5. Rust should own orchestration, schemas, policy, storage, and reproducibility.
 6. Playwright and axe should run behind a narrow worker boundary.
 7. OpenRouter/model routing is useful only behind strict provider, privacy, budget, and audit policy.
+8. Repository inspection and runtime exploration should discover context before
+   asking consumers to enumerate routes, journeys, themes, tenants, roles, or
+   states.
+9. Durable test intent belongs in a versioned accessibility test plan; generated
+   executable tests belong in an ephemeral isolated workspace, not the target
+   repository. A test-only patch may be emitted as an inert report artifact, but
+   the audit never applies it and never proposes product remediation.
+10. A complete report and a complete assessment are different. The obligation
+    ledger is total; evaluated scope, sampling, failed attempts, and unverified
+    cells remain explicit.
+11. Local files, GitHub, Azure, object storage, and future systems are publisher
+    adapters over one canonical artifact bundle.
 
-## First Product Wedge
+## Point-and-Shoot Product Contract
 
-Build a CLI plus CI check that can:
+The canonical invocation starts from a checkout without requiring prior Allie
+state or a manifest. An optional manifest or prior packet may add policy,
+credentials, known journeys, environment adapters, or historical context.
 
-1. Read a flow manifest for one staged app.
-2. Authenticate with supplied staging credentials.
-3. Execute one critical user journey in Playwright.
-4. Run axe checks on page and interaction states.
-5. Capture screenshots, DOM snapshots, accessibility tree snapshots, console/network summaries, and trace metadata.
-6. Write an evidence packet to disk.
-7. Produce a local HTML report.
-8. Return a blocking exit code only for deterministic or scripted required failures.
+The unattended run must:
+
+1. Resolve a read-only target snapshot and record its revision and provenance.
+2. Infer build, launch, surfaces, routes, roles, themes, tenants, workflows,
+   states, and variation candidates from source and runtime evidence.
+3. Merge optional caller context through one explicit precedence policy.
+4. Emit a versioned accessibility test plan covering surfaces, states,
+   variations, obligations, methods, provenance, sampling, and unresolved gaps.
+5. Generate and run appropriate static, unit, integration, Playwright/axe, and
+   agentic checks inside a declared sandbox without mutating the target.
+6. Enforce per-run limits for elapsed time, spend, calls, actions, retries,
+   variants, and artifact bytes, then emit a usage and stop-reason receipt.
+7. Produce a complete obligation ledger. Every status carries evidence, or an
+   attempted method, diagnostic, missing prerequisite, and residual inquiry.
+8. Write one canonical packet and progressively disclosed report bundle that a
+   publisher adapter can deliver without changing accessibility semantics.
+9. Return a blocking exit code only for deterministic/scripted policy failures
+   or required evidence gaps; model opinion alone never blocks.
 
 ## Standards Model
 
@@ -120,7 +157,10 @@ Never block on:
 Every run should produce an evidence packet with:
 
 - run id, tool version, git metadata, environment metadata, timestamp, and policy profile;
-- flow manifest id and route/surface coverage;
+- resolved-context provenance, optional manifest/prior-packet references, and
+  discovered route/surface/variation coverage;
+- accessibility test-plan version, methods, selection/sampling decisions, and
+  unresolved discovery;
 - browser, viewport, mobile-web viewport, color scheme, reduced-motion, zoom, and locale settings;
 - axe JSON and summarized deterministic findings for captured desktop and mobile-web passes where configured;
 - DOM and accessibility tree snapshots for inspected states;
@@ -129,6 +169,10 @@ Every run should produce an evidence packet with:
 - model prompts, model ids, provider metadata, redaction state, and model outputs for agentic review;
 - verdicts mapped to standards obligations;
 - waivers and human-review provenance;
+- isolation, sanitization, redaction, model-egress, usage, budget, and
+  methodology receipts;
+- attempted-method diagnostics, missing prerequisites, and residual inquiry for
+  every unverified obligation;
 - replay instructions.
 
 ## Security and Privacy Contract
@@ -137,17 +181,26 @@ Allie assumes staging apps may still contain sensitive data.
 
 Requirements:
 
+- Execute target code and generated tests only through a declared ephemeral
+  isolation boundary with a read-only target, scratch-only writes, scoped
+  filesystem access, deny-by-default egress, bounded resources, process-tree
+  teardown, and brokered credentials. Unguarded runs are not release-grade.
 - Use short-lived scoped credentials.
 - Store secrets only through explicit credential providers.
-- Redact screenshots, DOM, console logs, network summaries, and prompts where configured.
+- Classify artifacts at creation; redact screenshots, DOM, console logs, network
+  summaries, prompts, URLs, and related metadata before model egress or public
+  publication when policy requires it.
 - Route real customer-like data only to approved ZDR-capable providers.
 - Never silently fall back from approved providers to unapproved providers.
 - Keep audit logs for model calls, generated findings, evidence projections, PR comments, and waiver decisions.
 - Bound exploration by route, time, spend, screenshot/video count, model calls, and retry limits.
+- Treat production-like environment provisioning and data sanitization as a
+  caller-owned adapter contract. Record its attestation; never acquire raw
+  production extraction credentials by default.
 
-## Acceptance For V0
+## Shipped V0 Foundation
 
-V0 is acceptable when this command exists:
+The original manifest-first acceptance slice remains the regression foundation:
 
 ```sh
 allie run --manifest examples/login-flow.yml --out .allie/runs/latest
@@ -162,3 +215,5 @@ And it produces:
 - deterministic pass/fail exit behavior;
 - a documented replay command;
 - `cargo test --locked` green.
+
+It proves the packet pipeline, not the full point-and-shoot contract above.
