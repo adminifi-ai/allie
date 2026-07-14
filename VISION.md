@@ -2,23 +2,28 @@
 
 > Accessibility evidence for every release.
 
-Allie is an open-source, self-hosted accessibility evidence harness: a Rust-first
+Allie is an Apache-2.0 open-source, self-hosted accessibility evidence harness: a Rust-first
 agentic engine you run as a developer, against your own repository, to assess
 where an application stands against accessibility standards — and then generate
 deep, comprehensive, replayable context you can act on however you like.
 
-You bring your own config, your own model, and your own API keys. You clone or
-download Allie into whatever repo you are working in, point it at your app, and
-run it. Wire it into CI, run it locally before a release, or drive it by hand.
-There is no account to create and nothing sent to a vendor by default. Allie runs
-where your code runs.
+The canonical entrypoint is the repository itself. You clone or download Allie,
+point it at a checkout, and dispatch one unattended run. Allie infers what it can
+from source and runtime; an optional manifest adds policy, credentials, required
+journeys, environment adapters, budgets, and organizational constraints. Wire it
+into CI or run it locally before a release. There is no account to create and
+nothing sent to a vendor by default. Allie runs where your code runs.
 
-Allie's job is autonomous accessibility audit, mapping, and reporting. It
-discovers the codebase, product surfaces, routes, themes, workflows, and likely
-user stories; writes and runs the tests and agentic QA loops itself; analyzes
+Allie's job is autonomous accessibility audit, mapping, testing, and reporting.
+It discovers the codebase, product surfaces, routes, roles, themes, tenants,
+workflows, states, and meaningful variations; designs and maintains a compact
+accessibility test plan; generates and runs the required static, unit,
+integration, browser, and agentic QA in an isolated workspace; analyzes
 screenshots, GIFs, and video walkthroughs with vision models; proves what can be
 proven automatically; and renders a defensible, replayable picture of
-accessibility status tied to a specific code revision.
+accessibility status tied to a specific code revision. Generated executable
+tests do not mutate the target repository. A proposed permanent test patch may
+be emitted as an artifact, but applying it is a separate explicit action.
 
 Allie does not remediate. Fixing what the audit finds — by hand, by ticket, or by
 a downstream fixing agent — is a separate product that consumes Allie's evidence.
@@ -32,29 +37,42 @@ the gap rather than letting either drift.
 
 ## Audience
 
-- Frontend and full-stack engineers who want fast, reproducible accessibility
-  feedback in CI and pull requests, tied to the code that changed.
+- Frontend and full-stack engineers who own releases and want fast,
+  reproducible accessibility feedback in CI and pull requests, tied to the code
+  that changed.
 - QA engineers who need real browser-flow evidence for keyboard, focus,
   zoom/reflow, reduced-motion, modal, menu, and form-error behavior.
-- Accessibility specialists who want richer context and far less manual setup
-  before they apply judgment.
+- Accessibility engineers who review pull requests and need reports rich enough
+  to become the context and jumping-off point for their own investigations.
 - Product, engineering, compliance, and audit stakeholders who need a defensible
   release picture without a false legal guarantee.
 
-The first reader of an Allie report is increasingly another agent. The artifact
-is written to be trusted and acted on by a machine as readily as by a person.
+Release-owning engineers and accessibility engineers are co-primary users. They
+share one canonical report: progressive disclosure should make the release
+picture immediate without hiding criterion-, surface-, finding-, and
+artifact-level depth. The first reader is also increasingly another agent, so
+the artifact must be trusted and acted on by a machine as readily as by a
+person.
 
 ## The Job
 
-Given a repository, a running or staged app, and a policy profile, Allie should
-discover the sitemap, product surfaces, likely user stories, relevant config,
-themes, and interaction states; write and replay deterministic Playwright + axe
-coverage through a real browser; map every result to its relevant WCAG 2.2 A/AA
+Given repository access — plus a runnable or staged app, credentials, policy,
+and environment context when available — Allie should discover the sitemap,
+product surfaces, likely user stories, relevant config, themes, roles, tenants,
+and interaction states; generate and replay deterministic Playwright + axe and
+other appropriate coverage; map every result to its relevant WCAG 2.2 A/AA
 obligation; run agentic vision passes over screenshots, GIFs, and video
 walkthroughs that render a committed pass/fail verdict (shown asterisked, with
 the evidence inlined) on criteria that require judgment; and produce a report
 where every in-scope criterion is green, red, not applicable, or explicitly
 unverified across every discovered product surface.
+
+The report is always complete even when the assessment cannot be. An
+unreachable workflow or unavailable form of evidence remains a visible ledger
+cell with attempted method, failure diagnostics, missing prerequisite, and
+residual investigation — never an omitted obligation and never a fabricated
+pass. Allie runs as comprehensively as the available context and configured
+budgets allow.
 
 The output is the product. It is deep and comprehensive by default, generated
 automatically, and structured so the next agent — or the next human — can trust
@@ -90,6 +108,14 @@ breaks one of them, it is the wrong change regardless of how convenient it is.
 - **Local-first and yours.** Allie runs where your code runs, on your keys, with
   nothing sent to a vendor by default. Privacy, provenance, and replayability are
   product features, not later hardening.
+- **Point and shoot.** Dispatch Allie, leave it alone, and receive the finished
+  evidence and report. Agentic work is internal and unattended; Allie is not a
+  conversational or drivable investigation tool.
+- **Cold-start capable.** Every run can begin from repository access alone.
+  Prior plans, packets, and human review records are optional explicit inputs,
+  never hidden memory or required infrastructure.
+- **Read-only target.** Allie may inspect, clone, build, and run target code in
+  a declared sandbox, but the audit does not rewrite the target repository.
 - **No legal promise.** Allie reports evidence, status, confidence, and residual
   review needs. It never claims legal compliance and never implies that a green
   run discharges a legal obligation.
@@ -106,10 +132,16 @@ The repo should refuse work that erodes the invariants above, specifically:
 
 - A global accessibility "score" or grade that collapses the obligation ledger
   into one number.
-- Remediation of any kind — fix suggestions, patch generation, or a remediation
-  queue. Allie audits, maps, and reports; fixing what it finds is a separate
-  product that consumes Allie's evidence. The audit report is where Allie's job
-  ends.
+- Product remediation of any kind — fix suggestions, product-code patches, or a
+  remediation queue. Allie audits, maps, and reports; fixing what it finds is a
+  separate product that consumes Allie's evidence. A test-only patch may be
+  proposed as an inert report artifact under the rule above, but Allie never
+  applies it and never proposes a product fix. The audit report is where
+  Allie's job ends.
+- An interactive accessibility workbench. Accessibility engineers investigate
+  from Allie's output in tools of their choice. Allie may ingest portable,
+  append-only attestations, waivers, corrections, and review notes on a later
+  run, but it does not own the workflow that authors them.
 - Model-only findings that block a release on their own. Agentic verdicts inform
   and prioritize; they gate only after scripted reproduction or human
   attestation promotes them.
@@ -146,8 +178,40 @@ can be revisited if evidence says we bet wrong.
    starts from evidence, not a fresh investigation. Allie does not take that next
    step itself.
 6. CI and scheduled verification are first-class distribution paths. Pull
-   requests should show what accessibility changed, while nightly or weekly
-   staging runs answer whether the shipped product is still accessible.
+   requests should deeply assess changed and high-risk surfaces, while nightly,
+   weekly, and release runs refresh the broadest feasible application coverage.
+   Both use the same evidence contract; carried-forward, stale, sampled, and
+   untested coverage stays explicit. When evaluating every discovered state is
+   infeasible, selection follows a reproducible methodology aligned with
+   WCAG-EM: defined scope and conformance target, structured and random samples,
+   complete-process closure, and a methodology receipt. Sampled evidence never
+   becomes a whole-product conformance claim.
+7. Discovery should remove setup, not conceal uncertainty. Repository inspection
+   is the zero-config baseline; runtime exploration and optional consumer context
+   deepen it. Consumers may seed critical journeys and known dimensions, but do
+   not have to enumerate every nook, theme, tenant, role, or state before Allie
+   is useful.
+8. Test intent outlives generated test code. The durable accessibility test plan
+   records surfaces, states, variants, obligations, methods, and evidence needs.
+   Executable tests are generated ephemerally behind adapters and can be
+   regenerated from the plan.
+9. Context and publication are adapter boundaries. A target adapter supplies a
+   pinned read-only checkout or runnable application; an environment adapter may
+   provision production-like data under an organization-owned sanitization
+   policy and return a machine-readable attestation; publishers deliver the same
+   canonical bundle to local disk, GitHub, Azure, object storage, or future
+   systems. GitHub is the first path, not a core assumption.
+10. Comprehensiveness is bounded and auditable. Core policy enforces configurable
+    per-run ceilings for time, spend, model calls, browser actions, retries,
+    variants, and artifact volume. Coverage saturation, sampling decisions,
+    budget exhaustion, and every remaining gap are receipts, not invisible
+    control flow. Cross-run
+    budget accounting is a later adapter, not required core state.
+11. Running arbitrary target code requires declared isolation. Builds,
+    application processes, generated tests, and exploration execute in an
+    ephemeral sandbox with scoped filesystem access, bounded resources,
+    deny-by-default egress, and brokered credentials. An unguarded run must say
+    so and cannot present itself as release-grade.
 
 ## Lifespan
 
@@ -161,25 +225,32 @@ deliberately.
 Allie is not SaaS-first. A managed or hosted layer — multi-tenant dashboards,
 shared history, organization rollups — is a plausible later evolution, not a
 near-term goal, and nothing in the hosted direction is allowed to compromise the
-local-first contracts it would eventually be built on.
+local-first contracts it would eventually be built on. Portable packets and
+publisher adapters are the extension point; the core does not grow a hosted
+control plane to achieve distribution.
 
 ## What Excellent Looks Like
 
-**Now.** The local loop is trustworthy and boring to run. A developer runs one
-command against a staged app and gets a replayable evidence packet, a WCAG
-drilldown with no silent gaps, and a release decision that explains itself —
-every time, byte-stable enough to gate CI on.
+**Now.** The shipped manifest-first local loop is trustworthy and boring to run.
+It returns a replayable evidence packet, a WCAG drilldown with no silent gaps,
+and a release decision that explains itself, byte-stable enough to gate CI on.
+The immediate product target is to preserve those properties while replacing
+required hand-authored manifests with one unattended repository dispatch.
 
-**Six to twelve months.** A developer clones Allie into their repo, points it at
-a staged or running app with their own model keys, and runs one command in CI or
-locally. Allie autonomously discovers a representative product surface; generates
-and replays Playwright plus axe coverage; preserves DOM, accessibility tree,
-screenshot, video/GIF, trace, console, network, and model-review artifacts under
-redaction policy; and emits a WCAG drilldown report that shows every criterion as
-pass, fail, not applicable, or a committed agentic verdict — with no silent "not
-tested" gaps. The report is complete enough that whatever fixes the findings — an
-agent or a human — can start without re-investigating. It explains every
-release-blocking decision in terms of evidence, and never claims legal compliance.
+**Six to twelve months.** A developer dispatches Allie against an arbitrary web
+repository with no required hand-authored product map. Allie inspects source,
+starts or connects to the application through a sandboxed adapter, discovers
+meaningful surfaces and variation dimensions, maintains the compact test plan,
+and generates and replays the necessary coverage. It preserves DOM,
+accessibility tree, screenshot, video/GIF, trace, console, network, test, and
+model-review artifacts under redaction policy; then emits a portable WCAG
+drilldown report that accounts for every criterion and every discovered surface
+without silent gaps. Pull-request runs focus on change; scheduled and release
+runs evaluate the broadest feasible scope and disclose any reproducible
+sampling. The report is complete enough that whatever investigates or
+fixes the findings — an accessibility engineer, another agent, or a product team
+— can start without repeating Allie's work. It explains every release-blocking
+decision in terms of evidence and never claims legal compliance.
 
 **Beyond.** Allie is the default way a team brings accessibility evidence to a
 release conversation — the harness whose packets a fixing agent, an auditor, and

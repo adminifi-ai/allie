@@ -3,6 +3,8 @@
 Allie is a Rust-first accessibility evidence harness and release intelligence
 system.
 
+Licensed under the [Apache License 2.0](LICENSE).
+
 The product goal is not to be another accessibility scanner or an "AI fixes
 accessibility" overlay. Allie's moat is the artifact a release can carry: a
 replayable evidence packet, a complete WCAG obligation ledger, and a

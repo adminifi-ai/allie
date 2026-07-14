@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Accessibility evidence harness and release intelligence CLI"
 publish = false
-license = "UNLICENSED"
+license = "Apache-2.0"
 
 [dependencies]
 chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
