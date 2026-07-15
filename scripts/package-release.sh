@@ -5,6 +5,7 @@
 # The bundle layout is the runtime contract:
 #   allie/bin/allie
 #   allie/workers/browser/run.mjs
+#   allie/workers/agentic/review.mjs
 #   allie/node_modules/...
 #   allie/ms-playwright/...
 set -eu
@@ -21,20 +22,24 @@ BUNDLE="$DIST/allie"
 ARCHIVE="$DIST/allie-$target_name.tar.gz"
 
 rm -rf "$BUNDLE" "$ARCHIVE"
-mkdir -p "$BUNDLE/bin" "$BUNDLE/workers" "$BUNDLE/fixtures"
+mkdir -p "$BUNDLE/bin" "$BUNDLE/fixtures"
 
-if [ ! -d node_modules ]; then
-  npm ci
-fi
+# A pre-existing node_modules directory may be stale relative to the lockfile.
+# Release contents must be materialized from package-lock.json exactly.
+npm ci
 
 cargo build --release --locked
 cp target/release/allie "$BUNDLE/bin/allie"
-cp -R workers/browser "$BUNDLE/workers/browser"
+cp -R workers "$BUNDLE/workers"
 cp -R fixtures/login "$BUNDLE/fixtures/login"
 cp package.json "$BUNDLE/package.json"
 cp package-lock.json "$BUNDLE/package-lock.json"
 cp -R node_modules "$BUNDLE/node_modules"
 
-PLAYWRIGHT_BROWSERS_PATH="$BUNDLE/ms-playwright" npx playwright install chromium
+PLAYWRIGHT_BROWSERS_PATH="$BUNDLE/ms-playwright" npx playwright install chromium --only-shell
+# Playwright's installer bookkeeping points back to the source checkout's
+# node_modules path. It is not needed to launch the bundled browser and must not
+# leak build-machine paths into a portable release artifact.
+rm -rf "$BUNDLE/ms-playwright/.links"
 tar -czf "$ARCHIVE" -C "$DIST" allie
 echo "Allie release bundle: $ARCHIVE"

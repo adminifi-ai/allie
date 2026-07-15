@@ -10,9 +10,14 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
+mod assets;
+use assets::{
+    AGENTIC_WORKER, BROWSER_WORKER, WorkerAsset, WorkerScriptResolution, WorkerScriptSearch,
+    resolve_worker_script,
+};
+pub(crate) use assets::{agentic_worker_script, apply_worker_environment, browser_worker_script};
+
 const DOCTOR_SCHEMA: &str = "allie.doctor.v0";
-const BROWSER_WORKER_ENV: &str = "ALLIE_BROWSER_WORKER";
-const BROWSER_WORKER_RELATIVE: &str = "workers/browser/run.mjs";
 const DOCTOR_TIMEOUT_MS: u64 = 30_000;
 
 #[derive(Debug)]
@@ -76,13 +81,15 @@ pub(crate) struct DoctorReceipt {
 
 pub(crate) fn run_doctor(options: DoctorOptions) -> DoctorReceipt {
     let out_dir = absolute_out_dir(&options.out_dir);
-    let worker_resolution = resolve_worker_script();
+    let browser_resolution = resolve_worker_script(BROWSER_WORKER);
+    let agentic_resolution = resolve_worker_script(AGENTIC_WORKER);
     let node_check = check_node();
     let node_ok = node_check.status == DoctorCheckStatus::Ok;
     let mut checks = vec![
-        check_worker_script(&worker_resolution),
+        check_worker_script(BROWSER_WORKER, &browser_resolution),
+        check_worker_script(AGENTIC_WORKER, &agentic_resolution),
         node_check,
-        check_playwright(worker_resolution.as_ref().ok(), &out_dir),
+        check_playwright(browser_resolution.as_ref().ok(), &out_dir),
         check_target(options.manifest_path.as_deref(), node_ok),
         check_model(options.manifest_path.as_deref()),
     ];
@@ -112,30 +119,6 @@ pub(crate) fn run_doctor(options: DoctorOptions) -> DoctorReceipt {
     receipt
 }
 
-pub(crate) fn browser_worker_script() -> std::result::Result<PathBuf, String> {
-    resolve_worker_script()
-        .map(|resolution| resolution.path)
-        .map_err(|search| search.message)
-}
-
-pub(crate) fn apply_worker_environment(command: &mut Command, worker_script: &Path) {
-    let Some(root) = worker_asset_root(worker_script) else {
-        return;
-    };
-    let browsers = root.join("ms-playwright");
-    if browsers.is_dir() {
-        command.env("PLAYWRIGHT_BROWSERS_PATH", browsers);
-    }
-}
-
-fn worker_asset_root(worker_script: &Path) -> Option<PathBuf> {
-    worker_script
-        .parent()?
-        .parent()?
-        .parent()
-        .map(Path::to_path_buf)
-}
-
 fn absolute_out_dir(path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
@@ -146,138 +129,25 @@ fn absolute_out_dir(path: &Path) -> PathBuf {
     }
 }
 
-#[derive(Debug)]
-struct WorkerScriptResolution {
-    path: PathBuf,
-    source: String,
-}
-
-#[derive(Debug)]
-struct WorkerScriptSearch {
-    message: String,
-    searched_paths: Vec<PathBuf>,
-}
-
-fn resolve_worker_script() -> std::result::Result<WorkerScriptResolution, WorkerScriptSearch> {
-    let env_override = std::env::var_os(BROWSER_WORKER_ENV).map(PathBuf::from);
-    let exe_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("allie"));
-    resolve_worker_script_from(
-        env_override,
-        &exe_path,
-        Path::new(env!("CARGO_MANIFEST_DIR")),
-    )
-}
-
-fn resolve_worker_script_from(
-    env_override: Option<PathBuf>,
-    exe_path: &Path,
-    manifest_dir: &Path,
-) -> std::result::Result<WorkerScriptResolution, WorkerScriptSearch> {
-    if let Some(path) = env_override {
-        if path.exists() {
-            let path = std::fs::canonicalize(&path).unwrap_or(path);
-            return Ok(WorkerScriptResolution {
-                path,
-                source: BROWSER_WORKER_ENV.to_string(),
-            });
-        }
-        return Err(WorkerScriptSearch {
-            message: format!(
-                "{BROWSER_WORKER_ENV} points to missing browser worker at {}; unset it or point it at {}",
-                path.display(),
-                BROWSER_WORKER_RELATIVE
-            ),
-            searched_paths: vec![path],
-        });
-    }
-
-    let candidates = worker_script_candidates(exe_path, manifest_dir);
-    for (path, source) in &candidates {
-        if path.exists() {
-            let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-            return Ok(WorkerScriptResolution {
-                path,
-                source: (*source).to_string(),
-            });
-        }
-    }
-
-    Err(WorkerScriptSearch {
-        message: format!(
-            "browser worker script not found; searched {}; install Allie with bundled worker assets, run from a checkout, or set {BROWSER_WORKER_ENV}",
-            candidates
-                .iter()
-                .map(|(path, _)| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        searched_paths: candidates.into_iter().map(|(path, _)| path).collect(),
-    })
-}
-
-fn worker_script_candidates(exe_path: &Path, manifest_dir: &Path) -> Vec<(PathBuf, &'static str)> {
-    let exe_dir = exe_path.parent().unwrap_or_else(|| Path::new("."));
-    let mut candidates = Vec::new();
-    push_worker_candidate(
-        &mut candidates,
-        exe_dir.join(BROWSER_WORKER_RELATIVE),
-        "executable directory",
-    );
-    push_worker_candidate(
-        &mut candidates,
-        exe_dir.join("../").join(BROWSER_WORKER_RELATIVE),
-        "bundled distribution root",
-    );
-    push_worker_candidate(
-        &mut candidates,
-        exe_dir.join("../lib/allie").join(BROWSER_WORKER_RELATIVE),
-        "installed lib directory",
-    );
-    push_worker_candidate(
-        &mut candidates,
-        exe_dir.join("../share/allie").join(BROWSER_WORKER_RELATIVE),
-        "installed share directory",
-    );
-    push_worker_candidate(
-        &mut candidates,
-        exe_dir.join("../../").join(BROWSER_WORKER_RELATIVE),
-        "cargo target directory",
-    );
-    push_worker_candidate(
-        &mut candidates,
-        manifest_dir.join(BROWSER_WORKER_RELATIVE),
-        "source checkout",
-    );
-    candidates
-}
-
-fn push_worker_candidate(
-    candidates: &mut Vec<(PathBuf, &'static str)>,
-    path: PathBuf,
-    source: &'static str,
-) {
-    if !candidates.iter().any(|(existing, _)| existing == &path) {
-        candidates.push((path, source));
-    }
-}
-
 fn check_worker_script(
+    worker: WorkerAsset,
     resolution: &std::result::Result<WorkerScriptResolution, WorkerScriptSearch>,
 ) -> DoctorCheck {
     match resolution {
         Ok(resolution) => DoctorCheck {
-            name: "browser worker".to_string(),
+            name: worker.label.to_string(),
             status: DoctorCheckStatus::Ok,
             detail: format!("{} ({})", resolution.path.display(), resolution.source),
             fix: None,
         },
         Err(search) => DoctorCheck {
-            name: "browser worker".to_string(),
+            name: worker.label.to_string(),
             status: DoctorCheckStatus::Fail,
             detail: search.message.clone(),
             fix: Some(format!(
-                "Run from an Allie checkout, install a package that includes {}, or set {BROWSER_WORKER_ENV}. Searched: {}",
-                BROWSER_WORKER_RELATIVE,
+                "Run from an Allie checkout, install a package that includes {}, or set {}. Searched: {}",
+                worker.relative_path,
+                worker.env_var,
                 search
                     .searched_paths
                     .iter()

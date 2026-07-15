@@ -1,12 +1,13 @@
 use crate::model::{AgenticAssessmentRecord, AgenticMediaRef, ArtifactPolicy, EvidencePacket};
 use crate::standards::{wcag22_success_criteria, wcag22_success_criterion_ids};
+use crate::worker_runtime;
 use crate::{
     AllieError, FlowManifest, Result, artifact_for_path, now_utc, read_json_file, write_json_pretty,
 };
 use std::collections::BTreeSet;
 use std::fmt::{self, Display};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 #[cfg(test)]
 use std::sync::Mutex;
@@ -43,14 +44,6 @@ impl Display for AgenticReviewOutcome {
             Self::Degraded => "degraded",
         })
     }
-}
-
-fn agentic_worker_script() -> PathBuf {
-    std::env::var_os("ALLIE_AGENTIC_WORKER")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("workers/agentic/review.mjs")
-        })
 }
 
 #[derive(serde::Serialize)]
@@ -177,21 +170,18 @@ fn run_agentic_review_with_timeout(
     let response_path = run_dir.join("agentic-response.json");
     write_json_pretty(&request_path, &request)?;
 
-    let script = agentic_worker_script();
-    if !script.exists() {
-        return Err(AllieError::Worker(format!(
-            "agentic worker script not found at {}",
-            script.display()
-        )));
-    }
-    let mut child = Command::new("node")
+    let script = worker_runtime::agentic_worker_script().map_err(AllieError::Worker)?;
+    let mut command = Command::new("node");
+    command
         .arg(&script)
         .arg("--request")
         .arg(&request_path)
         .arg("--response")
         .arg(&response_path)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    worker_runtime::apply_worker_environment(&mut command, &script);
+    let mut child = command
         .spawn()
         .map_err(|source| AllieError::Worker(format!("spawn agentic worker: {source}")))?;
     let status = child
