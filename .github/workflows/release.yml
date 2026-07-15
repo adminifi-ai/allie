@@ -5,32 +5,109 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  linux-bundle:
+  build-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
 
       - run: npm ci
 
+      - run: npx playwright install --with-deps chromium
+
       - run: npm run verify
 
       - run: scripts/package-release.sh dist
 
-      - name: Upload release bundle
+      - name: Generate release checksums
+        run: scripts/release-checksums.sh dist
+
+      - name: Stage unsigned release inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-release-bundle
+          path: |
+            dist/allie-linux-x64.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-and-publish:
+    needs: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Download unsigned release inputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: unsigned-release-bundle
+          path: dist
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign release bundle with GitHub OIDC
+        run: >-
+          cosign sign-blob --yes
+          --bundle dist/allie-linux-x64.tar.gz.sigstore.json
+          dist/allie-linux-x64.tar.gz
+
+      - name: Publish only after exact asset readback
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes "Allie $GITHUB_REF_NAME"
-          gh release upload "$GITHUB_REF_NAME" dist/allie-linux-x64.tar.gz --clobber
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          created=false
+
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ] && [ "$created" = true ]; then
+              set +e
+              release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)
+              lookup_status=$?
+              if [ "$lookup_status" -eq 0 ] && [ -n "$release_id" ]; then
+                gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"
+              fi
+              set -e
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          gh release create "$tag" --draft --verify-tag --title "$tag" --notes "Allie $tag"
+          created=true
+
+          gh release upload "$tag" \
+            dist/allie-linux-x64.tar.gz \
+            dist/SHA256SUMS \
+            dist/allie-linux-x64.tar.gz.sigstore.json
+
+          actual_assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.assets[].name' | LC_ALL=C sort)
+          expected_assets=$(printf '%s\n' \
+            SHA256SUMS \
+            allie-linux-x64.tar.gz \
+            allie-linux-x64.tar.gz.sigstore.json | LC_ALL=C sort)
+          if [ "$actual_assets" != "$expected_assets" ]; then
+            printf 'release asset mismatch\nexpected:\n%s\nactual:\n%s\n' "$expected_assets" "$actual_assets" >&2
+            exit 1
+          fi
+
+          gh release edit "$tag" --draft=false
+          created=false

@@ -1,0 +1,6 @@
+# Structured metadata for every advisory ID in `.cargo/audit.toml` `ignore`.
+# Entries are fail-closed: the release contract rejects missing fields, invalid
+# calendar dates, expired dates, duplicate IDs, and records not present in the
+# cargo-audit ignore list.
+schema = 1
+waiver = []
