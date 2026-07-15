@@ -1,10 +1,66 @@
 use crate::model_credentials::{MODEL_PROVIDER_PRESETS, ModelProviderPreset};
 use crate::worker::RunFailure;
-use crate::{AllieError, FlowManifest, ModelPolicy, Result};
+use crate::{AllieError, FlowManifest, Result};
+
+#[derive(Clone, Copy, Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ModelRedactionMode {
+    None,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct ModelPolicy {
+    pub(crate) enabled: bool,
+    pub(crate) provider_allowlist: Vec<String>,
+    pub(crate) zdr_required: bool,
+    #[serde(default)]
+    pub(crate) redaction: Option<ModelRedactionMode>,
+    #[serde(default)]
+    pub(crate) provider: Option<String>,
+    #[serde(default)]
+    pub(crate) model: Option<String>,
+    #[serde(default)]
+    pub(crate) api_key_env: Option<String>,
+    #[serde(default)]
+    pub(crate) base_url: Option<String>,
+    #[serde(default)]
+    pub(crate) max_model_calls: Option<u32>,
+    #[serde(default)]
+    pub(crate) reasoning_effort: Option<String>,
+}
+
+impl Default for ModelPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider_allowlist: Vec::new(),
+            zdr_required: true,
+            redaction: None,
+            provider: None,
+            model: None,
+            api_key_env: None,
+            base_url: None,
+            max_model_calls: None,
+            reasoning_effort: None,
+        }
+    }
+}
+
+impl ModelPolicy {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if let Some(failure) = self.redaction_mode_failure() {
+            return Err(AllieError::InvalidManifest(failure.message));
+        }
+        Ok(())
+    }
+}
 
 impl FlowManifest {
     pub(crate) fn enforce_model_provider_allowlist(&self) -> Result<()> {
         if let Some(failure) = self.model.provider_allowlist_incomplete_failure() {
+            return Err(AllieError::InvalidManifest(failure.message));
+        }
+        if let Some(failure) = self.model.redaction_mode_failure() {
             return Err(AllieError::InvalidManifest(failure.message));
         }
         if let Some(failure) = self.model.provider_allowlist_failure() {
@@ -22,6 +78,21 @@ pub(crate) struct ResolvedModelRoute {
 }
 
 impl ModelPolicy {
+    pub(crate) fn accepted_redaction_mode(&self) -> Option<ModelRedactionMode> {
+        self.redaction.filter(|_| self.enabled)
+    }
+
+    pub(crate) fn redaction_mode_failure(&self) -> Option<RunFailure> {
+        (self.enabled && self.redaction.is_none()).then(|| {
+            RunFailure::new(
+                "model-policy-incomplete",
+                "model-redaction",
+                "model calls are enabled but model.redaction is missing; V0 requires explicit none"
+                    .to_string(),
+            )
+        })
+    }
+
     pub(crate) fn resolved_route(&self) -> ResolvedModelRoute {
         let provider = normalized_model_setting(&self.provider)
             .unwrap_or_else(|| default_model_provider_preset().provider.to_string());

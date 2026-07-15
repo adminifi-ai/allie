@@ -39,6 +39,7 @@
     "model_provider_allowlist": [],
     "model_status": "disabled",
     "zdr_required": true,
+    "model_egress_redaction": null,
     "redaction_profile": "not_redacted_local_fixture",
     "budget": {
       "model_calls": 0,

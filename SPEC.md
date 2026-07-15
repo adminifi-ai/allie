@@ -188,9 +188,12 @@ Requirements:
   teardown, and brokered credentials. Unguarded runs are not release-grade.
 - Use short-lived scoped credentials.
 - Store secrets only through explicit credential providers.
-- Classify artifacts at creation; redact screenshots, DOM, console logs, network
-  summaries, prompts, URLs, and related metadata before model egress or public
-  publication when policy requires it.
+- Classify artifacts at creation. V0 model egress supports only an explicit
+  `model.redaction: none`: no screenshot, video, or related content transformer
+  is claimed. Each worker response must retain a versioned `not_sent` or
+  `not_applied` receipt, while local artifact redaction/publication policy stays
+  separate. Future redaction profiles require a real transformer and hostile
+  proof before they may claim `applied`. Public publication remains fail-closed.
 - Route real customer-like data only to approved ZDR-capable providers.
 - Never silently fall back from approved providers to unapproved providers.
 - Keep audit logs for model calls, generated findings, evidence projections, PR comments, and waiver decisions.

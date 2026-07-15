@@ -33,6 +33,7 @@ const server = http.createServer((request, response) => {
 
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 try {
+  await assertMissingAndUnsupportedRedactionFailClosed();
   const requestPath = path.join(work, 'model-request.json');
   const responsePath = path.join(work, 'model-response.json');
   await fs.writeFile(requestPath, `${JSON.stringify(agenticRequest(server.address().port), null, 2)}\n`);
@@ -65,6 +66,7 @@ function agenticRequest(port) {
       api_key_env: 'ALLIE_AGENTIC_FAKE_KEY',
       base_url: `http://127.0.0.1:${port}`,
       max_calls: 5,
+      redaction: 'none',
     },
     artifacts_dir: path.join(work, 'model-artifacts'),
     surfaces: [
@@ -235,6 +237,45 @@ async function assertWorkerResponse(responsePath) {
   }
   if (!workerResponse.assessments[0].media.some((entry) => entry.caption.includes('settings'))) {
     throw new Error('agentic response did not include settings-surface media');
+  }
+  const receipt = workerResponse.redaction_receipt;
+  if (receipt?.schema !== 'allie.model-redaction-receipt.v0' || receipt.profile !== 'none' || receipt.status !== 'not_applied') {
+    throw new Error(`fake-provider response did not retain a truthful not_applied receipt: ${JSON.stringify(receipt)}`);
+  }
+}
+
+async function assertMissingAndUnsupportedRedactionFailClosed() {
+  for (const [label, redaction] of [['missing', undefined], ['unsupported', 'blur-v1']]) {
+    const request = agenticRequest(server.address().port);
+    if (redaction === undefined) delete request.model.redaction;
+    else request.model.redaction = redaction;
+    const requestPath = path.join(work, `${label}-redaction-request.json`);
+    const responsePath = path.join(work, `${label}-redaction-response.json`);
+    request.artifacts_dir = path.join(work, `${label}-redaction-artifacts`);
+    await fs.writeFile(requestPath, `${JSON.stringify(request, null, 2)}\n`);
+
+    const before = capturedRequests.length;
+    const code = await runAgenticWorker(requestPath, responsePath);
+    if (code !== 1 || capturedRequests.length !== before) {
+      throw new Error(`${label} redaction mode did not fail before provider transmission`);
+    }
+    const response = JSON.parse(await fs.readFile(responsePath, 'utf8'));
+    const receipt = response.redaction_receipt;
+    if (receipt?.schema !== 'allie.model-redaction-receipt.v0' || receipt.profile !== 'none' || receipt.status !== 'not_sent') {
+      throw new Error(`${label} redaction refusal did not carry a truthful not_sent receipt: ${JSON.stringify(receipt)}`);
+    }
+    if (await pathExists(request.artifacts_dir)) {
+      throw new Error(`${label} redaction mode created capture artifacts before refusal`);
+    }
+  }
+}
+
+async function pathExists(target) {
+  try {
+    await fs.access(target);
+    return true;
+  } catch {
+    return false;
   }
 }
 

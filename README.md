@@ -340,8 +340,13 @@ The autonomous loop discovers fixture surfaces, promotes generated flow
 candidates into a replayable manifest, captures axe, screenshot, DOM,
 accessibility-tree, keyboard, and trace artifacts, and projects the release
 decision from that replay evidence. With `model.enabled: true`, the review
-step calls the live agentic gateway instead; generated and agentic claims do
-not enforce release policy until replayed, scripted, or human-attested.
+step calls the live agentic gateway instead and the manifest must explicitly
+declare `model.redaction: none`. That is an honest V0 boundary, not a redaction
+claim: unmodified screenshots and video may reach the approved provider, and
+the worker records `not_sent` at zero calls or `not_applied` after egress.
+Local artifact redaction remains a separate policy. Generated and agentic
+claims do not enforce release policy until replayed, scripted, or
+human-attested.
 
 ## Local Verification
 

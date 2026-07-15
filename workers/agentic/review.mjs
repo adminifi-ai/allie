@@ -18,6 +18,7 @@ import { chromium } from 'playwright';
 
 const REQUEST_SCHEMA = 'allie.agentic.request.v0';
 const RESPONSE_SCHEMA = 'allie.agentic.response.v0';
+const REDACTION_RECEIPT_SCHEMA = 'allie.model-redaction-receipt.v0';
 const MAX_REVIEW_ACTIONS = 3;
 const MAX_MODEL_RETRIES = 1;
 const ALLOWED_REVIEW_KEYS = new Set(['Tab']);
@@ -38,12 +39,16 @@ async function run(request) {
   if (request.schema !== REQUEST_SCHEMA) {
     return errorResponse(`unexpected request schema ${request.schema}`);
   }
+  if (request.model?.redaction !== 'none') {
+    return errorResponse('model.redaction must explicitly declare the supported V0 mode "none"');
+  }
   const apiKey = process.env[request.model.api_key_env || 'OPENROUTER_API_KEY'];
   const artifactsDir = path.resolve(repoRoot, request.artifacts_dir);
   await fs.mkdir(artifactsDir, { recursive: true });
 
   let browser = null;
   let fixtureServer = null;
+  let calls = 0;
   const errors = [];
   try {
     const target = await resolveTarget(request.target);
@@ -59,7 +64,6 @@ async function run(request) {
 
     const groups = groupCriteria(request.criteria || []);
     const maxCalls = request.model.max_calls ?? 4;
-    let calls = 0;
     const usage = { prompt_tokens: 0, completion_tokens: 0 };
     const assessmentResults = new Map();
 
@@ -121,13 +125,14 @@ async function run(request) {
       provider: request.model.provider || 'openrouter',
       model: request.model.model,
       calls,
+      redaction_receipt: redactionReceipt(calls),
       usage,
       assessments,
       ...(precisionGate ? { precision_gate: precisionGate } : {}),
       errors,
     };
   } catch (error) {
-    return errorResponse(error instanceof Error ? error.message : String(error));
+    return errorResponse(error instanceof Error ? error.message : String(error), calls);
   } finally {
     if (browser) await browser.close().catch(() => {});
     if (fixtureServer) await new Promise((resolve) => fixtureServer.close(resolve)).catch(() => {});
@@ -760,8 +765,26 @@ function chunk(items, size) {
   return out;
 }
 
-function errorResponse(message) {
-  return { schema: RESPONSE_SCHEMA, status: 'error', provider: 'openrouter', model: null, calls: 0, usage: {}, assessments: [], errors: [message] };
+function redactionReceipt(calls) {
+  return {
+    schema: REDACTION_RECEIPT_SCHEMA,
+    profile: 'none',
+    status: calls === 0 ? 'not_sent' : 'not_applied',
+  };
+}
+
+function errorResponse(message, calls = 0) {
+  return {
+    schema: RESPONSE_SCHEMA,
+    status: 'error',
+    provider: 'openrouter',
+    model: null,
+    calls,
+    redaction_receipt: redactionReceipt(calls),
+    usage: {},
+    assessments: [],
+    errors: [message],
+  };
 }
 
 function parseArgs(args) {
