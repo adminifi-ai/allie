@@ -165,6 +165,8 @@ if (!packet.agentic_assessments.some((assessment) => assessment.assessment === '
   throw new Error('missing degraded live-gateway assessment with captured media');
 }
 const request = JSON.parse(fs.readFileSync(path.join(jobDir, 'steps/run/agentic-request.json'), 'utf8'));
+if (request.model?.redaction !== 'none') throw new Error('live agentic request did not carry explicit redaction none');
+if (packet.policy.model_egress_redaction !== 'none') throw new Error('evidence policy did not retain accepted model egress mode');
 const surfaceIds = new Set((request.surfaces || []).map((surface) => surface.id));
 for (const id of ['home', 'settings']) {
   if (!surfaceIds.has(id)) throw new Error(`live agentic request missing ${id} review surface`);
@@ -186,6 +188,12 @@ fs.mkdirSync(path.dirname(responsePath), { recursive: true });
 fs.writeFileSync(responsePath, `${JSON.stringify({
   schema: 'allie.agentic.response.v0',
   status: 'error',
+  calls: 0,
+  redaction_receipt: {
+    schema: 'allie.model-redaction-receipt.v0',
+    profile: 'none',
+    status: 'not_sent',
+  },
   errors: ['synthetic agentic worker failure'],
 }, null, 2)}\n`);
 process.exit(1);

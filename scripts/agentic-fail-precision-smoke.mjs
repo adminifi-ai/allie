@@ -86,6 +86,7 @@ function agenticRequest(port, labels, name) {
       api_key_env: 'ALLIE_AGENTIC_FAKE_KEY',
       base_url: `http://127.0.0.1:${port}`,
       max_calls: 4,
+      redaction: 'none',
     },
     artifacts_dir: path.join(work, `${name}-artifacts`),
     surfaces: [

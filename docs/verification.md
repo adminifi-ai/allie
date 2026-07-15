@@ -254,9 +254,12 @@ assistive-technology obligations are still marked `not_tested` or
 
 `npm run agentic:smoke` proves the agentic review gateway launches the browser,
 captures media, and returns a well-formed inconclusive assessment when no model
-API key is present. It also starts a local fake OpenRouter endpoint and verifies
+API key is present, with a `not_sent` model-redaction receipt. Before capture it
+also refuses missing or unsupported redaction modes and proves the fake
+provider receives no request. It then starts a local fake OpenRouter endpoint and verifies
 that a model request includes both screenshot `image_url` parts and captured
-WebM walkthrough clips as `video_url` parts. The fake endpoint reviews the
+WebM walkthrough clips as `video_url` parts only under explicit `none`, retaining
+a truthful `not_applied` receipt. The fake endpoint reviews the
 workbench home and settings surfaces, first requests a bounded `press_key`
 observation on home, then forces a transient settings model failure so the
 gateway must retry inside the same call budget. The final fake verdict fails

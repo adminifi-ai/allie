@@ -53,8 +53,17 @@ infrastructure/provenance error instead of writing empty revision fields.
 - `policy.blocking_classes`
 - `policy.model_provider_allowlist`
 - `policy.zdr_required`
+- `policy.model_egress_redaction`: `none` for an enabled V0 model route, or
+  `null` when model review is disabled. This is the accepted egress mode, not a
+  claim that media was transformed.
 - `policy.redaction_profile`
 - `policy.budget`
+
+`policy.redaction_profile` describes retained local artifacts. It is separate
+from model egress. Every agentic worker response carries
+`allie.model-redaction-receipt.v0`: profile `none` is `not_sent` when no model
+call occurred and `not_applied` after unredacted media was transmitted. V0 has
+no status that can honestly serialize `applied` or `redacted`.
 
 ## Coverage
 

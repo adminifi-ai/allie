@@ -22,6 +22,7 @@ artifacts:
   retention_class: local_ephemeral
 model:
   enabled: true
+  redaction: none
   provider_allowlist:
     - openrouter
   zdr_required: true

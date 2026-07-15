@@ -162,6 +162,7 @@ mod tests {
                 model_provider_allowlist: Vec::new(),
                 model_status: "disabled".to_string(),
                 zdr_required: true,
+                model_egress_redaction: None,
                 redaction_profile: "not_redacted_local_fixture".to_string(),
                 budget: PolicyBudget {
                     model_calls: 0,

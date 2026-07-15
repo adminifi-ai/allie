@@ -38,6 +38,10 @@ fn init_enables_model_review_when_an_api_key_resolves() {
 
     assert!(manifest.model.enabled);
     assert_eq!(
+        manifest.model.redaction,
+        Some(crate::ModelRedactionMode::None)
+    );
+    assert_eq!(
         manifest.model.provider_allowlist,
         vec!["openrouter".to_string()]
     );
@@ -93,6 +97,10 @@ fn init_falls_back_to_openai_when_only_that_key_resolves() {
     clear_model_credential_env();
 
     assert!(manifest.model.enabled);
+    assert_eq!(
+        manifest.model.redaction,
+        Some(crate::ModelRedactionMode::None)
+    );
     assert_eq!(manifest.model.provider.as_deref(), Some("openai"));
     assert_eq!(
         manifest.model.api_key_env.as_deref(),
@@ -237,6 +245,7 @@ flow:
     clear_model_credential_env();
 
     assert!(after.model.enabled);
+    assert_eq!(after.model.redaction, Some(crate::ModelRedactionMode::None));
     assert_eq!(after.model.provider.as_deref(), Some("openrouter"));
     assert!(receipt.model_note.is_none());
 }

@@ -50,7 +50,7 @@
     },
     "policy": {
       "type": "object",
-      "required": ["profile", "blocking_classes", "worker_timeout_ms", "model_provider_allowlist", "model_status", "zdr_required", "redaction_profile", "budget"],
+      "required": ["profile", "blocking_classes", "worker_timeout_ms", "model_provider_allowlist", "model_status", "zdr_required", "model_egress_redaction", "redaction_profile", "budget"],
       "properties": {
         "profile": { "type": "string" },
         "blocking_classes": { "type": "array", "items": { "type": "string" } },
@@ -58,6 +58,7 @@
         "model_provider_allowlist": { "type": "array", "items": { "type": "string" } },
         "model_status": { "enum": ["disabled", "enabled"] },
         "zdr_required": { "type": "boolean" },
+        "model_egress_redaction": { "oneOf": [{ "const": "none" }, { "type": "null" }] },
         "redaction_profile": { "type": "string" },
         "budget": {
           "type": "object",

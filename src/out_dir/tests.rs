@@ -365,6 +365,7 @@ fn release_packet_json() -> serde_json::Value {
             "model_provider_allowlist": [],
             "model_status": "disabled",
             "zdr_required": false,
+            "model_egress_redaction": null,
             "redaction_profile": "not_redacted_local",
             "budget": {"model_calls": 0, "max_states": 1},
         },

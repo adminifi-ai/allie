@@ -204,7 +204,7 @@ fn enabled_model_with_its_key_set_is_ok() {
     let temp = tempdir().unwrap();
     let manifest_path = write_model_fixture_manifest(
         temp.path(),
-        "model:\n  enabled: true\n  provider_allowlist:\n    - openrouter\n  zdr_required: false\n  provider: openrouter\n  api_key_env: OPENROUTER_API_KEY\n",
+        "model:\n  enabled: true\n  redaction: none\n  provider_allowlist:\n    - openrouter\n  zdr_required: false\n  provider: openrouter\n  api_key_env: OPENROUTER_API_KEY\n",
     );
 
     let check = check_model(Some(&manifest_path));
@@ -226,7 +226,7 @@ fn enabled_model_with_its_key_missing_names_it_explicitly() {
     let temp = tempdir().unwrap();
     let manifest_path = write_model_fixture_manifest(
         temp.path(),
-        "model:\n  enabled: true\n  provider_allowlist:\n    - openrouter\n  zdr_required: false\n  provider: openrouter\n  api_key_env: SOME_OTHER_ENV\n",
+        "model:\n  enabled: true\n  redaction: none\n  provider_allowlist:\n    - openrouter\n  zdr_required: false\n  provider: openrouter\n  api_key_env: SOME_OTHER_ENV\n",
     );
 
     let check = check_model(Some(&manifest_path));

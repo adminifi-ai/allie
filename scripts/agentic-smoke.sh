@@ -16,7 +16,7 @@ cat > "$WORK/request.json" <<JSON
   "schema": "allie.agentic.request.v0",
   "target": { "fixture_dir": "$ALLIE_REPO/fixtures/login" },
   "browser": { "viewport": { "width": 1024, "height": 768 }, "color_scheme": "light", "reduced_motion": "reduce", "locale": "en-US" },
-  "model": { "provider": "openrouter", "model": "offline", "api_key_env": "ALLIE_AGENTIC_SMOKE_NO_KEY", "base_url": "https://openrouter.ai/api/v1", "max_calls": 1 },
+  "model": { "provider": "openrouter", "model": "offline", "api_key_env": "ALLIE_AGENTIC_SMOKE_NO_KEY", "base_url": "https://openrouter.ai/api/v1", "max_calls": 1, "redaction": "none" },
   "artifacts_dir": "$WORK/artifacts",
   "criteria": [
     { "obligation": "wcag22-aa:2.4.7-focus-visible", "num": "2.4.7", "handle": "Focus Visible", "level": "AA", "principle": "Operable" }
@@ -45,6 +45,13 @@ if (assessment.confidence !== 'not_observed') {
 }
 if (!assessment.media.some((entry) => entry.kind === 'screenshot')) {
   throw new Error('gateway did not capture screenshot evidence');
+}
+if (JSON.stringify(response.redaction_receipt) !== JSON.stringify({
+  schema: 'allie.model-redaction-receipt.v0',
+  profile: 'none',
+  status: 'not_sent',
+})) {
+  throw new Error(`offline response did not carry a truthful not_sent redaction receipt: ${JSON.stringify(response.redaction_receipt)}`);
 }
 console.log(`agentic smoke ok: captured ${assessment.media.length} media item(s), status ${response.status}`);
 NODE

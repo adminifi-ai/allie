@@ -42,6 +42,11 @@ fs.writeFileSync(process.argv[responseIndex], JSON.stringify({{
   provider: '{provider}',
   model: 'test',
   calls: 0,
+  redaction_receipt: {{
+    schema: 'allie.model-redaction-receipt.v0',
+    profile: 'none',
+    status: 'not_sent'
+  }},
   assessments: [],
   errors: []
 }}, null, 2));
@@ -50,6 +55,28 @@ fs.writeFileSync(process.argv[responseIndex], JSON.stringify({{
     )
     .unwrap();
     (worker_path, marker_path)
+}
+
+#[test]
+fn rejects_missing_redaction_before_request_write_or_worker_spawn() {
+    let _guard = AGENTIC_WORKER_ENV_GUARD
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let temp = tempdir().unwrap();
+    let (worker_path, marker_path) = write_marker_worker(temp.path(), "openrouter");
+    let packet_path = temp.path().join("evidence.json");
+    write_json_pretty(&packet_path, &minimal_agentic_packet()).unwrap();
+    let mut manifest =
+        FlowManifest::load(Path::new("examples/autonomous-workbench-agentic.yml")).unwrap();
+    manifest.model.redaction = None;
+
+    let _env = AgenticWorkerEnvGuard::set(&worker_path, &marker_path);
+    let error = run_agentic_review_with_timeout(&manifest, &packet_path, Duration::from_secs(5))
+        .unwrap_err();
+
+    assert!(error.to_string().contains("model.redaction is missing"));
+    assert!(!temp.path().join("agentic-request.json").exists());
+    assert!(!marker_path.exists());
 }
 
 #[test]
@@ -154,6 +181,17 @@ fn rejects_empty_allowlist_before_request_write_or_worker_spawn() {
     );
 }
 
+#[test]
+fn evidence_packet_rejects_missing_required_model_egress_policy() {
+    let mut packet = minimal_agentic_packet();
+    packet["policy"]
+        .as_object_mut()
+        .unwrap()
+        .remove("model_egress_redaction");
+
+    assert!(serde_json::from_value::<crate::model::EvidencePacket>(packet).is_err());
+}
+
 fn minimal_agentic_packet() -> serde_json::Value {
     serde_json::json!({
         "schema": "allie.evidence.v0",
@@ -196,6 +234,7 @@ fn minimal_agentic_packet() -> serde_json::Value {
             "model_provider_allowlist": ["openrouter"],
             "model_status": "enabled",
             "zdr_required": true,
+            "model_egress_redaction": "none",
             "redaction_profile": "not_redacted_local_fixture",
             "budget": { "model_calls": 0, "max_states": 1 }
         },

@@ -20,6 +20,7 @@ mod consumer;
 mod discovery;
 mod model_credentials;
 mod model_policy;
+pub(crate) use model_policy::{ModelPolicy, ModelRedactionMode};
 mod out_dir;
 mod pipeline;
 mod publication;
@@ -835,6 +836,8 @@ impl FlowManifest {
 
         if let Some(failure) = self.model.provider_allowlist_incomplete_failure() {
             failures.push(failure);
+        } else if let Some(failure) = self.model.redaction_mode_failure() {
+            failures.push(failure);
         } else if let Some(failure) = self.model.provider_allowlist_failure() {
             failures.push(failure);
         }
@@ -898,52 +901,6 @@ struct ManifestPolicy {
 
 fn default_worker_timeout_ms() -> u64 {
     DEFAULT_WORKER_TIMEOUT_MS
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct ModelPolicy {
-    enabled: bool,
-    provider_allowlist: Vec<String>,
-    zdr_required: bool,
-    #[serde(default)]
-    provider: Option<String>,
-    #[serde(default)]
-    model: Option<String>,
-    #[serde(default)]
-    api_key_env: Option<String>,
-    #[serde(default)]
-    base_url: Option<String>,
-    #[serde(default)]
-    max_model_calls: Option<u32>,
-    /// Optional thinking-effort hint for models that support it (e.g. Gemini
-    /// 3.x "minimal|low|medium|high"). Forwarded to the gateway verbatim.
-    #[serde(default)]
-    reasoning_effort: Option<String>,
-}
-
-impl Default for ModelPolicy {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            provider_allowlist: Vec::new(),
-            zdr_required: true,
-            provider: None,
-            model: None,
-            api_key_env: None,
-            base_url: None,
-            max_model_calls: None,
-            reasoning_effort: None,
-        }
-    }
-}
-
-impl ModelPolicy {
-    fn validate(&self) -> Result<()> {
-        if !self.enabled {
-            return Ok(());
-        }
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1162,6 +1119,7 @@ fn write_packet_and_report(
                 "disabled".to_string()
             },
             zdr_required: manifest.model.zdr_required,
+            model_egress_redaction: manifest.model.accepted_redaction_mode(),
             redaction_profile: manifest.artifacts.redaction_status.clone(),
             budget: PolicyBudget {
                 model_calls: 0,
@@ -2473,6 +2431,7 @@ mod tests {
         let out_dir = temp.path().join("latest");
         let mut manifest = FlowManifest::load(Path::new("examples/login-flow.yml")).unwrap();
         manifest.model.enabled = true;
+        manifest.model.redaction = Some(ModelRedactionMode::None);
         manifest.model.provider_allowlist = Vec::new();
         let failures = manifest.preflight_failures();
         let response = WorkerResponse::error(
@@ -2620,6 +2579,13 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|value| value["required"][0] == "packet_ref")
+        );
+        assert!(
+            parsed["properties"]["policy"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "model_egress_redaction")
         );
         let artifact = &parsed["properties"]["artifacts"]["items"];
         let required = artifact["required"].as_array().unwrap();
@@ -4251,6 +4217,7 @@ mod tests {
                 "model_provider_allowlist": [],
                 "model_status": "disabled",
                 "zdr_required": true,
+                "model_egress_redaction": null,
                 "redaction_profile": "not_redacted_local_fixture",
                 "budget": {
                     "model_calls": 0,

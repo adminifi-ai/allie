@@ -98,6 +98,8 @@ assert(packet.run.finished_at === freezeTime, `unexpected finished_at ${packet.r
 assert(packet.run.git_sha && packet.run.git_sha !== 'unknown', 'git_sha must be present');
 assert(packet.run.git_branch && packet.run.git_branch !== 'unknown', 'git_branch must be present');
 assert(packet.target.base_url === `http://127.0.0.1:${freezePort}/`, `unexpected base_url ${packet.target.base_url}`);
+assert(packet.policy.model_egress_redaction === null, 'model-disabled evidence must record null model egress mode');
+assert(packet.policy.redaction_profile === 'not_redacted_local_fixture', 'local artifact redaction policy changed unexpectedly');
 assert(packet.coverage.routes_visited.includes('/'), 'coverage must include fixture route');
 assert(packet.coverage.states_captured.includes('login-form'), 'coverage must include login-form state');
 assert(packet.coverage.state_metadata.some((state) => (

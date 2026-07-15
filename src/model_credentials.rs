@@ -64,6 +64,7 @@ pub(crate) fn scaffold_model_policy() -> ModelPolicy {
         Some(preset) => ModelPolicy {
             enabled: true,
             provider_allowlist: vec![preset.provider.to_string()],
+            redaction: Some(crate::ModelRedactionMode::None),
             provider: Some(preset.provider.to_string()),
             model: Some(preset.model.to_string()),
             api_key_env: Some(preset.api_key_env.to_string()),
@@ -168,6 +169,7 @@ mod tests {
 
         assert!(policy.enabled);
         assert_eq!(policy.provider_allowlist, vec!["openrouter".to_string()]);
+        assert_eq!(policy.redaction, Some(crate::ModelRedactionMode::None));
         assert_eq!(policy.provider.as_deref(), Some("openrouter"));
         assert_eq!(policy.api_key_env.as_deref(), Some("OPENROUTER_API_KEY"));
         assert!(policy.model.is_some());

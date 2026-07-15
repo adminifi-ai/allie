@@ -21,6 +21,7 @@ artifacts:
   retention_class: local_ephemeral
 model:
   enabled: true
+  redaction: none
   provider_allowlist: []
   zdr_required: true
 known_nondeterminism: []

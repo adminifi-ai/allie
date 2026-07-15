@@ -15,6 +15,9 @@ use wait_timeout::ChildExt;
 
 const AGENTIC_WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 
+mod redaction;
+use redaction::accepted_redaction_receipt;
+
 #[cfg(test)]
 static AGENTIC_WORKER_ENV_GUARD: Mutex<()> = Mutex::new(());
 
@@ -72,15 +75,8 @@ fn agentic_review_surfaces(packet: &EvidencePacket) -> Vec<AgenticReviewSurface>
         .collect()
 }
 
-/// Run the agentic (vision-model) review over the criteria a run left as
-/// needs_review, fold the model's assessments + captured media into the
-/// evidence packet, and promote each committed verdict to the criterion's
-/// pass/fail status — marked with the "agentic" evidence class so the report
-/// renders it with an asterisk (a reviewer judgment, not a machine-proven
-/// result). Model-unavailable degradation is advisory and leaves criteria at
-/// needs_review; worker/protocol failure returns an error. It never fabricates
-/// a verdict — an "inconclusive" or unavailable result leaves the criterion at
-/// needs_review.
+/// Run model review over needs-review criteria and attach captured evidence.
+/// Unavailable or inconclusive results stay neutral; protocol failure errors.
 pub(crate) fn run_agentic_review(
     manifest: &FlowManifest,
     packet_path: &Path,
@@ -170,6 +166,7 @@ fn run_agentic_review_with_timeout(
             "base_url": model_route.base_url,
             "max_calls": manifest.model.max_model_calls.unwrap_or(4),
             "reasoning_effort": manifest.model.reasoning_effort.clone(),
+            "redaction": manifest.model.redaction,
         },
         "artifacts_dir": artifacts_dir.to_string_lossy(),
         "surfaces": agentic_review_surfaces(&packet),
@@ -219,6 +216,7 @@ fn run_agentic_review_with_timeout(
     }
 
     let response: serde_json::Value = read_json_file(&response_path)?;
+    let redaction_receipt = accepted_redaction_receipt(&response, manifest.model.redaction)?;
     let outcome = agentic_response_outcome(&response, status.success())?;
     let timestamp = now_utc();
     let policy = ArtifactPolicy {
@@ -237,6 +235,7 @@ fn run_agentic_review_with_timeout(
         .to_string();
     let model = response["model"].as_str().unwrap_or_default().to_string();
     let fail_precision_passed = agentic_fail_precision_passed(&response);
+    packet.policy.model_egress_redaction = Some(redaction_receipt.profile);
     let empty = Vec::new();
     for assessment in response["assessments"].as_array().unwrap_or(&empty) {
         let Some(obligation) = assessment["obligation"].as_str() else {
@@ -613,6 +612,7 @@ mod tests {
                 "model_provider_allowlist": ["openrouter"],
                 "model_status": "enabled",
                 "zdr_required": true,
+                "model_egress_redaction": "none",
                 "redaction_profile": "not_redacted_local_fixture",
                 "budget": { "model_calls": 0, "max_states": 1 }
             },

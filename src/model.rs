@@ -1,9 +1,3 @@
-//! Shared pure-data DTOs for Allie's evidence, compliance, and product-map
-//! packets. This is the base (leaf) module: it depends only on std and external
-//! crates, never on other `crate::` items, so every domain module
-//! ({lib, report, agentic, compliance, consumer}) imports its data model from
-//! here instead of reaching up into the crate root.
-
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -251,14 +245,10 @@ pub(crate) struct EvidenceMedia {
     pub(crate) artifact_ref: Option<String>,
 }
 
-/// Structured output of the agentic (vision-model) review for one criterion:
-/// the model's assessment plus the context a human reviewer needs to confirm it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct AgenticAssessment {
-    /// The committed verdict: pass | fail | inconclusive.
     pub(crate) assessment: String,
     pub(crate) rationale: String,
-    /// concrete steps the human reviewer should take to confirm or refute.
     pub(crate) reviewer_guidance: String,
     pub(crate) confidence: String,
     pub(crate) provider: String,
@@ -374,9 +364,7 @@ pub(crate) struct EvidencePacket {
     pub(crate) replay: Replay,
 }
 
-/// One criterion's agentic (vision-model) assessment, recorded in the evidence
-/// packet. Media paths are relative to the run directory (alongside the run
-/// screenshots) so the report resolves them the same way.
+/// One criterion's model assessment, with run-relative media paths.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct AgenticAssessmentRecord {
     pub(crate) obligation: String,
@@ -447,8 +435,19 @@ pub(crate) struct PolicyMetadata {
     pub(crate) model_provider_allowlist: Vec<String>,
     pub(crate) model_status: String,
     pub(crate) zdr_required: bool,
+    #[serde(deserialize_with = "deserialize_model_egress_redaction")]
+    pub(crate) model_egress_redaction: Option<crate::ModelRedactionMode>,
     pub(crate) redaction_profile: String,
     pub(crate) budget: PolicyBudget,
+}
+
+fn deserialize_model_egress_redaction<'de, D>(
+    deserializer: D,
+) -> Result<Option<crate::ModelRedactionMode>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::deserialize(deserializer)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
