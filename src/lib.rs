@@ -22,6 +22,7 @@ mod model_credentials;
 mod model_policy;
 mod out_dir;
 mod pipeline;
+mod publication;
 mod release;
 mod report;
 mod review;
@@ -1281,6 +1282,7 @@ pub(crate) fn artifact_for_path(
         hash: format!("sha256:{}", sha256_file(path)?),
         redaction_status: artifact_policy.redaction_status.clone(),
         retention_class: artifact_policy.retention_class.clone(),
+        publication_class: PublicationClass::SensitiveLocal,
         unavailable_reason: None,
         related_flow_state,
         creation_tool: creation_tool.to_string(),
@@ -2239,6 +2241,7 @@ mod tests {
         assert!(packet.contains("\"schema\": \"allie.evidence.v0\""));
         assert!(packet.contains("sha256:"));
         assert!(packet.contains("\"retention_class\": \"local_ephemeral\""));
+        assert!(packet.contains("\"publication_class\": \"sensitive_local\""));
         assert!(packet.contains("\"infrastructure_failures\": 0"));
         assert!(packet.contains("\"title\": \"Allie Fixture Login\""));
         assert!(packet.contains("wcag22-aa:deterministic-axe-rules"));
@@ -2618,6 +2621,13 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|value| value["required"][0] == "packet_ref")
+        );
+        let artifact = &parsed["properties"]["artifacts"]["items"];
+        let required = artifact["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("publication_class")));
+        assert_eq!(
+            artifact["properties"]["publication_class"]["enum"],
+            serde_json::json!(["sensitive_local", "redacted_shareable", "public_summary"])
         );
     }
 

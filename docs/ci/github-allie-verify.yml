@@ -25,11 +25,18 @@ jobs:
       - name: Run Allie
         run: allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
 
-      - name: Upload Allie evidence
+      - name: Prepare policy-approved public summary
+        id: publication
         if: always()
+        run: allie publication --verify-root .allie/verify/latest --out .allie/public/latest
+
+      - name: Upload Allie public summary
+        if: always() && steps.publication.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: allie-verify
           path: |
-            .allie/doctor
-            .allie/verify/latest
+            .allie/public/latest/allie-public-summary.json
+            .allie/public/latest/allie-public-summary.md
+            .allie/public/latest/publication-receipt.json
+            .allie/public/latest/allie-run-manifest.json

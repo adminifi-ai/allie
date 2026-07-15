@@ -90,9 +90,11 @@ Later versions can add:
 - object storage for large artifacts;
 - signed URLs for report sharing.
 
-Storage and publication are separate adapter boundaries. Local disk, GitHub,
-Azure, object storage, or a future system receive the same canonical packet and
-report bundle; host-specific adapters do not own accessibility policy.
+Storage and publication are separate adapter boundaries. Local disk keeps the
+canonical evidence bundle. GitHub, Azure, object storage, or a future system
+receive only the projection classes their policy permits; public adapters
+default to `public_summary` and refuse `sensitive_local`. Host-specific adapters
+do not own accessibility policy.
 
 ## Form Factors
 

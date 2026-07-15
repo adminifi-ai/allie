@@ -60,8 +60,9 @@ portable report that release engineers and accessibility engineers can trust.
 10. A complete report and a complete assessment are different. The obligation
     ledger is total; evaluated scope, sampling, failed attempts, and unverified
     cells remain explicit.
-11. Local files, GitHub, Azure, object storage, and future systems are publisher
-    adapters over one canonical artifact bundle.
+11. The canonical artifact bundle remains private local evidence. Publisher
+    adapters for GitHub, Azure, object storage, and future systems emit only
+    policy-approved projections; they never publish that raw bundle by default.
 
 ## Point-and-Shoot Product Contract
 

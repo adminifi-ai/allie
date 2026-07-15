@@ -51,6 +51,7 @@ Allie's consuming-app contract is local and host-agnostic first:
 allie init --manifest .allie/manifest.yml --app-name "My App"
 allie doctor --manifest .allie/manifest.yml --out .allie/doctor
 allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
+allie publication --verify-root .allie/verify/latest --out .allie/public/latest
 ```
 
 `allie init` writes a minimal manifest without assuming GitHub, Azure, or a
@@ -80,7 +81,7 @@ and release-projection primitives, then writes stable reporter files:
 .allie/verify/latest/reporters/allie.sarif
 ```
 
-Every `--out` directory (`run`, `report`, `release`, `verify`) describes
+Every `--out` directory (`run`, `report`, `release`, `verify`, `publication`) describes
 exactly one run. A small `allie-run-manifest.json` marks the directory as
 owned by that command: it is written with `phase: "in_progress"` when the
 run starts and rewritten with `phase: "complete"` plus the full file list
@@ -95,9 +96,15 @@ command, is refused outright with nothing deleted — point `--out` at a
 fresh or empty directory rather than one Allie cannot account for.
 
 GitHub and Azure examples live in [docs/ci](docs/ci). They call the same
-`allie verify` command and upload the full `.allie/verify/latest` artifact root
-so HTML drilldowns can reach the map, evidence, WCAG report, release summary,
-JUnit, and SARIF files. Host-specific files do not fork accessibility policy.
+`allie verify` command, then run `allie publication` and upload only its four
+allowlisted files from `.allie/public/latest`. The canonical `.allie/verify/latest` tree is sensitive
+local evidence by default: it can contain authenticated DOM, screenshots,
+accessibility trees, traces, prompts, URLs, console/network details, and axe
+HTML. `allie publication` emits a deliberately small `public_summary`
+projection plus a policy receipt. A request to include any canonical evidence
+is refused as `sensitive_local`, leaves the local tree unchanged, and produces
+a retryable refusal receipt. Receipts are themselves `public_summary` artifacts
+and never echo a refused raw path. Host-specific files do not fork that policy.
 
 Arbitrary repositories install the release bundle, then run the same local
 preflight and verification commands. The bundle layout keeps the Rust binary and
@@ -110,6 +117,7 @@ curl -fsSL https://github.com/adminifi-ai/allie/releases/latest/download/allie-l
 export PATH="$PWD/.allie/tooling/allie/bin:$PATH"
 allie doctor --manifest .allie/manifest.yml --out .allie/doctor
 allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
+allie publication --verify-root .allie/verify/latest --out .allie/public/latest
 ```
 
 When working from a source checkout instead of a release bundle, run `npm ci`

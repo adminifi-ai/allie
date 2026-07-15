@@ -108,7 +108,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "type", "path", "hash", "redaction_status", "retention_class", "unavailable_reason", "creation_tool", "timestamp"],
+        "required": ["id", "type", "path", "hash", "redaction_status", "retention_class", "publication_class", "unavailable_reason", "creation_tool", "timestamp"],
         "properties": {
           "id": { "type": "string", "minLength": 1 },
           "type": { "type": "string", "minLength": 1 },
@@ -116,6 +116,7 @@
           "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
           "redaction_status": { "type": "string", "minLength": 1 },
           "retention_class": { "type": "string", "minLength": 1 },
+          "publication_class": { "enum": ["sensitive_local", "redacted_shareable", "public_summary"] },
           "unavailable_reason": { "type": ["string", "null"] },
           "related_flow_state": { "type": ["string", "null"] },
           "creation_tool": { "type": "string", "minLength": 1 },

@@ -18,10 +18,11 @@ OUT=.allie/consumer-contract-smoke
 MANIFEST_DIR=.allie/consumer-contract-smoke-config
 MANIFEST="$MANIFEST_DIR/manifest.yml"
 FIXTURE_DIR="../../fixtures/login"
-VERIFY_CMD="allie verify --manifest .allie/manifest.yml --out .allie/verify/latest"
+PUBLIC_OUT=.allie/consumer-publication-smoke
+REFUSAL_OUT=.allie/consumer-publication-refusal-smoke
 
 mkdir -p "$MANIFEST_DIR"
-rm -rf "$MANIFEST" "$OUT"
+rm -rf "$MANIFEST" "$OUT" "$PUBLIC_OUT" "$REFUSAL_OUT"
 
 cargo run --locked -- init \
   --manifest "$MANIFEST" \
@@ -33,6 +34,19 @@ cargo run --locked -- verify \
   --manifest "$MANIFEST" \
   --out "$OUT" \
   --project-root fixtures/login
+
+cargo run --locked -- publication \
+  --verify-root "$OUT" \
+  --out "$PUBLIC_OUT"
+
+set +e
+cargo run --locked -- publication \
+  --verify-root "$OUT" \
+  --out "$REFUSAL_OUT" \
+  --include run/evidence.json
+refusal_code=$?
+set -e
+test "$refusal_code" -eq 2
 
 test -f "$MANIFEST"
 test -f "$OUT/discovery/discovery.json"
@@ -55,9 +69,18 @@ test -f "$OUT/reporters/allie-report.html"
 test -f "$OUT/reporters/allie-report.md"
 test -f "$OUT/reporters/junit.xml"
 test -f "$OUT/reporters/allie.sarif"
+test -f "$PUBLIC_OUT/allie-public-summary.json"
+test -f "$PUBLIC_OUT/allie-public-summary.md"
+test -f "$PUBLIC_OUT/publication-receipt.json"
+test -f "$PUBLIC_OUT/allie-run-manifest.json"
+test -f "$REFUSAL_OUT/publication-receipt.json"
+test -f "$OUT/run/evidence.json"
+test ! -e "$PUBLIC_OUT/run/evidence.json"
+test ! -e "$REFUSAL_OUT/run/evidence.json"
 
 node - <<'NODE'
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 const summary = JSON.parse(fs.readFileSync('.allie/consumer-contract-smoke/reporters/allie-report.json', 'utf8'));
 if (summary.schema !== 'allie.verify.v0') {
@@ -100,6 +123,36 @@ for (const [, href] of html.matchAll(/href="([^"]+)"/g)) {
   if (!fs.existsSync(resolved)) {
     throw new Error(`report HTML link is not closed under verify artifact root: ${href}`);
   }
+}
+
+const publicSummary = JSON.parse(fs.readFileSync('.allie/consumer-publication-smoke/allie-public-summary.json', 'utf8'));
+const publicReceipt = JSON.parse(fs.readFileSync('.allie/consumer-publication-smoke/publication-receipt.json', 'utf8'));
+const refusalReceipt = JSON.parse(fs.readFileSync('.allie/consumer-publication-refusal-smoke/publication-receipt.json', 'utf8'));
+const publicManifest = JSON.parse(fs.readFileSync('.allie/consumer-publication-smoke/allie-run-manifest.json', 'utf8'));
+const refusalManifest = JSON.parse(fs.readFileSync('.allie/consumer-publication-refusal-smoke/allie-run-manifest.json', 'utf8'));
+if (publicSummary.schema !== 'allie.public-summary.v0' || publicSummary.publication_class !== 'public_summary') {
+  throw new Error('public projection must carry the public_summary contract');
+}
+if (JSON.stringify(publicSummary).includes(summary.project_root) || JSON.stringify(publicSummary).includes('run/evidence.json')) {
+  throw new Error('public projection leaked a private path or canonical artifact reference');
+}
+if (publicReceipt.status !== 'ready' || publicReceipt.retryable !== false) {
+  throw new Error('approved public projection must emit a ready, non-retryable receipt');
+}
+if (publicReceipt.publication_class !== 'public_summary' || refusalReceipt.publication_class !== 'public_summary') {
+  throw new Error('every publicly uploaded publication receipt must classify itself as public_summary');
+}
+if (publicManifest.publication_class !== 'public_summary' || refusalManifest.publication_class !== 'public_summary') {
+  throw new Error('every publicly uploaded publication run manifest must classify itself as public_summary');
+}
+if (!publicReceipt.published.every((item) => item.publication_class === 'public_summary')) {
+  throw new Error('public publisher accepted a non-public_summary artifact');
+}
+if (refusalReceipt.status !== 'refused' || refusalReceipt.retryable !== true) {
+  throw new Error('raw evidence request must emit a retryable refusal receipt');
+}
+if (refusalReceipt.refused[0]?.publication_class !== 'sensitive_local') {
+  throw new Error('raw evidence refusal must name its sensitive_local class');
 }
 
 // AL-123: review grain labels — a reader of allie-report.md/.html must tell
@@ -157,6 +210,7 @@ const ciFiles = [
 const github = fs.readFileSync(ciFiles[0], 'utf8');
 const azure = fs.readFileSync(ciFiles[1], 'utf8');
 const doctorCommand = 'allie doctor --manifest .allie/manifest.yml --out .allie/doctor';
+const publicationCommand = 'allie publication --verify-root .allie/verify/latest --out .allie/public/latest';
 for (const file of ciFiles) {
   const text = fs.readFileSync(file, 'utf8');
   if (text.includes('ALLIE_BROWSER_WORKER')) {
@@ -171,19 +225,78 @@ for (const file of ciFiles) {
   if (!text.includes('allie verify --manifest .allie/manifest.yml --out .allie/verify/latest')) {
     throw new Error(`${file} does not call the portable verify command`);
   }
-  if (!text.includes('.allie/verify/latest')) {
-    throw new Error(`${file} does not publish the full verify artifact root`);
+  if (!text.includes(publicationCommand)) {
+    throw new Error(`${file} does not prepare the policy-approved public projection`);
   }
   const forbidden = /\ballie\s+(run|discover|promote-flow|map|report|release|workbench|review|remediate|init)\b/;
   if (forbidden.test(text)) {
     throw new Error(`${file} must not call lower-level Allie commands`);
   }
 }
-if (!github.includes('if: always()')) {
-  throw new Error('GitHub example must upload evidence even when verify blocks');
+const publicFiles = [
+  'allie-public-summary.json',
+  'allie-public-summary.md',
+  'publication-receipt.json',
+  'allie-run-manifest.json',
+];
+if (/(^|\n)\s*path:\s*\.allie\/public\/latest\s*($|\n)/.test(github) || github.includes('path: .allie/verify/latest')) {
+  throw new Error('GitHub example must not upload an uncontrolled output directory');
 }
-if (!azure.includes('condition: always()')) {
-  throw new Error('Azure example must publish evidence even when verify blocks');
+for (const file of publicFiles) {
+  if (!github.includes(`.allie/public/latest/${file}`)) {
+    throw new Error(`GitHub example does not explicitly allowlist ${file}`);
+  }
+  if (!azure.includes(`        ${file}`)) {
+    throw new Error(`Azure example does not explicitly allowlist ${file}`);
+  }
+}
+const githubPublicFiles = [...github.matchAll(/^\s+\.allie\/public\/latest\/(\S+)$/gm)]
+  .map((match) => match[1]);
+if (JSON.stringify(githubPublicFiles) !== JSON.stringify(publicFiles)) {
+  throw new Error(`GitHub publication allowlist must be exact, got ${githubPublicFiles}`);
+}
+const azureContents = azure.match(/Contents: \|\n([\s\S]*?)\n\s+TargetFolder:/)?.[1]
+  .trim()
+  .split(/\n/)
+  .map((line) => line.trim());
+if (JSON.stringify(azureContents) !== JSON.stringify(publicFiles)) {
+  throw new Error(`Azure publication allowlist must be exact, got ${azureContents}`);
+}
+if (!azure.includes('SourceFolder: .allie/public/latest') || !azure.includes('publish: $(Build.ArtifactStagingDirectory)/allie-public') || azure.includes('publish: .allie/verify/latest')) {
+  throw new Error('Azure example must stage only allowlisted files before publication');
+}
+if (!github.includes("if: always() && steps.publication.outcome == 'success'")) {
+  throw new Error('GitHub upload must run only after successful public projection');
+}
+if (!azure.includes('##vso[task.setvariable variable=ALLIE_PUBLICATION_READY]true')) {
+  throw new Error('Azure publication must emit its success gate only after projection succeeds');
+}
+const azurePublicationDisplay = '\n    displayName: Prepare policy-approved public summary';
+const azurePublicationEnd = azure.indexOf(azurePublicationDisplay);
+const azurePublicationStart = azure.lastIndexOf('  - script: |\n', azurePublicationEnd);
+const azurePublication = azure
+  .slice(azurePublicationStart + '  - script: |\n'.length, azurePublicationEnd)
+  .split(/\n/)
+  .map((line) => line.trim())
+  .filter(Boolean)
+  .join('\n');
+if (!azurePublication?.startsWith('set -eu\n')) {
+  throw new Error('Azure publication must fail before setting readiness');
+}
+const failedAzurePublication = spawnSync(
+  'sh',
+  ['-c', azurePublication.replace(publicationCommand, 'false')],
+  { encoding: 'utf8' },
+);
+if (
+  failedAzurePublication.status === 0
+  || !failedAzurePublication.stdout.includes('ALLIE_PUBLICATION_READY]false')
+  || failedAzurePublication.stdout.includes('ALLIE_PUBLICATION_READY]true')
+) {
+  throw new Error('Azure publication failure must reset readiness and never set it true');
+}
+if ((azure.match(/condition: and\(always\(\), eq\(variables\['ALLIE_PUBLICATION_READY'\], 'true'\)\)/g) || []).length !== 2) {
+  throw new Error('Azure staging and publication must require successful public projection');
 }
 
 const command = 'allie verify --manifest .allie/manifest.yml --out .allie/verify/latest';
@@ -192,6 +305,12 @@ if ((github.match(new RegExp(command, 'g')) || []).length !== 1) {
 }
 if ((azure.match(new RegExp(command, 'g')) || []).length !== 1) {
   throw new Error('Azure example must call allie verify exactly once');
+}
+if ((github.match(new RegExp(publicationCommand, 'g')) || []).length !== 1) {
+  throw new Error('GitHub example must call allie publication exactly once');
+}
+if ((azure.match(new RegExp(publicationCommand, 'g')) || []).length !== 1) {
+  throw new Error('Azure example must call allie publication exactly once');
 }
 NODE
 

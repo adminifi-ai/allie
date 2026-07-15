@@ -22,6 +22,7 @@ curl -fsSL https://github.com/adminifi-ai/allie/releases/latest/download/allie-l
 export PATH="$PWD/.allie/tooling/allie/bin:$PATH"
 allie doctor --manifest .allie/manifest.yml --out .allie/doctor
 allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
+allie publication --verify-root .allie/verify/latest --out .allie/public/latest
 ```
 
 For source-checkout development, run `npm ci` and `npx playwright install
@@ -30,9 +31,28 @@ explicit override for nonstandard layouts, not part of the normal consumer path.
 Release bundles are built with `npm run package:release`; tag pushes publish the
 Linux bundle consumed by the CI examples.
 
-CI should archive the whole `.allie/verify/latest` directory, not just
-`reporters/`, because `reporters/allie-report.html` links to sibling map,
-evidence, WCAG report, and release artifacts.
+Treat `.allie/verify/latest` as sensitive local evidence. It can contain
+authenticated DOM, screenshots, accessibility trees, traces, prompts, URLs,
+console/network details, and axe HTML. Public CI publishers must run
+`allie publication` and archive only the four allowlisted files under
+`.allie/public/latest`. The projection
+contains count-level public summaries and a policy receipt; it intentionally
+does not preserve the private HTML drilldown. Keep the canonical verify tree in
+policy-approved private storage when accessibility engineers need its full
+evidence depth.
+
+A successful projection contains four public-safe files:
+
+```text
+.allie/public/latest/allie-public-summary.json
+.allie/public/latest/allie-public-summary.md
+.allie/public/latest/publication-receipt.json
+.allie/public/latest/allie-run-manifest.json
+```
+
+Requesting any file from the canonical verify tree with `--include` is a
+retryable policy refusal (exit `2`). The refusal receipt remains in the public
+output directory; the sensitive source evidence remains local and unchanged.
 
 The repository CI workflow is intentionally thin: `.github/workflows/ci.yml`
 installs Rust, Node, npm dependencies, and Playwright, then calls the same
@@ -77,8 +97,12 @@ npm run size:smoke
 under the same lockfile as the tests.
 
 `npm run secrets:smoke` runs the repo-owned secret scan self-test and then scans
-tracked source, nonignored worktree files, the current commit message, and the
-GitHub event payload when present. Findings are printed with redacted matches.
+tracked source, nonignored worktree files, textual generated evidence under
+`.allie/`, the current commit message, and the GitHub event payload when
+present. Heavy tooling/browser bundles and binary captures are skipped;
+publication policy rejects binary screenshots and all other canonical evidence
+instead of treating absence of a textual secret match as approval. Findings are
+printed with redacted matches.
 
 `npm run landscape:smoke` validates the competitive record shape, review age,
 approved source set, and roadmap linkage that the landscape document claims are

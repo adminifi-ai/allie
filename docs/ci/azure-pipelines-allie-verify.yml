@@ -30,12 +30,28 @@ steps:
   - script: allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
     displayName: Run Allie
 
-  - publish: .allie/doctor
-    artifact: allie-doctor
-    displayName: Publish Allie doctor
+  - script: |
+      set -eu
+      echo "##vso[task.setvariable variable=ALLIE_PUBLICATION_READY]false"
+      allie publication --verify-root .allie/verify/latest --out .allie/public/latest
+      echo "##vso[task.setvariable variable=ALLIE_PUBLICATION_READY]true"
+    displayName: Prepare policy-approved public summary
     condition: always()
 
-  - publish: .allie/verify/latest
+  - task: CopyFiles@2
+    displayName: Stage policy-approved public files
+    condition: and(always(), eq(variables['ALLIE_PUBLICATION_READY'], 'true'))
+    inputs:
+      SourceFolder: .allie/public/latest
+      Contents: |
+        allie-public-summary.json
+        allie-public-summary.md
+        publication-receipt.json
+        allie-run-manifest.json
+      TargetFolder: $(Build.ArtifactStagingDirectory)/allie-public
+      CleanTargetFolder: true
+
+  - publish: $(Build.ArtifactStagingDirectory)/allie-public
     artifact: allie-verify
-    displayName: Publish Allie evidence
-    condition: always()
+    displayName: Publish Allie public summary
+    condition: and(always(), eq(variables['ALLIE_PUBLICATION_READY'], 'true'))

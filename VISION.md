@@ -198,9 +198,10 @@ can be revisited if evidence says we bet wrong.
 9. Context and publication are adapter boundaries. A target adapter supplies a
    pinned read-only checkout or runnable application; an environment adapter may
    provision production-like data under an organization-owned sanitization
-   policy and return a machine-readable attestation; publishers deliver the same
-   canonical bundle to local disk, GitHub, Azure, object storage, or future
-   systems. GitHub is the first path, not a core assumption.
+   policy and return a machine-readable attestation. The canonical bundle stays
+   private local evidence; publisher adapters deliver only policy-approved
+   projections to GitHub, Azure, object storage, or future systems. GitHub is the
+   first path, not a core assumption.
 10. Comprehensiveness is bounded and auditable. Core policy enforces configurable
     per-run ceilings for time, spend, model calls, browser actions, retries,
     variants, and artifact volume. Coverage saturation, sampling decisions,
