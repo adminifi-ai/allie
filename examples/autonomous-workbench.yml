@@ -15,7 +15,8 @@ policy:
   blocking_classes:
     - deterministic
     - scripted_required
-  worker_timeout_ms: 30000
+  # Fixture evidence capture measured 37.31s under load; keep >2x headroom.
+  worker_timeout_ms: 90000
 artifacts:
   redaction_status: not_redacted_local_fixture
   retention_class: local_ephemeral

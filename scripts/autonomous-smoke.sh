@@ -48,6 +48,7 @@ NODE
 grep -q "steps:" "$DISCOVERY_DIR/generated-flow.yml"
 grep -q "#open-menu" "$DISCOVERY_DIR/generated-flow.yml"
 grep -q "qa@example.test" "$DISCOVERY_DIR/generated-flow.yml"
+grep -q "worker_timeout_ms: 90000" "$DISCOVERY_DIR/generated-flow.yml"
 
 set +e
 cargo run --locked -- run \
@@ -107,7 +108,7 @@ test "$workbench_status" -eq 1
 cargo run --locked -- workbench status \
   --job "$JOB_DIR"
 
-node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('$JOB_DIR/job.json','utf8')); if(j.schema!=='allie.job.v0') process.exit(1); if(j.status!=='blocked') process.exit(1); if(j.runtime_policy.agent_step_timeout_ms!==null) process.exit(1); for (const p of ['product_map','compliance_report','evidence_packet','reviewed_packet','release_summary']) if(!j.pointers[p]) process.exit(1);"
+node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('$JOB_DIR/job.json','utf8')); if(j.schema!=='allie.job.v0') process.exit(1); if(j.status!=='blocked') process.exit(1); if(j.runtime_policy.agent_step_timeout_ms!==null) process.exit(1); if(j.runtime_policy.worker_timeout_ms!==90000) process.exit(1); for (const p of ['product_map','compliance_report','evidence_packet','reviewed_packet','release_summary']) if(!j.pointers[p]) process.exit(1);"
 node -e "const fs=require('fs'); const events=fs.readFileSync('$JOB_DIR/events.jsonl','utf8').trim().split('\\n').map(JSON.parse); if(!events.some(e=>e.event==='job_started')) process.exit(1); if(!events.some(e=>e.event==='step_completed' && e.step==='map')) process.exit(1); if(!events.some(e=>e.event==='job_finished')) process.exit(1);"
 test -f "$JOB_DIR/steps/discovery/discovery.json"
 test -f "$JOB_DIR/steps/map/product-map.json"
@@ -133,6 +134,7 @@ const path = require('path');
 const jobDir = process.argv[2];
 const job = JSON.parse(fs.readFileSync(path.join(jobDir, 'job.json'), 'utf8'));
 if (job.status !== 'blocked') throw new Error(`expected blocked job, got ${job.status}`);
+if (job.runtime_policy.worker_timeout_ms !== 90000) throw new Error(`agentic job lost fixture worker timeout: ${job.runtime_policy.worker_timeout_ms}`);
 if (job.pointers.reviewed_packet !== 'steps/run/evidence.json') {
   throw new Error(`live agentic review should update the run packet, got ${job.pointers.reviewed_packet}`);
 }

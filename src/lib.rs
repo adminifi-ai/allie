@@ -2169,7 +2169,6 @@ mod tests {
             &mut stdout,
             &mut stderr,
         );
-
         assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
         let stdout = String::from_utf8(stdout).unwrap();
         assert!(stdout.contains("Setup checklist:"));
@@ -2814,6 +2813,8 @@ mod tests {
         );
 
         assert_eq!(code, 0, "stderr={}", String::from_utf8_lossy(&stderr));
+        let promoted = FlowManifest::load(&generated_manifest).unwrap();
+        assert_eq!(promoted.policy.worker_timeout_ms, 90_000);
         let generated = fs::read_to_string(generated_manifest).unwrap();
         assert!(generated.contains("promotion_state: verified_flow"));
         assert!(generated.contains("accessibility_tree: true"));
