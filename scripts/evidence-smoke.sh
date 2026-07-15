@@ -113,6 +113,7 @@ assert(packet.artifacts.some((artifact) => artifact.id === 'axe-json-login-form'
 assert(packet.artifacts.some((artifact) => artifact.id === 'screenshot-login-form' && artifact.hash?.startsWith('sha256:')), 'screenshot artifact hash missing');
 assert(packet.artifacts.some((artifact) => artifact.id === 'mobile-axe-json-login-form' && artifact.hash?.startsWith('sha256:')), 'mobile axe artifact hash missing');
 assert(packet.artifacts.some((artifact) => artifact.id === 'mobile-screenshot-login-form' && artifact.hash?.startsWith('sha256:')), 'mobile screenshot artifact hash missing');
+assert(packet.artifacts.every((artifact) => artifact.publication_class === 'sensitive_local'), 'every fresh evidence artifact must default to sensitive_local');
 
 const deterministic = verdict('wcag22-aa:deterministic-axe-rules');
 assert(deterministic?.status === 'pass', 'deterministic aggregate must pass');

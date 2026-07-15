@@ -8,6 +8,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum PublicationClass {
+    #[default]
+    SensitiveLocal,
+    RedactedShareable,
+    PublicSummary,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct ManifestTarget {
     pub(crate) kind: String,
@@ -458,12 +467,10 @@ pub(crate) struct Coverage {
     pub(crate) standards_obligations_evaluated: Vec<String>,
     pub(crate) obligations_not_tested: Vec<String>,
     /// The fixed set of obligations this policy profile defines as requiring
-    /// human judgment by method (WCAG's `human_review`-tagged success criteria
-    /// plus any profile's explicit `human_review_obligations`). This is scope,
+    /// human judgment by method (WCAG's `human_review` success criteria plus explicit profile obligations). This is scope,
     /// not a run outcome: it is the same list for every run of a given
-    /// profile regardless of what the run found. See `crate::review` for how
-    /// this relates to the other two "review" grains (`Verdict.status ==
-    /// "needs_review"` and a criterion's aggregated report status).
+    /// profile regardless of what the run found. See `crate::review` for its
+    /// relation to verdict and criterion-level `needs_review` outcomes.
     pub(crate) profile_human_review_scope: Vec<String>,
 }
 
@@ -492,6 +499,8 @@ pub(crate) struct ArtifactMetadata {
     pub(crate) hash: String,
     pub(crate) redaction_status: String,
     pub(crate) retention_class: String,
+    #[serde(default)]
+    pub(crate) publication_class: PublicationClass,
     pub(crate) unavailable_reason: Option<String>,
     pub(crate) related_flow_state: Option<String>,
     pub(crate) creation_tool: String,

@@ -60,4 +60,35 @@ if (infra > 0) {
 console.log(`distribution smoke ok: states_captured=${captured}, infrastructure_failures=${infra}`);
 NODE
 
+# Exercise the public projection from the bundled binary using a minimal verify
+# reporter fixture. Distribution layout must not silently omit new CLI paths.
+mkdir -p .allie/verify/latest/reporters
+cp .allie/run/latest/evidence.json .allie/verify/latest/run-evidence-source.json
+node - .allie/verify/latest/reporters/allie-report.json <<'NODE'
+import fs from 'node:fs';
+fs.writeFileSync(process.argv[2], JSON.stringify({
+  schema: 'allie.verify.v0',
+  status: 'needs_review',
+  exit_code: 0,
+  generated_at: '2026-07-15T00:00:00Z',
+  release_status: 'needs_review',
+  run_status: 'pass',
+  why: {
+    blocking: {
+      deterministic_failures: 0,
+      scripted_failures: 0,
+      infrastructure_failures: 0,
+      missing_required_evidence: [],
+    },
+    compliance_summary: {pass: 1, fail: 0, needs_review: 1, not_tested: 0},
+  },
+}));
+NODE
+"$BIN" publication \
+  --verify-root .allie/verify/latest \
+  --out .allie/public/latest
+test -f .allie/public/latest/allie-public-summary.json
+test -f .allie/public/latest/publication-receipt.json
+test ! -f .allie/public/latest/run-evidence-source.json
+
 echo "distribution smoke passed: $WORK/.allie/run/latest"

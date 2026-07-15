@@ -4,7 +4,7 @@ use crate::{
     parse_run_options, run_compliance_report, run_discovery, run_map, run_promote_flow,
     run_release, run_v0,
 };
-use crate::{consumer, workbench, worker_runtime};
+use crate::{consumer, publication, workbench, worker_runtime};
 use std::fmt::Display;
 use std::io::{self, Write};
 
@@ -45,6 +45,7 @@ pub(crate) fn run_cli_with_io(
         Some("promote-flow") => handle_promote_flow(&args[1..], stdout, stderr),
         Some("map") => handle_map(&args[1..], stdout, stderr),
         Some("report") => handle_report(&args[1..], stdout, stderr),
+        Some("publication") => handle_publication(&args[1..], stdout, stderr),
         Some("workbench") => handle_workbench(&args[1..], stdout, stderr),
         Some("release") => handle_release(&args[1..], stdout, stderr),
         _ => {
@@ -52,6 +53,28 @@ pub(crate) fn run_cli_with_io(
             print_usage(stderr);
             ExitClass::Usage.code()
         }
+    }
+}
+
+fn handle_publication(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    match publication::parse_publication_options(args) {
+        Ok(options) => match publication::run_publication(options) {
+            Ok(receipt) => {
+                let _ = writeln!(
+                    stdout,
+                    "Allie publication status: {}",
+                    receipt.status.as_str()
+                );
+                let _ = writeln!(
+                    stdout,
+                    "Publication receipt: {}",
+                    receipt.receipt_path.display()
+                );
+                receipt.exit_class.code()
+            }
+            Err(error) => infra_error(error, stderr),
+        },
+        Err(error) => usage_error(error, stderr),
     }
 }
 
@@ -296,50 +319,10 @@ fn usage_error(error: impl Display, stderr: &mut dyn Write) -> i32 {
 fn print_usage(writer: &mut dyn Write) {
     let _ = writeln!(
         writer,
-        "Usage:\n  allie init [--manifest .allie/manifest.yml] [--app-name <name>] [--base-url <url> | --fixture-dir <dir>] [--force]\n  allie doctor [--manifest .allie/manifest.yml | --no-manifest] [--out .allie/doctor]\n  allie verify [--manifest .allie/manifest.yml] [--out .allie/verify/latest] [--project-root <dir>] [--changed-surface <id>] [--agent local|opencode|omp] [--stale-after-days <days>]\n  allie run --manifest <flow.yml> --out <output-dir> [--project-root <dir>]\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
+        "Usage:\n  allie init [--manifest .allie/manifest.yml] [--app-name <name>] [--base-url <url> | --fixture-dir <dir>] [--force]\n  allie doctor [--manifest .allie/manifest.yml | --no-manifest] [--out .allie/doctor]\n  allie verify [--manifest .allie/manifest.yml] [--out .allie/verify/latest] [--project-root <dir>] [--changed-surface <id>] [--agent local|opencode|omp] [--stale-after-days <days>]\n  allie publication --verify-root .allie/verify/latest --out .allie/public/latest [--include <relative-path>]\n  allie run --manifest <flow.yml> --out <output-dir> [--project-root <dir>]\n  allie discover --manifest <flow.yml> --out <output-dir>\n  allie promote-flow --discovery <discovery.json> --flow-plan <flow-plan.json> --out <flow.yml>\n  allie map --manifest <flow.yml> --out <output-dir> [--project-root <dir>] [--agent local|opencode|omp]\n  allie report --map <product-map.json> --packet <evidence.json> --out <output-dir>\n  allie workbench start --manifest <flow.yml> --out <job-dir> [--project-root <dir>]\n  allie workbench status --job <job-dir>\n  allie workbench cancel --job <job-dir>\n  allie workbench resume --job <job-dir>\n  allie release --packet <evidence.json> --out <output-dir> [--changed-surface <id>] [--stale-after-days <days>]"
     );
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn run_handler_reports_usage_without_required_paths() {
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-
-        let code = handle_run(&[], &mut stdout, &mut stderr);
-
-        assert_eq!(code, ExitClass::Usage.code());
-        let stderr = String::from_utf8(stderr).unwrap();
-        assert!(stderr.contains("--manifest is required"));
-        assert!(stderr.contains("allie run --manifest"));
-    }
-
-    #[test]
-    fn release_handler_reports_usage_without_packet() {
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-
-        let code = handle_release(&[], &mut stdout, &mut stderr);
-
-        assert_eq!(code, ExitClass::Usage.code());
-        let stderr = String::from_utf8(stderr).unwrap();
-        assert!(stderr.contains("--packet is required"));
-        assert!(stderr.contains("allie release --packet"));
-    }
-
-    #[test]
-    fn doctor_handler_reports_usage_for_unexpected_args() {
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-
-        let code = handle_doctor(&["--wat".to_string()], &mut stdout, &mut stderr);
-
-        assert_eq!(code, ExitClass::Usage.code());
-        let stderr = String::from_utf8(stderr).unwrap();
-        assert!(stderr.contains("unexpected argument: --wat"));
-        assert!(stderr.contains("allie doctor"));
-    }
-}
+#[path = "cli/tests.rs"]
+mod tests;

@@ -115,6 +115,8 @@ Each artifact should carry:
 - path or URI;
 - hash;
 - redaction status;
+- publication class (`sensitive_local`, `redacted_shareable`, or
+  `public_summary`);
 - related flow/state;
 - creation tool;
 - timestamp.
@@ -214,10 +216,14 @@ projection, then writes a stable reporter matrix under `reporters/`:
 - `allie.sarif`: SARIF 2.1.0 summary for hosts that ingest code-scanning
   artifacts.
 
-GitHub, Azure, and local runs use the same command and reporter names. Host
-wrappers archive `.allie/verify/latest` as the artifact root so HTML drilldown
-links can reach sibling map, evidence, report, and release outputs; they do not
-define accessibility policy.
+GitHub, Azure, and local runs use the same verify command and reporter names.
+The canonical `.allie/verify/latest` tree is sensitive local evidence. Public
+host wrappers run `allie publication --verify-root .allie/verify/latest --out
+.allie/public/latest` and publish only its four explicitly allowlisted files. Private
+evidence stores may retain the canonical tree under their own access policy;
+host wrappers do not define accessibility policy. The projection and its
+receipt are `public_summary`; a refusal classifies the requested artifact as
+`sensitive_local` without copying or echoing its raw path.
 
 ## Replay
 

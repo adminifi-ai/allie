@@ -542,7 +542,7 @@ fn verify_summary_value(
         },
         "contract": {
             "local_command": format!("allie verify --manifest {} --out {}", options.manifest_path.display(), options.out_dir.display()),
-            "ci_contract": "CI hosts call the same allie verify command and archive the full verify artifact root.",
+            "ci_contract": "CI hosts call allie verify, then publish only the policy-approved allie publication projection.",
             "legal_claim": "evidence visibility only; not a legal compliance guarantee"
         }
     })

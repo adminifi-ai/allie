@@ -39,6 +39,7 @@
 //!   every removed path is physically inside the out-dir by construction.
 //! - Allie never `rm -rf`s a directory it cannot account for.
 
+use crate::model::PublicationClass;
 use crate::{AllieError, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -53,6 +54,8 @@ const PHASE_COMPLETE: &str = "complete";
 struct RunManifest {
     schema: String,
     command: String,
+    #[serde(default)]
+    publication_class: PublicationClass,
     /// "in_progress" from prepare until the run's last write; "complete"
     /// once finalize has recorded the run's files. Additive to v0: absent in
     /// manifests written before the field existed, which are treated as
@@ -146,6 +149,10 @@ fn write_manifest(out_dir: &Path, command: &str, phase: &str, files: Vec<String>
     let manifest = RunManifest {
         schema: MANIFEST_SCHEMA.to_string(),
         command: command.to_string(),
+        publication_class: match command {
+            "publication" => PublicationClass::PublicSummary,
+            _ => PublicationClass::SensitiveLocal,
+        },
         phase: phase.to_string(),
         written_at: crate::now_utc().to_rfc3339(),
         files,
