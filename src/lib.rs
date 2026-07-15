@@ -2326,6 +2326,7 @@ mod tests {
     fn auth_fixture_manifest_validates_and_carries_auth_block() {
         let manifest = FlowManifest::load(Path::new("examples/auth-fixture-flow.yml")).unwrap();
         manifest.validate().unwrap();
+        assert_eq!(manifest.policy.worker_timeout_ms, 90_000);
 
         let auth = manifest.auth.as_ref().expect("auth block present");
         assert_eq!(auth.start_path.as_deref(), Some("/login.html"));
@@ -2336,6 +2337,16 @@ mod tests {
             auth.referenced_value_envs(),
             vec!["ALLIE_AUTH_FIXTURE_USER", "ALLIE_AUTH_FIXTURE_PASSWORD"]
         );
+
+        let negative =
+            FlowManifest::load(Path::new("examples/auth-fixture-flow-negative.yml")).unwrap();
+        negative.validate().unwrap();
+        assert_eq!(negative.policy.worker_timeout_ms, 90_000);
+
+        let storage =
+            FlowManifest::load(Path::new("examples/auth-fixture-storage-state-flow.yml")).unwrap();
+        storage.validate().unwrap();
+        assert_eq!(storage.policy.worker_timeout_ms, 90_000);
     }
 
     #[test]
