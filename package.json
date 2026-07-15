@@ -19,6 +19,8 @@
     "agentic:smoke": "scripts/agentic-smoke.sh",
     "agentic:precision": "node scripts/agentic-fail-precision-smoke.mjs",
     "package:release": "scripts/package-release.sh",
+    "release-integrity:smoke": "scripts/release-integrity-smoke.sh",
+    "release-workflow:smoke": "node scripts/release-workflow-contract-smoke.mjs",
     "release:smoke": "cargo run --locked -- release --packet .allie/runs/v0-smoke/evidence.json --out .allie/releases/v0-smoke --changed-surface login-form",
     "autonomous:smoke": "scripts/autonomous-smoke.sh",
     "size:smoke": "scripts/module-size-gate.sh --self-test && scripts/module-size-gate.sh",
@@ -27,5 +29,9 @@
   "dependencies": {
     "@axe-core/playwright": "^4.10.2",
     "playwright": "^1.49.1"
+  },
+  "devDependencies": {
+    "@iarna/toml": "^2.2.5",
+    "yaml": "^2.9.0"
   }
 }

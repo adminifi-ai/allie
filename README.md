@@ -109,11 +109,35 @@ and never echo a refused raw path. Host-specific files do not fork that policy.
 Arbitrary repositories install the release bundle, then run the same local
 preflight and verification commands. The bundle layout keeps the Rust binary and
 browser worker assets together, so the CLI resolves the worker automatically.
+Download the archive, checksum manifest, and adjacent Sigstore bundle first;
+verify both the checksum and the GitHub Actions signer before extracting any
+release content:
 
 ```sh
-mkdir -p .allie/tooling
-curl -fsSL https://github.com/adminifi-ai/allie/releases/latest/download/allie-linux-x64.tar.gz \
-  | tar -xz -C .allie/tooling
+set -eu
+release=v0.1.0
+archive=allie-linux-x64.tar.gz
+base="https://github.com/adminifi-ai/allie/releases/download/$release"
+download=.allie/tooling/download
+mkdir -p "$download" .allie/tooling
+curl -fsSLo "$download/$archive" "$base/$archive"
+curl -fsSLo "$download/SHA256SUMS" "$base/SHA256SUMS"
+curl -fsSLo "$download/$archive.sigstore.json" "$base/$archive.sigstore.json"
+(
+  cd "$download"
+  checksum_entries=$(awk -v archive="$archive" '$2 == archive { count++ } END { print count + 0 }' SHA256SUMS)
+  if [ "$checksum_entries" -ne 1 ]; then
+    printf 'expected exactly one checksum for %s, found %s\n' "$archive" "$checksum_entries" >&2
+    exit 1
+  fi
+  awk -v archive="$archive" '$2 == archive' SHA256SUMS | sha256sum --check -
+)
+cosign verify-blob \
+  --bundle "$download/$archive.sigstore.json" \
+  --certificate-identity "https://github.com/adminifi-ai/allie/.github/workflows/release.yml@refs/tags/$release" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  "$download/$archive"
+tar -xzf "$download/$archive" -C .allie/tooling
 export PATH="$PWD/.allie/tooling/allie/bin:$PATH"
 allie doctor --manifest .allie/manifest.yml --out .allie/doctor
 allie verify --manifest .allie/manifest.yml --out .allie/verify/latest
@@ -124,7 +148,17 @@ When working from a source checkout instead of a release bundle, run `npm ci`
 and `npx playwright install chromium` in the Allie checkout once. The
 `ALLIE_BROWSER_WORKER` override remains available only for nonstandard layouts.
 Release bundles are produced with `npm run package:release` and published from
-tag builds.
+tag builds. The tag workflow builds and verifies without write or OIDC
+privileges, then passes only the named archive and checksum manifest to a
+minimal signing/publishing job. That job creates a draft, uploads the three
+exact expected assets, reads their names back through the GitHub API, and only
+then publishes; any failed draft is deleted.
+
+RustSec ignores live in `.cargo/audit.toml`; every ignored advisory must have
+one matching structured record in `.cargo/audit-waivers.toml` with
+`tracking_ref`, `rationale`, `owner`, a future TOML calendar `expiry`, and the
+`removal` condition. CI rejects malformed, expired, duplicate, undocumented,
+or unreferenced waiver records.
 
 Interpret results as evidence status: `approved` exits `0`, `needs_review`
 exits `0` with neutral review-required evidence, `blocked` exits `1` because

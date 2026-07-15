@@ -1,0 +1,4 @@
+[advisories]
+# Advisory waivers are exceptional and never belong in workflow flags. Every
+# ignored ID requires one matching structured record in `audit-waivers.toml`.
+ignore = []
