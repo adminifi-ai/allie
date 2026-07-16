@@ -43,6 +43,7 @@ fs.writeFileSync(process.argv[responseIndex], JSON.stringify({{
   provider: '{provider}',
   model: 'test',
   calls: 0,
+  usage: {{ prompt_tokens: 0, completion_tokens: 0 }},
   redaction_receipt: {{
     schema: 'allie.model-redaction-receipt.v0',
     profile: 'none',

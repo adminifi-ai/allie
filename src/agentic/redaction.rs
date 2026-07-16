@@ -9,12 +9,27 @@ enum Status {
     NotApplied,
 }
 
+impl Status {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NotSent => "not_sent",
+            Self::NotApplied => "not_applied",
+        }
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Receipt {
     schema: String,
     pub(super) profile: ModelRedactionMode,
     status: Status,
+}
+
+impl Receipt {
+    pub(super) fn status_str(&self) -> &'static str {
+        self.status.as_str()
+    }
 }
 
 pub(super) fn accepted_redaction_receipt(
