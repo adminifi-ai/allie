@@ -65,6 +65,13 @@ from model egress. Every agentic worker response carries
 call occurred and `not_applied` after unredacted media was transmitted. V0 has
 no status that can honestly serialize `applied` or `redacted`.
 
+Each accepted gateway run also appends an `allie.model-egress-event.v0` entry
+under `model_egress_events`. The event binds the opaque prompt version,
+provider/model/endpoint, call and token counts, redaction receipt, outcome, and
+SHA-256 hashes of the exact worker request and response. It contains no API key
+or prompt/media body. A worker response with an absent or unrecognized prompt
+version is rejected before its assessments or audit event enter the packet.
+
 ## Coverage
 
 - routes visited;

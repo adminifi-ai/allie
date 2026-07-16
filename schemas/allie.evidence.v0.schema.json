@@ -197,6 +197,60 @@
         "additionalProperties": true
       }
     },
+    "agentic_assessments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["obligation", "assessment", "rationale", "reviewer_guidance", "confidence", "provider", "model", "media"],
+        "properties": {
+          "obligation": { "type": "string" },
+          "assessment": { "type": "string" },
+          "rationale": { "type": "string" },
+          "reviewer_guidance": { "type": "string" },
+          "confidence": { "type": "string" },
+          "provider": { "type": "string" },
+          "model": { "type": "string" },
+          "media": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["kind", "caption", "path"],
+              "properties": {
+                "kind": { "type": "string" },
+                "caption": { "type": "string" },
+                "path": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "model_egress_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["schema", "occurred_at", "prompt_version", "provider", "model", "endpoint", "status", "calls", "prompt_tokens", "completion_tokens", "redaction_profile", "redaction_status", "request_sha256", "response_sha256"],
+        "properties": {
+          "schema": { "const": "allie.model-egress-event.v0" },
+          "occurred_at": { "type": "string", "minLength": 1 },
+          "prompt_version": { "type": "string", "minLength": 1 },
+          "provider": { "type": "string", "minLength": 1 },
+          "model": { "type": "string" },
+          "endpoint": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["ok", "degraded", "skipped"] },
+          "calls": { "type": "integer", "minimum": 0 },
+          "prompt_tokens": { "type": "integer", "minimum": 0 },
+          "completion_tokens": { "type": "integer", "minimum": 0 },
+          "redaction_profile": { "const": "none" },
+          "redaction_status": { "enum": ["not_sent", "not_applied"] },
+          "request_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "response_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+        },
+        "additionalProperties": false
+      }
+    },
     "replay": {
       "type": "object",
       "required": ["command", "manifest_path", "environment_requirements", "credential_profile", "browser", "seed_data", "known_nondeterminism"],

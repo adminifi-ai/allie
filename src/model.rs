@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+mod egress;
+pub(crate) use egress::{AgenticAssessmentRecord, ModelEgressEvent};
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum PublicationClass {
@@ -361,21 +364,9 @@ pub(crate) struct EvidencePacket {
     pub(crate) waivers: Vec<serde_json::Value>,
     #[serde(default)]
     pub(crate) agentic_assessments: Vec<AgenticAssessmentRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) model_egress_events: Vec<ModelEgressEvent>,
     pub(crate) replay: Replay,
-}
-
-/// One criterion's model assessment, with run-relative media paths.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct AgenticAssessmentRecord {
-    pub(crate) obligation: String,
-    pub(crate) assessment: String,
-    pub(crate) rationale: String,
-    pub(crate) reviewer_guidance: String,
-    pub(crate) confidence: String,
-    pub(crate) provider: String,
-    pub(crate) model: String,
-    #[serde(default)]
-    pub(crate) media: Vec<AgenticMediaRef>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

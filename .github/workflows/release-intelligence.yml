@@ -1,0 +1,128 @@
+name: Allie release intelligence
+
+on:
+  workflow_run:
+    workflows:
+      - ci
+    types:
+      - completed
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: allie-release-intelligence
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'master')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Mint release token
+        id: release-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.LANDMARK_RELEASER_APP_ID }}
+          private-key: ${{ secrets.LANDMARK_RELEASER_PRIVATE_KEY }}
+
+      - name: Checkout verified release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          token: ${{ steps.release-token.outputs.token }}
+
+      - name: Install pinned Landmark runtime
+        env:
+          LANDMARK_VERSION: 0.28.1
+          LANDMARK_SHA256: a1c01ff06fc8fc957055bafe4f1f94076b097fea23e267e6da11dbad44d2b920
+        run: |
+          set -euo pipefail
+          install -d "$RUNNER_TEMP/landmark/bin"
+          curl --fail --location --silent --show-error \
+            --output "$RUNNER_TEMP/landmark/bin/landmark" \
+            "https://github.com/misty-step/landmark/releases/download/v${LANDMARK_VERSION}/landmark-x86_64-unknown-linux-musl"
+          printf '%s  %s\n' "$LANDMARK_SHA256" "$RUNNER_TEMP/landmark/bin/landmark" | sha256sum --check --strict
+          chmod 0755 "$RUNNER_TEMP/landmark/bin/landmark"
+          echo "$RUNNER_TEMP/landmark/bin" >> "$GITHUB_PATH"
+
+      - name: Compute and materialize Landmark release
+        id: landmark
+        run: |
+          set -euo pipefail
+          explicit_tag=()
+          if ! git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -q .; then
+            bootstrap_version=$(sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"$/\1/p' Cargo.toml)
+            if ! printf '%s\n' "$bootstrap_version" | grep -Eq '^0\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+              echo "Bootstrap version must remain on the v0.x line: $bootstrap_version" >&2
+              exit 1
+            fi
+            explicit_tag=(--release-tag "v${bootstrap_version}")
+          fi
+
+          landmark run \
+            --provider local \
+            --repo-root . \
+            --repository adminifi-ai/allie \
+            --dry-run \
+            "${explicit_tag[@]}" > "$RUNNER_TEMP/landmark-preview.json"
+
+          bump=$(jq -r '.version_decision.bump' "$RUNNER_TEMP/landmark-preview.json")
+          if [ "$bump" = none ] && [ "${#explicit_tag[@]}" -eq 0 ]; then
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          release_tag=$(jq -r '.release_tag' "$RUNNER_TEMP/landmark-preview.json")
+          version=$(jq -r '.version' "$RUNNER_TEMP/landmark-preview.json")
+          stability=$(jq -r '.version_decision.stability' "$RUNNER_TEMP/landmark-preview.json")
+          if [ "$stability" != pre-stable ] || ! printf '%s\n' "$release_tag" | grep -Eq '^v0\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "Landmark must produce a pre-stable v0.x release, got $release_tag ($stability)" >&2
+            exit 1
+          fi
+
+          technical_changelog="docs/releases/${release_tag}-technical.md"
+          landmark run \
+            --provider local \
+            --repo-root . \
+            --repository adminifi-ai/allie \
+            --technical-changelog-file "$technical_changelog" \
+            "${explicit_tag[@]}"
+          node scripts/sync-release-version.mjs --repo-root . --version "$version"
+
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "technical_changelog=$technical_changelog" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Landmark evidence
+        if: steps.landmark.outputs.released == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: landmark-release-evidence-${{ steps.landmark.outputs.release_tag }}
+          path: .landmark/run
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Commit and tag Landmark release
+        if: steps.landmark.outputs.released == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.landmark.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock package.json package-lock.json docs/releases
+          git commit -m "chore(release): ${RELEASE_TAG}"
+          git tag "$RELEASE_TAG"
+          git push origin HEAD:master "$RELEASE_TAG"

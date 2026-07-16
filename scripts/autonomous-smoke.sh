@@ -166,6 +166,23 @@ if (!packet.agentic_assessments.some((assessment) => assessment.assessment === '
 }
 const request = JSON.parse(fs.readFileSync(path.join(jobDir, 'steps/run/agentic-request.json'), 'utf8'));
 if (request.model?.redaction !== 'none') throw new Error('live agentic request did not carry explicit redaction none');
+const response = JSON.parse(fs.readFileSync(path.join(jobDir, 'steps/run/agentic-response.json'), 'utf8'));
+const promptVersion = 'allie.agentic.wcag-review.v1';
+if (request.prompt_version !== promptVersion || response.prompt_version !== promptVersion) {
+  throw new Error(`agentic prompt version drifted: request=${request.prompt_version} response=${response.prompt_version}`);
+}
+if (!Array.isArray(packet.model_egress_events) || packet.model_egress_events.length !== 1) {
+  throw new Error(`expected one model egress event, got ${JSON.stringify(packet.model_egress_events)}`);
+}
+const egress = packet.model_egress_events[0];
+if (egress.schema !== 'allie.model-egress-event.v0' ||
+    egress.prompt_version !== promptVersion ||
+    egress.calls !== response.calls ||
+    packet.policy.budget.model_calls !== response.calls ||
+    !/^sha256:[0-9a-f]{64}$/.test(egress.request_sha256) ||
+    !/^sha256:[0-9a-f]{64}$/.test(egress.response_sha256)) {
+  throw new Error(`model egress event is incomplete: ${JSON.stringify(egress)}`);
+}
 if (packet.policy.model_egress_redaction !== 'none') throw new Error('evidence policy did not retain accepted model egress mode');
 const surfaceIds = new Set((request.surfaces || []).map((surface) => surface.id));
 for (const id of ['home', 'settings']) {
@@ -187,6 +204,7 @@ const responsePath = process.argv[responseIndex + 1];
 fs.mkdirSync(path.dirname(responsePath), { recursive: true });
 fs.writeFileSync(responsePath, `${JSON.stringify({
   schema: 'allie.agentic.response.v0',
+  prompt_version: 'allie.agentic.wcag-review.v1',
   status: 'error',
   calls: 0,
   redaction_receipt: {

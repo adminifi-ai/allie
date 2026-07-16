@@ -28,8 +28,11 @@ allie publication --verify-root .allie/verify/latest --out .allie/public/latest
 For source-checkout development, run `npm ci` and `npx playwright install
 chromium` in the Allie checkout once. `ALLIE_BROWSER_WORKER` is still an
 explicit override for nonstandard layouts, not part of the normal consumer path.
-Release bundles are built with `npm run package:release`; tag pushes publish the
-Linux bundle consumed by the CI examples.
+Allie's own versioning, technical changelog, and user-facing release notes come
+from the pinned Landmark CLI after `ci` succeeds on `master`. Landmark is not a
+target-repository dependency and is never invoked by `allie verify`. The
+dedicated release app pushes the Landmark-computed `v0.x` tag, triggering the
+bundle workflow that builds the Linux archive consumed by the CI examples.
 
 Treat `.allie/verify/latest` as sensitive local evidence. It can contain
 authenticated DOM, screenshots, accessibility trees, traces, prompts, URLs,

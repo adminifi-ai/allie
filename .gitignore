@@ -1,4 +1,5 @@
 /target
 /node_modules
 /.allie
+/.landmark/run
 .DS_Store

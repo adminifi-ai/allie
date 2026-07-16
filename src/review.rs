@@ -184,6 +184,7 @@ mod tests {
             verdicts,
             waivers: Vec::new(),
             agentic_assessments: Vec::new(),
+            model_egress_events: Vec::new(),
             replay: Replay {
                 command: "cargo run --locked -- run --manifest examples/login-flow.yml --out .allie/runs/latest".to_string(),
                 manifest_path: "examples/login-flow.yml".to_string(),
