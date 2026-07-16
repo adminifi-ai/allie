@@ -19,6 +19,8 @@ import { chromium } from 'playwright';
 const REQUEST_SCHEMA = 'allie.agentic.request.v0';
 const RESPONSE_SCHEMA = 'allie.agentic.response.v0';
 const REDACTION_RECEIPT_SCHEMA = 'allie.model-redaction-receipt.v0';
+// Bump whenever buildPrompt semantics or its required response shape changes.
+const PROMPT_VERSION = 'allie.agentic.wcag-review.v1';
 const MAX_REVIEW_ACTIONS = 3;
 const MAX_MODEL_RETRIES = 1;
 const ALLOWED_REVIEW_KEYS = new Set(['Tab']);
@@ -38,6 +40,9 @@ async function main() {
 async function run(request) {
   if (request.schema !== REQUEST_SCHEMA) {
     return errorResponse(`unexpected request schema ${request.schema}`);
+  }
+  if (request.prompt_version !== PROMPT_VERSION) {
+    return errorResponse(`unexpected prompt version ${request.prompt_version}; expected ${PROMPT_VERSION}`);
   }
   if (request.model?.redaction !== 'none') {
     return errorResponse('model.redaction must explicitly declare the supported V0 mode "none"');
@@ -121,6 +126,7 @@ async function run(request) {
     const status = errors.length === 0 ? 'ok' : 'degraded';
     return {
       schema: RESPONSE_SCHEMA,
+      prompt_version: PROMPT_VERSION,
       status,
       provider: request.model.provider || 'openrouter',
       model: request.model.model,
@@ -776,6 +782,7 @@ function redactionReceipt(calls) {
 function errorResponse(message, calls = 0) {
   return {
     schema: RESPONSE_SCHEMA,
+    prompt_version: PROMPT_VERSION,
     status: 'error',
     provider: 'openrouter',
     model: null,

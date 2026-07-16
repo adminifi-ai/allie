@@ -32,6 +32,13 @@ jobs:
 
       - run: scripts/package-release.sh dist
 
+      - name: Stage Landmark release notes
+        run: |
+          set -euo pipefail
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          test -s "$notes"
+          cp "$notes" dist/release-notes.md
+
       - name: Generate release checksums
         run: scripts/release-checksums.sh dist
 
@@ -42,6 +49,7 @@ jobs:
           path: |
             dist/allie-linux-x64.tar.gz
             dist/SHA256SUMS
+            dist/release-notes.md
           if-no-files-found: error
           retention-days: 1
 
@@ -91,7 +99,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          gh release create "$tag" --draft --verify-tag --title "$tag" --notes "Allie $tag"
+          gh release create "$tag" --draft --verify-tag --title "$tag" --notes-file dist/release-notes.md
           created=true
 
           gh release upload "$tag" \

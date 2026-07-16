@@ -1,0 +1,21 @@
+product:
+  name: Allie
+  description: Accessibility evidence harness and release gate for reproducible WCAG review.
+audience: developer
+voice: Clear, specific, evidence-first, and limited to shipped user-visible behavior.
+changelog:
+  source: auto
+artifacts:
+  markdown: docs/releases/{version}.md
+  plaintext: docs/releases/{version}.txt
+  html: docs/releases/{version}.html
+  json: docs/releases/releases.json
+  rss: docs/releases/feed.xml
+release:
+  profile: full
+model:
+  policy: balanced
+  fallbacks: []
+budget:
+  max_input_tokens: 12000
+  max_output_tokens: 1200

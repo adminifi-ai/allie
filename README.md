@@ -147,12 +147,22 @@ allie publication --verify-root .allie/verify/latest --out .allie/public/latest
 When working from a source checkout instead of a release bundle, run `npm ci`
 and `npx playwright install chromium` in the Allie checkout once. The
 `ALLIE_BROWSER_WORKER` override remains available only for nonstandard layouts.
-Release bundles are produced with `npm run package:release` and published from
-tag builds. The tag workflow builds and verifies without write or OIDC
-privileges, then passes only the named archive and checksum manifest to a
-minimal signing/publishing job. That job creates a draft, uploads the three
-exact expected assets, reads their names back through the GitHub API, and only
-then publishes; any failed draft is deleted.
+Landmark manages Allie's own pre-stable release line: after `ci` succeeds on
+`master`, the pinned Landmark CLI computes the next `v0.x` version and generates
+the technical changelog plus user-facing Markdown, text, HTML, JSON, and RSS
+release notes. The release-intelligence workflow uses the dedicated release app
+to synchronize the Rust and browser-worker versions, commit the generated
+release artifacts, and tag that commit; the authenticated tag push triggers the
+bundle workflow. Landmark is development/release infrastructure for Allie
+itself; the `allie` CLI never invokes Landmark while auditing a target
+repository.
+
+Release bundles are produced with `npm run package:release`. The tag workflow
+builds and verifies without write or OIDC privileges, then passes only the
+named archive, checksum manifest, and tag-matched Landmark notes to a minimal
+signing/publishing job. That job creates a draft, uploads the three exact
+expected assets, reads their names back through the GitHub API, and only then
+publishes; any failed draft is deleted.
 
 RustSec ignores live in `.cargo/audit.toml`; every ignored advisory must have
 one matching structured record in `.cargo/audit-waivers.toml` with

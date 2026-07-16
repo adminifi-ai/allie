@@ -59,8 +59,8 @@ The model gateway owns:
 - ZDR requirements;
 - spend and call budgets;
 - redaction policy;
-- prompt templates;
-- model metadata capture;
+- versioned prompt templates;
+- model metadata and egress audit receipts;
 - response validation;
 - no-fallback enforcement.
 

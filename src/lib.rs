@@ -1132,6 +1132,7 @@ fn write_packet_and_report(
         verdicts,
         waivers: Vec::new(),
         agentic_assessments: Vec::new(),
+        model_egress_events: Vec::new(),
         replay: Replay {
             command: replay_command,
             manifest_path: manifest_path.to_string_lossy().to_string(),

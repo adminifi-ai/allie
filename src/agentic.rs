@@ -16,8 +16,9 @@ use wait_timeout::ChildExt;
 
 const AGENTIC_WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 
+mod audit;
 mod redaction;
-use redaction::accepted_redaction_receipt;
+use audit::{PROMPT_VERSION as AGENTIC_PROMPT_VERSION, record_model_egress};
 
 #[cfg(test)]
 static AGENTIC_WORKER_ENV_GUARD: Mutex<()> = Mutex::new(());
@@ -142,6 +143,7 @@ fn run_agentic_review_with_timeout(
     let model_route = manifest.model.resolved_route();
     let request = serde_json::json!({
         "schema": "allie.agentic.request.v0",
+        "prompt_version": AGENTIC_PROMPT_VERSION,
         "target": {
             "base_url": target_base_url,
             "fixture_dir": manifest.target.fixture_dir.as_ref().map(|dir| dir.to_string_lossy().to_string()),
@@ -206,7 +208,14 @@ fn run_agentic_review_with_timeout(
     }
 
     let response: serde_json::Value = read_json_file(&response_path)?;
-    let redaction_receipt = accepted_redaction_receipt(&response, manifest.model.redaction)?;
+    let prompt_version = response["prompt_version"].as_str().ok_or_else(|| {
+        AllieError::Worker("agentic worker response omitted prompt_version".to_string())
+    })?;
+    if prompt_version != AGENTIC_PROMPT_VERSION {
+        return Err(AllieError::Worker(format!(
+            "agentic worker returned prompt version {prompt_version}; expected {AGENTIC_PROMPT_VERSION}"
+        )));
+    }
     let outcome = agentic_response_outcome(&response, status.success())?;
     let timestamp = now_utc();
     let policy = ArtifactPolicy {
@@ -219,13 +228,16 @@ fn run_agentic_review_with_timeout(
         .map(|artifact| artifact.path.clone())
         .collect::<BTreeSet<_>>();
 
-    let provider = response["provider"]
-        .as_str()
-        .unwrap_or("openrouter")
-        .to_string();
-    let model = response["model"].as_str().unwrap_or_default().to_string();
     let fail_precision_passed = agentic_fail_precision_passed(&response);
-    packet.policy.model_egress_redaction = Some(redaction_receipt.profile);
+    let (provider, model) = record_model_egress(
+        &mut packet,
+        &request,
+        &response,
+        &request_path,
+        &response_path,
+        manifest.model.redaction,
+        timestamp.to_rfc3339(),
+    )?;
     let empty = Vec::new();
     for assessment in response["assessments"].as_array().unwrap_or(&empty) {
         let Some(obligation) = assessment["obligation"].as_str() else {

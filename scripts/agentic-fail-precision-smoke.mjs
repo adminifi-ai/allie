@@ -73,6 +73,7 @@ function label(surfaceId, expected) {
 function agenticRequest(port, labels, name) {
   return {
     schema: 'allie.agentic.request.v0',
+    prompt_version: 'allie.agentic.wcag-review.v1',
     target: { fixture_dir: path.join(repo, 'fixtures/workbench') },
     browser: {
       viewport: { width: 1024, height: 768 },

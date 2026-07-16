@@ -7,6 +7,9 @@ import { parseDocument, stringify as stringifyYaml } from 'yaml';
 
 const RELEASE_PATH = '.github/workflows/release.yml';
 const CI_PATH = '.github/workflows/ci.yml';
+const RELEASE_INTELLIGENCE_PATH = '.github/workflows/release-intelligence.yml';
+const LANDMARK_MANIFEST_PATH = '.landmark.yml';
+const VERSION_SYNC_PATH = 'scripts/sync-release-version.mjs';
 const AUDIT_PATH = '.cargo/audit.toml';
 const WAIVER_PATH = '.cargo/audit-waivers.toml';
 const README_PATH = 'README.md';
@@ -48,6 +51,10 @@ function lines(value) {
 function validateReleaseWorkflow(text) {
   const workflow = parseYaml(text, 'release workflow');
   exactKeys(workflow.permissions, [], 'global release permissions');
+  const triggers = workflow.on || {};
+  if (!triggers.push?.tags?.includes('v*') || Object.hasOwn(triggers, 'workflow_dispatch')) {
+    fail('release workflow must accept only version tag pushes');
+  }
   const build = workflow.jobs?.['build-release'];
   const publish = workflow.jobs?.['sign-and-publish'];
   if (!build || !publish) fail('release workflow must split build-release from sign-and-publish');
@@ -85,7 +92,7 @@ function validateReleaseWorkflow(text) {
     fail('build-release must upload the named unsigned-release-bundle artifact');
   }
   const staged = lines(uploadArtifact.with.path);
-  const expectedStaged = ['dist/SHA256SUMS', 'dist/allie-linux-x64.tar.gz'];
+  const expectedStaged = ['dist/SHA256SUMS', 'dist/allie-linux-x64.tar.gz', 'dist/release-notes.md'];
   if (JSON.stringify(staged.sort()) !== JSON.stringify(expectedStaged)) {
     fail(`unsigned artifact paths must be exact, got ${staged.join(', ')}`);
   }
@@ -104,6 +111,11 @@ function validateReleaseWorkflow(text) {
   if (signRun !== SIGN_COMMAND) {
     fail('signing must be the exact fail-closed archive and Sigstore bundle command');
   }
+  const notes = (build.steps || []).find((step) => step.name === 'Stage Landmark release notes');
+  if (!String(notes?.run || '').includes('docs/releases/${GITHUB_REF_NAME}.md') ||
+      !String(notes?.run || '').includes('cp "$notes" dist/release-notes.md')) {
+    fail('build-release must stage the tag-matched Landmark release notes');
+  }
 
   const release = (publish.steps || []).find((step) => step.name === 'Publish only after exact asset readback');
   const run = String(release?.run || '');
@@ -113,6 +125,12 @@ function validateReleaseWorkflow(text) {
   const publishAt = run.indexOf('gh release edit "$tag" --draft=false');
   if (!(draftAt >= 0 && uploadAt > draftAt && readbackAt > uploadAt && publishAt > readbackAt)) {
     fail('release order must be draft, upload, API asset readback, then publish');
+  }
+  if (!run.includes('--notes-file dist/release-notes.md') || run.includes('--notes "Allie $tag"')) {
+    fail('release publication must use Landmark-generated notes');
+  }
+  if (!run.includes('tag="$GITHUB_REF_NAME"')) {
+    fail('release publication must bind release assets to the pushed tag');
   }
   if (!run.includes('set -euo pipefail') || !run.includes('trap cleanup EXIT') ||
       !run.includes('gh api --method DELETE')) {
@@ -133,6 +151,94 @@ function validateReleaseWorkflow(text) {
   }
   if (/gh release (create|edit)[^\n]*(--draft=false|--draft false)/.test(run.slice(0, readbackAt))) {
     fail('release may not become public before exact API readback');
+  }
+}
+
+function validateReleaseIntelligenceWorkflow(text, manifestText) {
+  const workflow = parseYaml(text, 'release intelligence workflow');
+  exactKeys(workflow.permissions, [], 'global release intelligence permissions');
+  const triggers = workflow.on || {};
+  if (!triggers.workflow_run || !Object.hasOwn(triggers, 'workflow_dispatch')) {
+    fail('release intelligence must support verified CI completion and manual dispatch');
+  }
+  if (JSON.stringify(triggers.workflow_run.workflows) !== JSON.stringify(['ci']) ||
+      JSON.stringify(triggers.workflow_run.branches) !== JSON.stringify(['master'])) {
+    fail('release intelligence must consume successful ci runs from master');
+  }
+
+  const job = workflow.jobs?.['prepare-release'];
+  if (!job) fail('release intelligence must define prepare-release');
+  exactKeys(job.permissions, ['contents'], 'release intelligence job permissions');
+  if (job.permissions.contents !== 'write') {
+    fail('release intelligence may only write repository contents');
+  }
+  const condition = String(job.if || '');
+  for (const clause of [
+    "github.ref == 'refs/heads/master'",
+    "github.event.workflow_run.conclusion == 'success'",
+    "github.event.workflow_run.event == 'push'",
+    "github.event.workflow_run.head_branch == 'master'",
+  ]) {
+    if (!condition.includes(clause)) fail(`release intelligence guard omitted ${clause}`);
+  }
+
+  for (const step of (job.steps || []).filter((item) => item.uses)) {
+    if (!ACTION_SHA.test(step.uses)) fail(`release intelligence action is not pinned to a full SHA: ${step.uses}`);
+  }
+  const token = actionStep(job.steps || [], 'actions/create-github-app-token');
+  if (!token ||
+      token.with?.['app-id'] !== '${{ secrets.LANDMARK_RELEASER_APP_ID }}' ||
+      token.with?.['private-key'] !== '${{ secrets.LANDMARK_RELEASER_PRIVATE_KEY }}') {
+    fail('release intelligence must mint the narrowly scoped release-app token');
+  }
+  const checkout = actionStep(job.steps || [], 'actions/checkout');
+  if (!checkout) fail('release intelligence requires a checkout');
+  if (checkout.with?.token !== '${{ steps.release-token.outputs.token }}' ||
+      checkout.with?.['fetch-depth'] !== 0 ||
+      !String(checkout.with?.ref || '').includes('workflow_run.head_sha')) {
+    fail('release intelligence checkout must use the release-app token and verified full-history source');
+  }
+
+  const install = (job.steps || []).find((step) => step.name === 'Install pinned Landmark runtime');
+  if (install?.env?.LANDMARK_VERSION !== '0.28.1' ||
+      install?.env?.LANDMARK_SHA256 !== 'a1c01ff06fc8fc957055bafe4f1f94076b097fea23e267e6da11dbad44d2b920') {
+    fail('Landmark runtime version and checksum must be pinned');
+  }
+  const installRun = String(install?.run || '');
+  if (!installRun.includes('misty-step/landmark/releases/download/v${LANDMARK_VERSION}') ||
+      !installRun.includes('sha256sum --check --strict')) {
+    fail('Landmark runtime must be downloaded from its pinned release and checksum-verified');
+  }
+
+  const compute = (job.steps || []).find((step) => step.name === 'Compute and materialize Landmark release');
+  const computeRun = String(compute?.run || '');
+  for (const contract of [
+    'landmark run',
+    '--provider local',
+    '--dry-run',
+    "'.version_decision.stability'",
+    'if [ "$stability" != pre-stable ]',
+    'scripts/sync-release-version.mjs',
+  ]) {
+    if (!computeRun.includes(contract)) fail(`Landmark release computation omitted ${contract}`);
+  }
+  const commit = (job.steps || []).find((step) => step.name === 'Commit and tag Landmark release');
+  const commitRun = String(commit?.run || '');
+  for (const contract of [
+    'git add Cargo.toml Cargo.lock package.json package-lock.json docs/releases',
+    'git tag "$RELEASE_TAG"',
+    'git push origin HEAD:master "$RELEASE_TAG"',
+  ]) {
+    if (!commitRun.includes(contract)) fail(`Landmark release mutation omitted ${contract}`);
+  }
+
+  const manifest = parseYaml(manifestText, 'Landmark manifest');
+  if (manifest.product?.name !== 'Allie' || manifest.release?.profile !== 'full') {
+    fail('Landmark manifest must identify Allie and enable the full release profile');
+  }
+  if (manifest.artifacts?.markdown !== 'docs/releases/{version}.md' ||
+      manifest.artifacts?.json !== 'docs/releases/releases.json') {
+    fail('Landmark manifest must preserve versioned user-facing release artifacts');
   }
 }
 
@@ -328,6 +434,36 @@ exit "$COSIGN_STATUS"`);
   }
 }
 
+function exerciseVersionSync() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'allie-version-sync-'));
+  const script = path.resolve(VERSION_SYNC_PATH);
+  fs.writeFileSync(path.join(root, 'Cargo.toml'), '[package]\nname = "allie"\nversion = "0.1.0"\n');
+  fs.writeFileSync(path.join(root, 'Cargo.lock'), 'version = 4\n\n[[package]]\nname = "allie"\nversion = "0.1.0"\n');
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"allie-browser-worker","version":"0.1.0"}\n');
+  fs.writeFileSync(path.join(root, 'package-lock.json'), '{"name":"allie-browser-worker","version":"0.1.0","packages":{"":{"name":"allie-browser-worker","version":"0.1.0"}}}\n');
+
+  try {
+    const result = spawnSync(process.execPath, [script, '--repo-root', root, '--version', '0.2.3'], {
+      encoding: 'utf8',
+    });
+    if (result.status !== 0) fail(`version synchronizer failed: ${result.stderr.trim()}`);
+    for (const file of ['Cargo.toml', 'Cargo.lock', 'package.json', 'package-lock.json']) {
+      if (!fs.readFileSync(path.join(root, file), 'utf8').includes('0.2.3')) {
+        fail(`version synchronizer did not update ${file}`);
+      }
+    }
+
+    const stable = spawnSync(process.execPath, [script, '--repo-root', root, '--version', '1.0.0'], {
+      encoding: 'utf8',
+    });
+    if (stable.status === 0 || !stable.stderr.includes('must remain on the v0.x line')) {
+      fail('version synchronizer accepted a stable release');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 function expectRejected(action, label) {
   try {
     action();
@@ -338,16 +474,20 @@ function expectRejected(action, label) {
 }
 
 const releaseText = fs.readFileSync(RELEASE_PATH, 'utf8');
+const releaseIntelligenceText = fs.readFileSync(RELEASE_INTELLIGENCE_PATH, 'utf8');
+const landmarkManifestText = fs.readFileSync(LANDMARK_MANIFEST_PATH, 'utf8');
 const ciText = fs.readFileSync(CI_PATH, 'utf8');
 const auditText = fs.readFileSync(AUDIT_PATH, 'utf8');
 const waiverText = fs.readFileSync(WAIVER_PATH, 'utf8');
 const readmeText = fs.readFileSync(README_PATH, 'utf8');
 validateReleaseWorkflow(releaseText);
+validateReleaseIntelligenceWorkflow(releaseIntelligenceText, landmarkManifestText);
 validateCiWorkflow(ciText);
 validateAuditPolicy(auditText, waiverText);
 validateReadme(readmeText);
 exerciseReadmeChecksumFlow(readmeText);
 exerciseReadmeInstallFlow(readmeText);
+exerciseVersionSync();
 
 const documentedAdvisory = '[advisories]\nignore = ["RUSTSEC-2099-0001"]\n';
 const validWaiver = 'schema = 1\n[[waiver]]\nadvisory = "RUSTSEC-2099-0001"\ntracking_ref = "AL-999"\nrationale = "test"\nowner = "security"\nexpiry = 2099-01-01\nremoval = "upgrade"\n';
@@ -355,6 +495,15 @@ validateAuditPolicy(documentedAdvisory, validWaiver, new Date('2026-01-01T00:00:
 
 const releaseObject = parseYaml(releaseText, 'release workflow');
 validateReleaseWorkflow(stringifyYaml(releaseObject));
+const releaseIntelligenceObject = parseYaml(releaseIntelligenceText, 'release intelligence workflow');
+validateReleaseIntelligenceWorkflow(stringifyYaml(releaseIntelligenceObject), landmarkManifestText);
+const stableLandmark = structuredClone(releaseIntelligenceObject);
+stableLandmark.jobs['prepare-release'].steps.find((step) => step.name === 'Compute and materialize Landmark release').run =
+  stableLandmark.jobs['prepare-release'].steps.find((step) => step.name === 'Compute and materialize Landmark release').run.replace('pre-stable', 'stable');
+expectRejected(
+  () => validateReleaseIntelligenceWorkflow(stringifyYaml(stableLandmark), landmarkManifestText),
+  'stable Landmark release line',
+);
 const extraUpload = structuredClone(releaseObject);
 extraUpload.jobs['sign-and-publish'].steps.at(-1).run = extraUpload.jobs['sign-and-publish'].steps.at(-1).run.replace(
   'dist/allie-linux-x64.tar.gz \\\n',

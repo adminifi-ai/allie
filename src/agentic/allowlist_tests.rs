@@ -1,5 +1,5 @@
-use super::{AGENTIC_WORKER_ENV_GUARD, run_agentic_review_with_timeout};
-use crate::{FlowManifest, write_json_pretty};
+use super::{AGENTIC_WORKER_ENV_GUARD, AgenticReviewOutcome, run_agentic_review_with_timeout};
+use crate::{FlowManifest, read_json_file, write_json_pretty};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -38,6 +38,7 @@ fs.writeFileSync(process.env.ALLIE_AGENTIC_MARKER, 'spawned');
 const responseIndex = process.argv.indexOf('--response') + 1;
 fs.writeFileSync(process.argv[responseIndex], JSON.stringify({{
   schema: 'allie.agentic.response.v0',
+  prompt_version: 'allie.agentic.wcag-review.v1',
   status: 'skipped',
   provider: '{provider}',
   model: 'test',
@@ -190,6 +191,76 @@ fn evidence_packet_rejects_missing_required_model_egress_policy() {
         .remove("model_egress_redaction");
 
     assert!(serde_json::from_value::<crate::model::EvidencePacket>(packet).is_err());
+}
+#[test]
+fn accepted_model_route_records_versioned_prompt_and_egress_event() {
+    let _guard = AGENTIC_WORKER_ENV_GUARD
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let temp = tempdir().unwrap();
+    let (worker_path, marker_path) = write_marker_worker(temp.path(), "openrouter");
+    let packet_path = temp.path().join("evidence.json");
+    write_json_pretty(&packet_path, &minimal_agentic_packet()).unwrap();
+    let manifest =
+        FlowManifest::load(Path::new("examples/autonomous-workbench-agentic.yml")).unwrap();
+
+    let _env = AgenticWorkerEnvGuard::set(&worker_path, &marker_path);
+    let summary =
+        run_agentic_review_with_timeout(&manifest, &packet_path, Duration::from_secs(5)).unwrap();
+
+    assert_eq!(summary.status, AgenticReviewOutcome::Skipped);
+    let request: serde_json::Value =
+        read_json_file(&temp.path().join("agentic-request.json")).unwrap();
+    assert_eq!(request["prompt_version"], "allie.agentic.wcag-review.v1");
+
+    let packet: serde_json::Value = read_json_file(&packet_path).unwrap();
+    let events = packet["model_egress_events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(event["schema"], "allie.model-egress-event.v0");
+    assert_eq!(event["prompt_version"], request["prompt_version"]);
+    assert_eq!(event["provider"], "openrouter");
+    assert_eq!(event["model"], "test");
+    assert_eq!(event["endpoint"], "https://openrouter.ai/api/v1");
+    assert_eq!(event["status"], "skipped");
+    assert_eq!(event["calls"], 0);
+    assert_eq!(event["redaction_profile"], "none");
+    assert_eq!(event["redaction_status"], "not_sent");
+    for field in ["request_sha256", "response_sha256"] {
+        let digest = event[field].as_str().unwrap();
+        assert!(digest.starts_with("sha256:"));
+        assert_eq!(digest.len(), "sha256:".len() + 64);
+    }
+}
+
+#[test]
+fn rejects_unrecognized_worker_prompt_version() {
+    let _guard = AGENTIC_WORKER_ENV_GUARD
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let temp = tempdir().unwrap();
+    let (worker_path, marker_path) = write_marker_worker(temp.path(), "openrouter");
+    let worker = fs::read_to_string(&worker_path).unwrap().replace(
+        "allie.agentic.wcag-review.v1",
+        "allie.agentic.wcag-review.v999",
+    );
+    fs::write(&worker_path, worker).unwrap();
+    let packet_path = temp.path().join("evidence.json");
+    write_json_pretty(&packet_path, &minimal_agentic_packet()).unwrap();
+    let manifest =
+        FlowManifest::load(Path::new("examples/autonomous-workbench-agentic.yml")).unwrap();
+
+    let _env = AgenticWorkerEnvGuard::set(&worker_path, &marker_path);
+    let error = run_agentic_review_with_timeout(&manifest, &packet_path, Duration::from_secs(5))
+        .unwrap_err();
+
+    assert!(
+        error.to_string().contains(
+            "agentic worker returned prompt version allie.agentic.wcag-review.v999; expected allie.agentic.wcag-review.v1"
+        )
+    );
+    let packet: serde_json::Value = read_json_file(&packet_path).unwrap();
+    assert!(packet.get("model_egress_events").is_none());
 }
 
 fn minimal_agentic_packet() -> serde_json::Value {

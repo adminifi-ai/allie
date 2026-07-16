@@ -14,6 +14,7 @@ trap 'rm -rf "$WORK"' EXIT
 cat > "$WORK/request.json" <<JSON
 {
   "schema": "allie.agentic.request.v0",
+  "prompt_version": "allie.agentic.wcag-review.v1",
   "target": { "fixture_dir": "$ALLIE_REPO/fixtures/login" },
   "browser": { "viewport": { "width": 1024, "height": 768 }, "color_scheme": "light", "reduced_motion": "reduce", "locale": "en-US" },
   "model": { "provider": "openrouter", "model": "offline", "api_key_env": "ALLIE_AGENTIC_SMOKE_NO_KEY", "base_url": "https://openrouter.ai/api/v1", "max_calls": 1, "redaction": "none" },
@@ -32,6 +33,9 @@ import fs from 'node:fs';
 const response = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (response.schema !== 'allie.agentic.response.v0') {
   throw new Error(`unexpected response schema ${response.schema}`);
+}
+if (response.prompt_version !== 'allie.agentic.wcag-review.v1') {
+  throw new Error(`unexpected prompt version ${response.prompt_version}`);
 }
 if (!Array.isArray(response.assessments) || response.assessments.length < 1) {
   throw new Error('gateway returned no assessments');
