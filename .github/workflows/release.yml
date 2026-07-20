@@ -92,10 +92,10 @@ jobs:
           }
           trap cleanup EXIT
 
-          gh release create "$tag" --draft --verify-tag --title "$tag" --generate-notes
+          gh release create "$tag" --draft --verify-tag --title "$tag" --generate-notes --repo "$GITHUB_REPOSITORY"
           created=true
 
-          gh release upload "$tag" \
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
             dist/allie-linux-x64.tar.gz \
             dist/SHA256SUMS \
             dist/allie-linux-x64.tar.gz.sigstore.json
@@ -110,5 +110,5 @@ jobs:
             exit 1
           fi
 
-          gh release edit "$tag" --draft=false
+          gh release edit "$tag" --draft=false --repo "$GITHUB_REPOSITORY"
           created=false
