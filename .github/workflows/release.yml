@@ -9,7 +9,7 @@ permissions: {}
 
 jobs:
   build-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
     steps:
@@ -31,6 +31,20 @@ jobs:
       - run: npm run verify
 
       - run: scripts/package-release.sh dist
+      - name: Verify archive on Debian 12
+        run: |
+          set -euo pipefail
+          smoke_root="$RUNNER_TEMP/allie-release-runtime-smoke"
+          rm -rf "$smoke_root"
+          mkdir -p "$smoke_root/work"
+          tar -xzf dist/allie-linux-x64.tar.gz -C "$smoke_root"
+          docker run --rm \
+            -v "$smoke_root/allie:/opt/allie:ro" \
+            -v "$smoke_root/work:/work" \
+            -w /work \
+            debian:bookworm-slim \
+            /opt/allie/bin/allie init --manifest .allie/manifest.yml --app-name "Release Runtime Smoke"
+          test -s "$smoke_root/work/.allie/manifest.yml"
 
 
       - name: Generate release checksums
