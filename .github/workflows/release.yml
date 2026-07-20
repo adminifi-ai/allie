@@ -75,32 +75,45 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
+          [[ "$tag" =~ ^v0\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Release tag must match v0.x.y, got $tag" >&2
+            exit 1
+          }
+          release_id=
           created=false
 
           cleanup() {
             status=$?
-            if [ "$status" -ne 0 ] && [ "$created" = true ]; then
+            if [ "$status" -ne 0 ] && [ "$created" = true ] && [ -n "$release_id" ]; then
               set +e
-              release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)
-              lookup_status=$?
-              if [ "$lookup_status" -eq 0 ] && [ -n "$release_id" ]; then
-                gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"
-              fi
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"
               set -e
             fi
             exit "$status"
           }
           trap cleanup EXIT
 
-          gh release create "$tag" --draft --verify-tag --title "$tag" --generate-notes --repo "$GITHUB_REPOSITORY"
+          tag_commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)
+          if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+            echo "Release tag $tag resolves to $tag_commit, expected $GITHUB_SHA" >&2
+            exit 1
+          fi
+
+          release_id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$tag" \
+            -f name="$tag" \
+            -F draft=true \
+            -F generate_release_notes=true \
+            --jq .id)
           created=true
+          test -n "$release_id"
 
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
             dist/allie-linux-x64.tar.gz \
             dist/SHA256SUMS \
             dist/allie-linux-x64.tar.gz.sigstore.json
 
-          actual_assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.assets[].name' | LC_ALL=C sort)
+          actual_assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.assets[].name' | LC_ALL=C sort)
           expected_assets=$(printf '%s\n' \
             SHA256SUMS \
             allie-linux-x64.tar.gz \
@@ -110,5 +123,5 @@ jobs:
             exit 1
           fi
 
-          gh release edit "$tag" --draft=false --repo "$GITHUB_REPOSITORY"
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false >/dev/null
           created=false
