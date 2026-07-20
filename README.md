@@ -113,6 +113,10 @@ Download the archive, checksum manifest, and adjacent Sigstore bundle first;
 verify both the checksum and the GitHub Actions signer before extracting any
 release content:
 
+The current archive targets Linux x86-64 with glibc 2.35 or newer and is
+runtime-smoked on Debian 12 before publication.
+
+
 ```sh
 set -eu
 release=v0.1.0

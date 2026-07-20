@@ -57,6 +57,19 @@ function validateReleaseWorkflow(text) {
   if (!build || !publish) fail('release workflow must split build-release from sign-and-publish');
   exactKeys(build.permissions, ['contents'], 'build-release permissions');
   if (build.permissions.contents !== 'read') fail('build-release may only read repository contents');
+  if (build['runs-on'] !== 'ubuntu-22.04') {
+    fail('release binary must build on the declared glibc 2.35 compatibility floor');
+  }
+  const runtimeSmoke = (build.steps || []).find((step) => step.name === 'Verify archive on Debian 12');
+  const runtimeSmokeRun = String(runtimeSmoke?.run || '');
+  for (const contract of [
+    'dist/allie-linux-x64.tar.gz',
+    'debian:bookworm-slim',
+    '/opt/allie/bin/allie init',
+    'test -s "$smoke_root/work/.allie/manifest.yml"',
+  ]) {
+    if (!runtimeSmokeRun.includes(contract)) fail(`release runtime smoke omitted ${contract}`);
+  }
   exactKeys(publish.permissions, ['contents', 'id-token'], 'sign-and-publish permissions');
   if (publish.permissions.contents !== 'write' || publish.permissions['id-token'] !== 'write') {
     fail('sign-and-publish must have only contents:write and id-token:write');
