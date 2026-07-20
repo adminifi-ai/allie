@@ -147,24 +147,13 @@ allie publication --verify-root .allie/verify/latest --out .allie/public/latest
 When working from a source checkout instead of a release bundle, run `npm ci`
 and `npx playwright install chromium` in the Allie checkout once. The
 `ALLIE_BROWSER_WORKER` override remains available only for nonstandard layouts.
-Landmark manages Allie's own pre-stable release line: after `ci` succeeds on
-`master`, the pinned Landmark CLI computes the next `v0.x` version and generates
-the technical changelog plus user-facing Markdown, text, HTML, JSON, and RSS
-release notes. The release-intelligence workflow uses the dedicated release app
-to synchronize the Rust and browser-worker versions on a generated release
-branch and open a pull request. The normal `verify` check protects that merge;
-after the merged commit's own CI succeeds, the same app tags that exact commit
-without bypassing `master`. The authenticated tag push triggers the bundle
-workflow. Landmark is development/release infrastructure for Allie
-itself; the `allie` CLI never invokes Landmark while auditing a target
-repository.
-
-Release bundles are produced with `npm run package:release`. The tag workflow
-builds and verifies without write or OIDC privileges, then passes only the
-named archive, checksum manifest, and tag-matched Landmark notes to a minimal
-signing/publishing job. That job creates a draft, uploads the three exact
-expected assets, reads their names back through the GitHub API, and only then
-publishes; any failed draft is deleted.
+Allie releases stay on the pre-stable `v0.x` line. A release operator pushes a
+version tag only after the matching version files are on a `master` commit whose
+`ci` run passed. The tag workflow reruns the full repository gate, builds the
+bundle, generates checksums, and passes only those named inputs to a minimal
+signing/publishing job. That job creates a draft with GitHub-generated notes,
+uploads the three exact expected assets, reads their names back through the
+GitHub API, and only then publishes; any failed draft is deleted.
 
 RustSec ignores live in `.cargo/audit.toml`; every ignored advisory must have
 one matching structured record in `.cargo/audit-waivers.toml` with

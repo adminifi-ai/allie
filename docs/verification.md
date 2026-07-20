@@ -28,14 +28,12 @@ allie publication --verify-root .allie/verify/latest --out .allie/public/latest
 For source-checkout development, run `npm ci` and `npx playwright install
 chromium` in the Allie checkout once. `ALLIE_BROWSER_WORKER` is still an
 explicit override for nonstandard layouts, not part of the normal consumer path.
-Allie's own versioning, technical changelog, and user-facing release notes come
-from the pinned Landmark CLI after `ci` succeeds on `master`. Landmark is not a
-target-repository dependency and is never invoked by `allie verify`. The
-dedicated release app opens a Landmark-generated release pull request instead
-of writing protected `master` directly. After the required `verify` check,
-merge, and successful CI on the merged commit, the app pushes the computed
-`v0.x` tag for that exact commit. The tag triggers the bundle workflow that
-builds the Linux archive consumed by the CI examples.
+Allie releases stay on the pre-stable `v0.x` line. Push a version tag only for
+a `master` commit whose matching Rust and browser-worker version files are
+already committed and whose `ci` run passed. The tag triggers the bundle
+workflow, which reruns the full repository gate, builds the Linux archive used
+by the CI examples, generates GitHub release notes from merged history, signs
+the archive, and publishes only after exact asset readback.
 
 Treat `.allie/verify/latest` as sensitive local evidence. It can contain
 authenticated DOM, screenshots, accessibility trees, traces, prompts, URLs,
