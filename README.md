@@ -151,9 +151,11 @@ Landmark manages Allie's own pre-stable release line: after `ci` succeeds on
 `master`, the pinned Landmark CLI computes the next `v0.x` version and generates
 the technical changelog plus user-facing Markdown, text, HTML, JSON, and RSS
 release notes. The release-intelligence workflow uses the dedicated release app
-to synchronize the Rust and browser-worker versions, commit the generated
-release artifacts, and tag that commit; the authenticated tag push triggers the
-bundle workflow. Landmark is development/release infrastructure for Allie
+to synchronize the Rust and browser-worker versions on a generated release
+branch and open a pull request. The normal `verify` check protects that merge;
+after the merged commit's own CI succeeds, the same app tags that exact commit
+without bypassing `master`. The authenticated tag push triggers the bundle
+workflow. Landmark is development/release infrastructure for Allie
 itself; the `allie` CLI never invokes Landmark while auditing a target
 repository.
 

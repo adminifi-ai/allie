@@ -26,23 +26,140 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
     steps:
+      - name: Require Landmark releaser credentials
+        env:
+          LANDMARK_RELEASER_APP_ID: ${{ secrets.LANDMARK_RELEASER_APP_ID }}
+          LANDMARK_RELEASER_PRIVATE_KEY: ${{ secrets.LANDMARK_RELEASER_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$LANDMARK_RELEASER_APP_ID" ] || [ -z "$LANDMARK_RELEASER_PRIVATE_KEY" ]; then
+            echo "Configure the repo-scoped Landmark releaser GitHub App before preparing a release." >&2
+            exit 1
+          fi
+
       - name: Mint release token
         id: release-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
           app-id: ${{ secrets.LANDMARK_RELEASER_APP_ID }}
           private-key: ${{ secrets.LANDMARK_RELEASER_PRIVATE_KEY }}
+          permission-checks: read
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Resolve verified master source
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = workflow_run ]; then
+            source_sha="$WORKFLOW_RUN_SHA"
+          else
+            source_sha=$(gh api "repos/$REPOSITORY/commits/master" --jq .sha)
+            verify_count=$(gh api "repos/$REPOSITORY/commits/$source_sha/check-runs" \
+              --jq '[.check_runs[] | select(.name == "verify" and .app.slug == "github-actions" and .status == "completed" and .conclusion == "success")] | length')
+            if [ "$verify_count" -eq 0 ]; then
+              echo "Manual release dispatch requires a successful verify check on master $source_sha." >&2
+              exit 1
+            fi
+          fi
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
 
       - name: Checkout verified release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ steps.source.outputs.sha }}
           fetch-depth: 0
           token: ${{ steps.release-token.outputs.token }}
 
+      - name: Reconcile verified release tag
+        id: reconcile
+        env:
+          APP_SLUG: ${{ steps.release-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          finished=false
+          app_actor="app/${APP_SLUG}"
+          gh pr list --repo "$REPOSITORY" --state merged --base master --limit 100 \
+            --json author,headRefName,mergeCommit,mergedAt,number,title > "$RUNNER_TEMP/merged-prs.json"
+          candidate=$(jq -c --arg actor "$app_actor" \
+            '[.[] | select(.headRefName | startswith("release/")) | select(.author.login == $actor)] | sort_by(.mergedAt) | reverse | .[0] // empty' \
+            "$RUNNER_TEMP/merged-prs.json")
+
+          if [ -n "$candidate" ]; then
+            merge_sha=$(printf '%s' "$candidate" | jq -r .mergeCommit.oid)
+            pr_number=$(printf '%s' "$candidate" | jq -r .number)
+            if ! printf '%s\n' "$merge_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "Merged release PR #$pr_number has no valid merge commit." >&2
+              exit 1
+            fi
+
+            git fetch --no-tags origin "$merge_sha"
+            candidate_path=".landmark/release-candidate.json"
+            git cat-file -e "$merge_sha:$candidate_path"
+            git show "$merge_sha:$candidate_path" > "$RUNNER_TEMP/release-candidate.json"
+            if [ "$(jq -r .schema_version "$RUNNER_TEMP/release-candidate.json")" != "allie.landmark-release-candidate.v1" ]; then
+              echo "Merged release PR #$pr_number has an unsupported release-candidate schema." >&2
+              exit 1
+            fi
+            base_sha=$(jq -r .base_sha "$RUNNER_TEMP/release-candidate.json")
+            release_tag=$(jq -r .release_tag "$RUNNER_TEMP/release-candidate.json")
+            if ! printf '%s\n' "$base_sha" | grep -Eq '^[0-9a-f]{40}$' ||
+               ! printf '%s\n' "$release_tag" | grep -Eq '^v0\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+              echo "Merged release PR #$pr_number has invalid committed provenance." >&2
+              exit 1
+            fi
+
+            verify_count=$(gh api "repos/$REPOSITORY/commits/$merge_sha/check-runs" \
+              --jq '[.check_runs[] | select(.name == "verify" and .app.slug == "github-actions" and .status == "completed" and .conclusion == "success")] | length')
+            if [ "$verify_count" -gt 0 ]; then
+              first_parent=$(git rev-parse "$merge_sha^1")
+              if [ "$first_parent" = "$base_sha" ]; then
+                version=${release_tag#v}
+                cargo_version=$(git show "$merge_sha:Cargo.toml" | sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"$/\1/p')
+                package_version=$(git show "$merge_sha:package.json" | jq -r .version)
+                notes_path="docs/releases/${release_tag}.md"
+                git cat-file -e "$merge_sha:$notes_path"
+                git show "$merge_sha:$notes_path" > "$RUNNER_TEMP/release-notes.md"
+                test -s "$RUNNER_TEMP/release-notes.md"
+                if [ "$cargo_version" != "$version" ] || [ "$package_version" != "$version" ]; then
+                  echo "Release PR #$pr_number version files do not match $release_tag." >&2
+                  exit 1
+                fi
+
+                remote_refs=$(git ls-remote origin "refs/tags/$release_tag" "refs/tags/$release_tag^{}")
+                remote_tag=$(printf '%s\n' "$remote_refs" | scripts/resolve-remote-tag.sh)
+                if [ -n "$remote_tag" ] && [ "$remote_tag" != "$merge_sha" ]; then
+                  echo "Refusing to move $release_tag from $remote_tag to $merge_sha." >&2
+                  exit 1
+                fi
+                if [ -z "$remote_tag" ]; then
+                  git tag "$release_tag" "$merge_sha"
+                  git push origin "refs/tags/$release_tag"
+                  finished=true
+                else
+                  echo "$release_tag already points at verified release commit $merge_sha; reconciling the next release."
+                fi
+              else
+                echo "Release PR #$pr_number merged on stale base; regenerating instead of tagging." >&2
+              fi
+            else
+              echo "Release PR #$pr_number is not green on merged commit $merge_sha; preparing a superseding candidate." >&2
+            fi
+          fi
+
+          echo "finished=$finished" >> "$GITHUB_OUTPUT"
+
       - name: Install pinned Landmark runtime
+        if: steps.reconcile.outputs.finished != 'true'
         env:
           LANDMARK_VERSION: 0.28.1
           LANDMARK_SHA256: a1c01ff06fc8fc957055bafe4f1f94076b097fea23e267e6da11dbad44d2b920
@@ -58,8 +175,23 @@ jobs:
 
       - name: Compute and materialize Landmark release
         id: landmark
+        if: steps.reconcile.outputs.finished != 'true'
+        env:
+          APP_SLUG: ${{ steps.release-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
+          open_release_prs=$(gh pr list --repo "$REPOSITORY" --state open --base master \
+            --author "app/$APP_SLUG" --limit 100 --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("release/"))] | length')
+          if [ "$open_release_prs" -gt 0 ]; then
+            echo "A Landmark release PR is already open; waiting for its protected merge." >&2
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           explicit_tag=()
           if ! git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -q .; then
             bootstrap_version=$(sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"$/\1/p' Cargo.toml)
@@ -73,7 +205,7 @@ jobs:
           landmark run \
             --provider local \
             --repo-root . \
-            --repository adminifi-ai/allie \
+            --repository "$REPOSITORY" \
             --dry-run \
             "${explicit_tag[@]}" > "$RUNNER_TEMP/landmark-preview.json"
 
@@ -95,15 +227,18 @@ jobs:
           landmark run \
             --provider local \
             --repo-root . \
-            --repository adminifi-ai/allie \
+            --repository "$REPOSITORY" \
             --technical-changelog-file "$technical_changelog" \
             "${explicit_tag[@]}"
           node scripts/sync-release-version.mjs --repo-root . --version "$version"
 
-          echo "released=true" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "technical_changelog=$technical_changelog" >> "$GITHUB_OUTPUT"
+          {
+            echo "released=true"
+            echo "release_tag=$release_tag"
+            echo "version=$version"
+            echo "technical_changelog=$technical_changelog"
+            echo "source_sha=$SOURCE_SHA"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Upload Landmark evidence
         if: steps.landmark.outputs.released == 'true'
@@ -114,15 +249,41 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Commit and tag Landmark release
+      - name: Open protected Landmark release pull request
         if: steps.landmark.outputs.released == 'true'
         env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
           RELEASE_TAG: ${{ steps.landmark.outputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ steps.landmark.outputs.source_sha }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock package.json package-lock.json docs/releases
+          short_sha=${SOURCE_SHA:0:12}
+          branch="release/${RELEASE_TAG}-${short_sha}"
+          bot_login="${{ steps.release-token.outputs.app-slug }}[bot]"
+          bot_id=$(gh api "/users/$bot_login" --jq .id)
+          git config user.name "$bot_login"
+          git config user.email "${bot_id}+${bot_login}@users.noreply.github.com"
+          git switch -c "$branch"
+          jq -n --arg base_sha "$SOURCE_SHA" --arg release_tag "$RELEASE_TAG" '{
+            schema_version: "allie.landmark-release-candidate.v1",
+            base_sha: $base_sha,
+            release_tag: $release_tag
+          }' > .landmark/release-candidate.json
+          git add .landmark/release-candidate.json Cargo.toml Cargo.lock package.json package-lock.json docs/releases
+          if git diff --cached --quiet; then
+            echo "Landmark reported a release but produced no tracked release changes." >&2
+            exit 1
+          fi
           git commit -m "chore(release): ${RELEASE_TAG}"
-          git tag "$RELEASE_TAG"
-          git push origin HEAD:master "$RELEASE_TAG"
+          git push origin "HEAD:refs/heads/$branch"
+
+          body_file="$RUNNER_TEMP/release-pr-body.md"
+          cat > "$body_file" <<EOF
+          Landmark-generated release candidate. Merge only after the required verify check succeeds.
+
+          Landmark-Base-SHA: ${SOURCE_SHA}
+          Landmark-Release-Tag: ${RELEASE_TAG}
+          EOF
+          gh pr create --repo "$REPOSITORY" --base master --head "$branch" \
+            --title "chore(release): ${RELEASE_TAG}" --body-file "$body_file"

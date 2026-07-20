@@ -31,8 +31,11 @@ explicit override for nonstandard layouts, not part of the normal consumer path.
 Allie's own versioning, technical changelog, and user-facing release notes come
 from the pinned Landmark CLI after `ci` succeeds on `master`. Landmark is not a
 target-repository dependency and is never invoked by `allie verify`. The
-dedicated release app pushes the Landmark-computed `v0.x` tag, triggering the
-bundle workflow that builds the Linux archive consumed by the CI examples.
+dedicated release app opens a Landmark-generated release pull request instead
+of writing protected `master` directly. After the required `verify` check,
+merge, and successful CI on the merged commit, the app pushes the computed
+`v0.x` tag for that exact commit. The tag triggers the bundle workflow that
+builds the Linux archive consumed by the CI examples.
 
 Treat `.allie/verify/latest` as sensitive local evidence. It can contain
 authenticated DOM, screenshots, accessibility trees, traces, prompts, URLs,

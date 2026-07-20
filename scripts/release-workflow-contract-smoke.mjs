@@ -13,6 +13,7 @@ const VERSION_SYNC_PATH = 'scripts/sync-release-version.mjs';
 const AUDIT_PATH = '.cargo/audit.toml';
 const WAIVER_PATH = '.cargo/audit-waivers.toml';
 const README_PATH = 'README.md';
+const REMOTE_TAG_RESOLVER_PATH = 'scripts/resolve-remote-tag.sh';
 const ACTION_SHA = /^[^@\s]+@[0-9a-f]{40}$/;
 const COSIGN_INSTALLER = /^sigstore\/cosign-installer@[0-9a-f]{40}$/;
 const SIGN_COMMAND = 'cosign sign-blob --yes --bundle dist/allie-linux-x64.tar.gz.sigstore.json dist/allie-linux-x64.tar.gz';
@@ -46,6 +47,25 @@ function actionStep(steps, owner) {
 
 function lines(value) {
   return String(value || '').split('\n').map((line) => line.trim()).filter(Boolean);
+}
+function exerciseRemoteTagResolver() {
+  const lightweight = '1111111111111111111111111111111111111111\trefs/tags/v0.1.0\n';
+  const annotated = [
+    '2222222222222222222222222222222222222222\trefs/tags/v0.1.0',
+    '3333333333333333333333333333333333333333\trefs/tags/v0.1.0^{}',
+    '',
+  ].join('\n');
+  for (const [label, input, expected] of [
+    ['absent tag', '', ''],
+    ['lightweight tag', lightweight, '1111111111111111111111111111111111111111'],
+    ['annotated tag', annotated, '3333333333333333333333333333333333333333'],
+  ]) {
+    const result = spawnSync(REMOTE_TAG_RESOLVER_PATH, [], { input, encoding: 'utf8' });
+    if (result.status !== 0) fail(`${label} resolver failed: ${result.stderr}`);
+    if (result.stdout.trim() !== expected) {
+      fail(`${label} resolved ${result.stdout.trim()}, expected ${expected}`);
+    }
+  }
 }
 
 function validateReleaseWorkflow(text) {
@@ -169,8 +189,8 @@ function validateReleaseIntelligenceWorkflow(text, manifestText) {
   const job = workflow.jobs?.['prepare-release'];
   if (!job) fail('release intelligence must define prepare-release');
   exactKeys(job.permissions, ['contents'], 'release intelligence job permissions');
-  if (job.permissions.contents !== 'write') {
-    fail('release intelligence may only write repository contents');
+  if (job.permissions.contents !== 'read') {
+    fail('release intelligence must leave repository mutation to the scoped app token');
   }
   const condition = String(job.if || '');
   for (const clause of [
@@ -185,18 +205,87 @@ function validateReleaseIntelligenceWorkflow(text, manifestText) {
   for (const step of (job.steps || []).filter((item) => item.uses)) {
     if (!ACTION_SHA.test(step.uses)) fail(`release intelligence action is not pinned to a full SHA: ${step.uses}`);
   }
+  const credentials = (job.steps || []).find((step) => step.name === 'Require Landmark releaser credentials');
+  const credentialsRun = String(credentials?.run || '');
+  if (!credentialsRun.includes('LANDMARK_RELEASER_APP_ID') ||
+      !credentialsRun.includes('LANDMARK_RELEASER_PRIVATE_KEY') ||
+      !credentialsRun.includes('exit 1')) {
+    fail('release intelligence must fail clearly when releaser credentials are absent');
+  }
+
   const token = actionStep(job.steps || [], 'actions/create-github-app-token');
   if (!token ||
       token.with?.['app-id'] !== '${{ secrets.LANDMARK_RELEASER_APP_ID }}' ||
-      token.with?.['private-key'] !== '${{ secrets.LANDMARK_RELEASER_PRIVATE_KEY }}') {
-    fail('release intelligence must mint the narrowly scoped release-app token');
+      token.with?.['private-key'] !== '${{ secrets.LANDMARK_RELEASER_PRIVATE_KEY }}' ||
+      token.with?.['permission-checks'] !== 'read' ||
+      token.with?.['permission-contents'] !== 'write' ||
+      token.with?.['permission-pull-requests'] !== 'write') {
+    fail('release intelligence must mint a narrowly scoped release-app token');
   }
+
+  const source = (job.steps || []).find((step) => step.name === 'Resolve verified master source');
+  const sourceRun = String(source?.run || '');
+  for (const contract of ['commits/master', 'check-runs', '.name == "verify"', '.app.slug == "github-actions"', '.conclusion == "success"']) {
+    if (!sourceRun.includes(contract)) fail(`manual release source verification omitted ${contract}`);
+  }
+
   const checkout = actionStep(job.steps || [], 'actions/checkout');
   if (!checkout) fail('release intelligence requires a checkout');
   if (checkout.with?.token !== '${{ steps.release-token.outputs.token }}' ||
       checkout.with?.['fetch-depth'] !== 0 ||
-      !String(checkout.with?.ref || '').includes('workflow_run.head_sha')) {
+      checkout.with?.ref !== '${{ steps.source.outputs.sha }}') {
     fail('release intelligence checkout must use the release-app token and verified full-history source');
+  }
+
+  const reconcile = (job.steps || []).find((step) => step.name === 'Reconcile verified release tag');
+  const reconcileRun = String(reconcile?.run || '');
+  if (reconcile?.env?.GH_TOKEN !== '${{ steps.release-token.outputs.token }}' ||
+      reconcile?.env?.APP_SLUG !== '${{ steps.release-token.outputs.app-slug }}') {
+    fail('release tag reconciliation must use the scoped release-app identity');
+  }
+  for (const contract of [
+    'app_actor="app/${APP_SLUG}"',
+    'gh pr list',
+    '.headRefName | startswith("release/")',
+    '.author.login == $actor',
+    '.mergeCommit.oid',
+    '.landmark/release-candidate.json',
+    'allie.landmark-release-candidate.v1',
+    'jq -r .base_sha',
+    'jq -r .release_tag',
+    'check-runs',
+    '.name == "verify"',
+    '.app.slug == "github-actions"',
+    'git rev-parse "$merge_sha^1"',
+    'docs/releases/${release_tag}.md',
+    'Cargo.toml',
+    'package.json',
+    'git ls-remote origin',
+    'refs/tags/$release_tag^{}',
+    'scripts/resolve-remote-tag.sh',
+    'Refusing to move',
+    'git tag "$release_tag" "$merge_sha"',
+    'git push origin "refs/tags/$release_tag"',
+  ]) {
+    if (!reconcileRun.includes(contract)) fail(`release tag reconciliation omitted ${contract}`);
+  }
+  const tagCreatedAt = reconcileRun.indexOf('git push origin "refs/tags/$release_tag"');
+  const tagFinishedAt = reconcileRun.indexOf('finished=true', tagCreatedAt);
+  const redMergeAt = reconcileRun.indexOf('preparing a superseding candidate');
+  const reconcileOutputAt = reconcileRun.lastIndexOf('echo "finished=$finished"');
+  if (redMergeAt < 0 || reconcileOutputAt < redMergeAt ||
+      reconcileRun.slice(redMergeAt, reconcileOutputAt).includes('exit 1')) {
+    fail('a red merged candidate must allow a newer green master to supersede it');
+  }
+  const taggedReleaseReconciledAt = reconcileRun.indexOf('already points at verified release commit', tagCreatedAt);
+  if (tagCreatedAt < 0 || tagFinishedAt < tagCreatedAt ||
+      taggedReleaseReconciledAt < tagFinishedAt) {
+    fail('only a newly created release tag may finish the reconciliation run');
+  }
+  if (reconcileRun.includes('${{ github.token }}') ||
+      reconcileRun.includes('HEAD:master') ||
+      /git push[^\n]*--force/.test(reconcileRun)) {
+    fail('release tag reconciliation may not bypass app-token or protected-ref invariants');
   }
 
   const install = (job.steps || []).find((step) => step.name === 'Install pinned Landmark runtime');
@@ -212,7 +301,11 @@ function validateReleaseIntelligenceWorkflow(text, manifestText) {
 
   const compute = (job.steps || []).find((step) => step.name === 'Compute and materialize Landmark release');
   const computeRun = String(compute?.run || '');
+  if (compute?.env?.APP_SLUG !== '${{ steps.release-token.outputs.app-slug }}') {
+    fail('release PR serialization must use the scoped app identity');
+  }
   for (const contract of [
+    '--author "app/$APP_SLUG"',
     'landmark run',
     '--provider local',
     '--dry-run',
@@ -222,14 +315,24 @@ function validateReleaseIntelligenceWorkflow(text, manifestText) {
   ]) {
     if (!computeRun.includes(contract)) fail(`Landmark release computation omitted ${contract}`);
   }
-  const commit = (job.steps || []).find((step) => step.name === 'Commit and tag Landmark release');
-  const commitRun = String(commit?.run || '');
+
+  const pullRequest = (job.steps || []).find((step) => step.name === 'Open protected Landmark release pull request');
+  const pullRequestRun = String(pullRequest?.run || '');
   for (const contract of [
-    'git add Cargo.toml Cargo.lock package.json package-lock.json docs/releases',
-    'git tag "$RELEASE_TAG"',
-    'git push origin HEAD:master "$RELEASE_TAG"',
+    'branch="release/${RELEASE_TAG}-${short_sha}"',
+    'gh api "/users/$bot_login" --jq .id',
+    'allie.landmark-release-candidate.v1',
+    'base_sha: $base_sha',
+    'release_tag: $release_tag',
+    'git add .landmark/release-candidate.json Cargo.toml Cargo.lock package.json package-lock.json docs/releases',
+    'git push origin "HEAD:refs/heads/$branch"',
+    'gh pr create',
+    '--base master',
   ]) {
-    if (!commitRun.includes(contract)) fail(`Landmark release mutation omitted ${contract}`);
+    if (!pullRequestRun.includes(contract)) fail(`Landmark release PR mutation omitted ${contract}`);
+  }
+  if (pullRequestRun.includes('HEAD:master') || /git push[^\n]*--force/.test(pullRequestRun)) {
+    fail('Landmark release preparation may never push or bypass protected master');
   }
 
   const manifest = parseYaml(manifestText, 'Landmark manifest');
@@ -488,6 +591,7 @@ validateReadme(readmeText);
 exerciseReadmeChecksumFlow(readmeText);
 exerciseReadmeInstallFlow(readmeText);
 exerciseVersionSync();
+exerciseRemoteTagResolver();
 
 const documentedAdvisory = '[advisories]\nignore = ["RUSTSEC-2099-0001"]\n';
 const validWaiver = 'schema = 1\n[[waiver]]\nadvisory = "RUSTSEC-2099-0001"\ntracking_ref = "AL-999"\nrationale = "test"\nowner = "security"\nexpiry = 2099-01-01\nremoval = "upgrade"\n';
@@ -503,6 +607,71 @@ stableLandmark.jobs['prepare-release'].steps.find((step) => step.name === 'Compu
 expectRejected(
   () => validateReleaseIntelligenceWorkflow(stringifyYaml(stableLandmark), landmarkManifestText),
   'stable Landmark release line',
+);
+const directMaster = structuredClone(releaseIntelligenceObject);
+directMaster.jobs['prepare-release'].steps.find((step) => step.name === 'Open protected Landmark release pull request').run +=
+  '\ngit push origin HEAD:master';
+expectRejected(
+  () => validateReleaseIntelligenceWorkflow(stringifyYaml(directMaster), landmarkManifestText),
+  'direct master release push',
+);
+const unverifiedDispatch = structuredClone(releaseIntelligenceObject);
+unverifiedDispatch.jobs['prepare-release'].steps.find((step) => step.name === 'Resolve verified master source').run =
+  unverifiedDispatch.jobs['prepare-release'].steps.find((step) => step.name === 'Resolve verified master source').run.replace('check-runs', 'statuses');
+expectRejected(
+  () => validateReleaseIntelligenceWorkflow(stringifyYaml(unverifiedDispatch), landmarkManifestText),
+  'manual dispatch without verify check readback',
+);
+const messageKeyedTag = structuredClone(releaseIntelligenceObject);
+messageKeyedTag.jobs['prepare-release'].steps.find((step) => step.name === 'Reconcile verified release tag').run =
+  messageKeyedTag.jobs['prepare-release'].steps.find((step) => step.name === 'Reconcile verified release tag').run.replace('.mergeCommit.oid', '.title');
+expectRejected(
+  () => validateReleaseIntelligenceWorkflow(stringifyYaml(messageKeyedTag), landmarkManifestText),
+  'tag callback keyed by PR title',
+);
+const nonIdempotentTag = structuredClone(releaseIntelligenceObject);
+nonIdempotentTag.jobs['prepare-release'].steps.find((step) => step.name === 'Reconcile verified release tag').run =
+  nonIdempotentTag.jobs['prepare-release'].steps.find((step) => step.name === 'Reconcile verified release tag').run.replace('git ls-remote origin', 'git show-ref --tags');
+expectRejected(
+  () => validateReleaseIntelligenceWorkflow(stringifyYaml(nonIdempotentTag), landmarkManifestText),
+  'tag callback without remote idempotency check',
+);
+const wrongAppActor = structuredClone(releaseIntelligenceObject);
+wrongAppActor.jobs['prepare-release'].steps.find((step) => step.name === 'Reconcile verified release tag').run =
+  wrongAppActor.jobs['prepare-release'].steps.find((step) => step.name === 'Reconcile verified release tag').run.replace(
+    'app_actor="app/${APP_SLUG}"',
+    'app_actor="${APP_SLUG}[bot]"',
+  );
+expectRejected(
+  () => validateReleaseIntelligenceWorkflow(stringifyYaml(wrongAppActor), landmarkManifestText),
+  'incorrect GitHub App PR author identity',
+);
+const deadlockedRedMerge = structuredClone(releaseIntelligenceObject);
+deadlockedRedMerge.jobs['prepare-release'].steps.find((step) => step.name === 'Reconcile verified release tag').run =
+  deadlockedRedMerge.jobs['prepare-release'].steps.find((step) => step.name === 'Reconcile verified release tag').run.replace(
+    'preparing a superseding candidate." >&2',
+    'preparing a superseding candidate." >&2\n    exit 1',
+  );
+expectRejected(
+  () => validateReleaseIntelligenceWorkflow(stringifyYaml(deadlockedRedMerge), landmarkManifestText),
+  'red merged candidate liveness deadlock',
+);
+const defaultTokenTag = structuredClone(releaseIntelligenceObject);
+defaultTokenTag.jobs['prepare-release'].steps.find((step) => step.name === 'Reconcile verified release tag').env.GH_TOKEN =
+  '${{ github.token }}';
+expectRejected(
+  () => validateReleaseIntelligenceWorkflow(stringifyYaml(defaultTokenTag), landmarkManifestText),
+  'tag callback using recursion-suppressed default token',
+);
+const forcedReleaseBranch = structuredClone(releaseIntelligenceObject);
+forcedReleaseBranch.jobs['prepare-release'].steps.find((step) => step.name === 'Open protected Landmark release pull request').run =
+  forcedReleaseBranch.jobs['prepare-release'].steps.find((step) => step.name === 'Open protected Landmark release pull request').run.replace(
+    'git push origin ',
+    'git push --force origin ',
+  );
+expectRejected(
+  () => validateReleaseIntelligenceWorkflow(stringifyYaml(forcedReleaseBranch), landmarkManifestText),
+  'forced release branch push',
 );
 const extraUpload = structuredClone(releaseObject);
 extraUpload.jobs['sign-and-publish'].steps.at(-1).run = extraUpload.jobs['sign-and-publish'].steps.at(-1).run.replace(
