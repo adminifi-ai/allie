@@ -121,6 +121,12 @@ function validateReleaseWorkflow(text) {
   if (!run.includes('--generate-notes') || run.replace('--generate-notes', '').includes('--notes')) {
     fail('release publication must use GitHub-generated notes');
   }
+  for (const command of ['gh release create ', 'gh release upload ', 'gh release edit ']) {
+    const commandLine = run.split('\n').find((line) => line.trimStart().startsWith(command));
+    if (!commandLine?.includes('--repo "$GITHUB_REPOSITORY"')) {
+      fail(`${command.trim()} must use explicit repository context without a checkout`);
+    }
+  }
   if (!run.includes('tag="$GITHUB_REF_NAME"')) {
     fail('release publication must bind release assets to the pushed tag');
   }
@@ -377,6 +383,13 @@ const handwrittenNotes = structuredClone(releaseObject);
 handwrittenNotes.jobs['sign-and-publish'].steps.at(-1).run =
   handwrittenNotes.jobs['sign-and-publish'].steps.at(-1).run.replace('--generate-notes', "--generate-notes --notes 'handwritten'");
 expectRejected(() => validateReleaseWorkflow(stringifyYaml(handwrittenNotes)), 'handwritten release notes');
+const missingRepositoryContext = structuredClone(releaseObject);
+missingRepositoryContext.jobs['sign-and-publish'].steps.at(-1).run =
+  missingRepositoryContext.jobs['sign-and-publish'].steps.at(-1).run.replace(' --repo "$GITHUB_REPOSITORY"', '');
+expectRejected(
+  () => validateReleaseWorkflow(stringifyYaml(missingRepositoryContext)),
+  'release command without repository context',
+);
 const impostorCosign = structuredClone(releaseObject);
 impostorCosign.jobs['sign-and-publish'].steps.find((step) => /\/cosign-installer@/.test(String(step.uses || ''))).uses =
   'attacker/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6';
