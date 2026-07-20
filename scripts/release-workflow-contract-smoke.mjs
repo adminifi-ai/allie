@@ -118,7 +118,7 @@ function validateReleaseWorkflow(text) {
   if (!(draftAt >= 0 && uploadAt > draftAt && readbackAt > uploadAt && publishAt > readbackAt)) {
     fail('release order must be draft, upload, API asset readback, then publish');
   }
-  if (!run.includes('--generate-notes') || run.includes('--notes-file') || run.includes('--notes "')) {
+  if (!run.includes('--generate-notes') || run.replace('--generate-notes', '').includes('--notes')) {
     fail('release publication must use GitHub-generated notes');
   }
   if (!run.includes('tag="$GITHUB_REF_NAME"')) {
@@ -373,6 +373,10 @@ extraUpload.jobs['sign-and-publish'].steps.at(-1).run = extraUpload.jobs['sign-a
   'dist/allie-linux-x64.tar.gz \\\n  dist/extra.txt \\\n',
 );
 expectRejected(() => validateReleaseWorkflow(stringifyYaml(extraUpload)), 'extra release asset');
+const handwrittenNotes = structuredClone(releaseObject);
+handwrittenNotes.jobs['sign-and-publish'].steps.at(-1).run =
+  handwrittenNotes.jobs['sign-and-publish'].steps.at(-1).run.replace('--generate-notes', "--generate-notes --notes 'handwritten'");
+expectRejected(() => validateReleaseWorkflow(stringifyYaml(handwrittenNotes)), 'handwritten release notes');
 const impostorCosign = structuredClone(releaseObject);
 impostorCosign.jobs['sign-and-publish'].steps.find((step) => /\/cosign-installer@/.test(String(step.uses || ''))).uses =
   'attacker/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6';
