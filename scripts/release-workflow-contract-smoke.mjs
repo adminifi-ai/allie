@@ -111,28 +111,29 @@ function validateReleaseWorkflow(text) {
 
   const release = (publish.steps || []).find((step) => step.name === 'Publish only after exact asset readback');
   const run = String(release?.run || '');
-  const draftAt = run.indexOf('gh release create "$tag" --draft');
+  const draftAt = run.indexOf('gh api --method POST "repos/$GITHUB_REPOSITORY/releases"');
   const uploadAt = run.indexOf('gh release upload "$tag"');
-  const readbackAt = run.indexOf("--jq '.assets[].name'");
-  const publishAt = run.indexOf('gh release edit "$tag" --draft=false');
+  const readbackAt = run.indexOf('"repos/$GITHUB_REPOSITORY/releases/$release_id" --jq');
+  const publishAt = run.indexOf('gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false');
   if (!(draftAt >= 0 && uploadAt > draftAt && readbackAt > uploadAt && publishAt > readbackAt)) {
     fail('release order must be draft, upload, API asset readback, then publish');
   }
-  if (!run.includes('--generate-notes') || run.replace('--generate-notes', '').includes('--notes')) {
+  if (!run.includes('-F generate_release_notes=true') || /\s-f body=/.test(run)) {
     fail('release publication must use GitHub-generated notes');
   }
-  for (const command of ['gh release create ', 'gh release upload ', 'gh release edit ']) {
-    const commandLine = run.split('\n').find((line) => line.trimStart().startsWith(command));
-    if (!commandLine?.includes('--repo "$GITHUB_REPOSITORY"')) {
-      fail(`${command.trim()} must use explicit repository context without a checkout`);
-    }
+  const uploadLine = run.split('\n').find((line) => line.trimStart().startsWith('gh release upload '));
+  if (!uploadLine?.includes('--repo "$GITHUB_REPOSITORY"')) {
+    fail('gh release upload must use explicit repository context without a checkout');
   }
-  if (!run.includes('tag="$GITHUB_REF_NAME"')) {
-    fail('release publication must bind release assets to the pushed tag');
+  if (!run.includes('tag="$GITHUB_REF_NAME"') ||
+      !run.includes('[[ "$tag" =~ ^v0\\.[0-9]+\\.[0-9]+$ ]]') ||
+      !run.includes('"repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha') ||
+      !run.includes('[ "$tag_commit" != "$GITHUB_SHA" ]')) {
+    fail('release publication must validate and bind the pushed tag to the workflow commit');
   }
   if (!run.includes('set -euo pipefail') || !run.includes('trap cleanup EXIT') ||
-      !run.includes('gh api --method DELETE')) {
-    fail('draft publication must fail closed and delete a failed draft');
+      !run.includes('gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"')) {
+    fail('draft publication must fail closed and delete the exact failed draft');
   }
   if (run.includes('--clobber') || run.includes('dist/*')) fail('release upload may not clobber or glob assets');
   const uploadBlock = run.slice(uploadAt, run.indexOf('\n\n', uploadAt));
@@ -147,7 +148,7 @@ function validateReleaseWorkflow(text) {
   for (const asset of EXPECTED_ASSETS) {
     if (!expectedBlock.includes(asset)) fail(`API readback expectation omitted ${asset}`);
   }
-  if (/gh release (create|edit)[^\n]*(--draft=false|--draft false)/.test(run.slice(0, readbackAt))) {
+  if (run.slice(0, readbackAt).includes('-F draft=false')) {
     fail('release may not become public before exact API readback');
   }
 }
@@ -381,7 +382,10 @@ extraUpload.jobs['sign-and-publish'].steps.at(-1).run = extraUpload.jobs['sign-a
 expectRejected(() => validateReleaseWorkflow(stringifyYaml(extraUpload)), 'extra release asset');
 const handwrittenNotes = structuredClone(releaseObject);
 handwrittenNotes.jobs['sign-and-publish'].steps.at(-1).run =
-  handwrittenNotes.jobs['sign-and-publish'].steps.at(-1).run.replace('--generate-notes', "--generate-notes --notes 'handwritten'");
+  handwrittenNotes.jobs['sign-and-publish'].steps.at(-1).run.replace(
+    '-F generate_release_notes=true',
+    "-F generate_release_notes=true \\\n  -f body='handwritten'",
+  );
 expectRejected(() => validateReleaseWorkflow(stringifyYaml(handwrittenNotes)), 'handwritten release notes');
 const missingRepositoryContext = structuredClone(releaseObject);
 missingRepositoryContext.jobs['sign-and-publish'].steps.at(-1).run =
