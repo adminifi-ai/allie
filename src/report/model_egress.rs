@@ -17,11 +17,7 @@ pub(super) fn render(events: &[ModelEgressEvent]) -> String {
         .iter()
         .filter_map(|event| event.usage.as_ref()?.completion_tokens)
         .sum::<u64>();
-    let costs = events
-        .iter()
-        .filter_map(|event| event.usage.as_ref()?.cost)
-        .collect::<Vec<_>>();
-    let total_cost = costs.iter().sum::<f64>();
+    let cost_summary = reported_cost(events);
     let rows = events
         .iter()
         .map(|event| {
@@ -77,14 +73,13 @@ pub(super) fn render(events: &[ModelEgressEvent]) -> String {
         })
         .collect::<String>();
     format!(
-        "<section><h2 class=\"sh\">Model egress receipt</h2><div class=\"hard-panel\"><p><b>{attempts} HTTP attempt(s)</b> · {successes} successful · {failures} failed · {prompt_tokens} prompt tokens · {completion_tokens} completion tokens · {total_cost:.6} reported cost across {cost_count} attempt(s).</p><p class=\"sub\">ZDR and no-fallback policy is recorded per attempt. Prompt and media bodies, authorization values, and credentials are not included.</p><details class=\"matrix-wrap\"><summary>Per-attempt model egress evidence</summary><table class=\"matrix ledger\"><thead><tr><th>Attempt</th><th>Outcome</th><th>HTTP</th><th>Requested route</th><th>Actual route</th><th>Generation</th><th>Payload fingerprints</th><th>Usage</th></tr></thead><tbody>{rows}</tbody></table></details></div></section>",
+        "<section><h2 class=\"sh\">Model egress receipt</h2><div class=\"hard-panel\"><p><b>{attempts} HTTP attempt(s)</b> · {successes} successful · {failures} failed · {prompt_tokens} prompt tokens · {completion_tokens} completion tokens · {cost_summary}.</p><p class=\"sub\">ZDR and no-fallback policy is recorded per attempt. Prompt and media bodies, authorization values, and credentials are not included.</p><details class=\"matrix-wrap\"><summary>Per-attempt model egress evidence</summary><table class=\"matrix ledger\"><thead><tr><th>Attempt</th><th>Outcome</th><th>HTTP</th><th>Requested route</th><th>Actual route</th><th>Generation</th><th>Payload fingerprints</th><th>Usage</th></tr></thead><tbody>{rows}</tbody></table></details></div></section>",
         attempts = events.len(),
         successes = successes,
         failures = events.len() - successes,
         prompt_tokens = prompt_tokens,
         completion_tokens = completion_tokens,
-        total_cost = total_cost,
-        cost_count = costs.len(),
+        cost_summary = cost_summary,
         rows = rows,
     )
 }
@@ -97,17 +92,29 @@ pub(super) fn summary(events: &[ModelEgressEvent]) -> String {
         .iter()
         .filter(|event| event.outcome == "success")
         .count();
-    let total_cost = events
-        .iter()
-        .filter_map(|event| event.usage.as_ref()?.cost)
-        .sum::<f64>();
     format!(
-        "Model egress: {} HTTP attempt(s), {} successful, {} failed, {:.6} reported cost. Per-attempt receipts are in the source packet.",
+        "Model egress: {} HTTP attempt(s), {} successful, {} failed, {}. Per-attempt receipts are in the source packet.",
         events.len(),
         successes,
         events.len() - successes,
-        total_cost
+        reported_cost(events)
     )
+}
+
+fn reported_cost(events: &[ModelEgressEvent]) -> String {
+    let costs = events
+        .iter()
+        .filter_map(|event| event.usage.as_ref()?.cost)
+        .collect::<Vec<_>>();
+    if costs.is_empty() {
+        "reported cost unavailable".to_string()
+    } else {
+        format!(
+            "{:.6} reported cost across {} attempt(s)",
+            costs.iter().sum::<f64>(),
+            costs.len()
+        )
+    }
 }
 
 #[cfg(test)]
@@ -117,7 +124,7 @@ mod tests {
 
     #[test]
     fn receipt_is_concise_disclosable_and_payload_free() {
-        let html = render(&[ModelEgressEvent {
+        let event = ModelEgressEvent {
             schema: "allie.model-egress-event.v1".to_string(),
             attempt: 1,
             started_at: "2026-07-21T12:00:00Z".to_string(),
@@ -141,7 +148,8 @@ mod tests {
                 total_tokens: Some(5),
                 cost: Some(0.001),
             }),
-        }]);
+        };
+        let html = render(std::slice::from_ref(&event));
 
         assert!(html.contains("1 HTTP attempt(s)"));
         assert!(html.contains("Per-attempt model egress evidence"));
@@ -152,5 +160,11 @@ mod tests {
         assert!(!html.contains("Authorization"));
         assert!(!html.contains("api_key"));
         assert!(!html.contains("messages"));
+
+        let mut unpriced = event;
+        unpriced.usage.as_mut().unwrap().cost = None;
+        let summary = summary(&[unpriced]);
+        assert!(summary.contains("reported cost unavailable"));
+        assert!(!summary.contains("0.000000 reported cost"));
     }
 }

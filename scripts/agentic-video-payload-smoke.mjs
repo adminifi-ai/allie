@@ -379,7 +379,7 @@ async function assertDirectOpenAiResponse(responsePath) {
   const event = response.model_call_audit?.[0];
   if (response.calls !== 1 || event?.outcome !== 'success'
       || event.response_id !== 'direct-response-1'
-      || event.generation_id !== 'direct-response-1'
+      || event.generation_id !== null
       || event.routed_provider !== 'openai'
       || event.routed_model !== 'fake-direct-openai-model'
       || event.usage?.cost !== null) {
