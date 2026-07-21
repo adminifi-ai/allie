@@ -2592,13 +2592,6 @@ mod tests {
                 .iter()
                 .any(|value| value["required"][0] == "packet_ref")
         );
-        assert!(
-            parsed["properties"]["policy"]["required"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|value| value == "model_egress_redaction")
-        );
         let artifact = &parsed["properties"]["artifacts"]["items"];
         let required = artifact["required"].as_array().unwrap();
         assert!(required.contains(&serde_json::json!("publication_class")));

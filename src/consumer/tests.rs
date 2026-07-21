@@ -102,6 +102,7 @@ fn init_falls_back_to_openai_when_only_that_key_resolves() {
         Some(crate::ModelRedactionMode::None)
     );
     assert_eq!(manifest.model.provider.as_deref(), Some("openai"));
+    assert!(!manifest.model.zdr_required);
     assert_eq!(
         manifest.model.api_key_env.as_deref(),
         Some("OPENAI_API_KEY")

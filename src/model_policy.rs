@@ -51,6 +51,9 @@ impl ModelPolicy {
         if let Some(failure) = self.redaction_mode_failure() {
             return Err(AllieError::InvalidManifest(failure.message));
         }
+        if let Some(failure) = self.zdr_capability_failure() {
+            return Err(AllieError::InvalidManifest(failure.message));
+        }
         Ok(())
     }
 }
@@ -64,6 +67,9 @@ impl FlowManifest {
             return Err(AllieError::InvalidManifest(failure.message));
         }
         if let Some(failure) = self.model.provider_allowlist_failure() {
+            return Err(AllieError::InvalidManifest(failure.message));
+        }
+        if let Some(failure) = self.model.zdr_capability_failure() {
             return Err(AllieError::InvalidManifest(failure.message));
         }
         Ok(())
@@ -170,6 +176,23 @@ impl ModelPolicy {
         }
 
         None
+    }
+
+    pub(crate) fn zdr_capability_failure(&self) -> Option<RunFailure> {
+        if !self.enabled || !self.zdr_required {
+            return None;
+        }
+        let route = self.resolved_route();
+        (route.provider != "openrouter").then(|| {
+            RunFailure::new(
+                "model-policy-not-allowed",
+                "model-policy",
+                format!(
+                    "model provider {} does not support required ZDR routing; choose the openrouter provider adapter or disable model.zdr_required explicitly",
+                    route.provider
+                ),
+            )
+        })
     }
 
     fn effective_provider_allowlist(&self) -> Vec<&str> {

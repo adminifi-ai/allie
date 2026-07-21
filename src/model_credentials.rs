@@ -64,6 +64,7 @@ pub(crate) fn scaffold_model_policy() -> ModelPolicy {
         Some(preset) => ModelPolicy {
             enabled: true,
             provider_allowlist: vec![preset.provider.to_string()],
+            zdr_required: preset.provider == "openrouter",
             redaction: Some(crate::ModelRedactionMode::None),
             provider: Some(preset.provider.to_string()),
             model: Some(preset.model.to_string()),

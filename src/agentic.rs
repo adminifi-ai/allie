@@ -17,6 +17,8 @@ use wait_timeout::ChildExt;
 const AGENTIC_WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 
 mod audit;
+#[cfg(test)]
+mod audit_tests;
 mod redaction;
 use audit::{PROMPT_VERSION as AGENTIC_PROMPT_VERSION, record_model_egress};
 
@@ -162,6 +164,7 @@ fn run_agentic_review_with_timeout(
             "max_calls": manifest.model.max_model_calls.unwrap_or(4),
             "reasoning_effort": manifest.model.reasoning_effort.clone(),
             "redaction": manifest.model.redaction,
+            "zdr_required": manifest.model.zdr_required,
         },
         "artifacts_dir": artifacts_dir.to_string_lossy(),
         "surfaces": agentic_review_surfaces(&packet),
@@ -216,7 +219,6 @@ fn run_agentic_review_with_timeout(
             "agentic worker returned prompt version {prompt_version}; expected {AGENTIC_PROMPT_VERSION}"
         )));
     }
-    let outcome = agentic_response_outcome(&response, status.success())?;
     let timestamp = now_utc();
     let policy = ArtifactPolicy {
         redaction_status: "not_redacted_local".to_string(),
@@ -229,15 +231,17 @@ fn run_agentic_review_with_timeout(
         .collect::<BTreeSet<_>>();
 
     let fail_precision_passed = agentic_fail_precision_passed(&response);
-    let (provider, model) = record_model_egress(
-        &mut packet,
-        &request,
-        &response,
-        &request_path,
-        &response_path,
-        manifest.model.redaction,
-        timestamp.to_rfc3339(),
-    )?;
+    let (provider, model) =
+        record_model_egress(&mut packet, &request, &response, manifest.model.redaction)?;
+    let outcome = match agentic_response_outcome(&response, status.success()) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            if response["status"].as_str() == Some("error") {
+                write_json_pretty(packet_path, &packet)?;
+            }
+            return Err(error);
+        }
+    };
     let empty = Vec::new();
     for assessment in response["assessments"].as_array().unwrap_or(&empty) {
         let Some(obligation) = assessment["obligation"].as_str() else {
