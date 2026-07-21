@@ -119,13 +119,15 @@ fn validate_event(
             "actual route provider/model must both be present or null",
         );
     }
+    if event.generation_id.as_deref().is_some_and(str::is_empty) {
+        return invalid_event(event, "generation_id must be non-empty when reported");
+    }
 
     match event.outcome.as_str() {
         "success" => {
             if !matches!(event.http_status, Some(200..=299))
                 || event.error_class.is_some()
                 || event.response_id.as_deref().is_none_or(str::is_empty)
-                || event.generation_id.as_deref().is_none_or(str::is_empty)
                 || event.routed_provider.as_deref().is_none_or(str::is_empty)
                 || event.routed_model.as_deref().is_none_or(str::is_empty)
                 || event.usage.is_none()
@@ -291,6 +293,7 @@ mod tests {
         event.zdr_required = false;
         event.allow_fallbacks = true;
         event.usage.as_mut().unwrap().cost = None;
+        event.generation_id = None;
 
         validate_event(&event, 1, "openai", "fake-model", false).unwrap();
     }

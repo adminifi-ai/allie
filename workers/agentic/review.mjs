@@ -883,7 +883,7 @@ function modelCallAuditEvent(policy, {
     http_status: httpStatus,
     error_class: errorClass,
     response_id: succeeded ? stringOrNull(responseJson?.id) : null,
-    generation_id: stringOrNull(generationId ?? (succeeded ? responseJson?.id : null)),
+    generation_id: stringOrNull(generationId),
     routed_provider: succeeded
       ? stringOrNull(selectedRoute?.provider
         ?? (policy.requestedProvider !== 'openrouter' ? policy.requestedProvider : null))
