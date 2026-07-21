@@ -43,6 +43,7 @@ fs.writeFileSync(process.argv[responseIndex], JSON.stringify({{
   provider: '{provider}',
   model: 'test',
   calls: 0,
+  model_call_audit: [],
   usage: {{ prompt_tokens: 0, completion_tokens: 0 }},
   redaction_receipt: {{
     schema: 'allie.model-redaction-receipt.v0',
@@ -112,6 +113,36 @@ fn rejects_off_allowlist_model_before_worker_spawn() {
         !marker_path.exists(),
         "policy failure must happen before the agentic worker is spawned"
     );
+}
+
+#[test]
+fn rejects_zdr_for_unsupported_provider_before_request_write_or_worker_spawn() {
+    let _guard = AGENTIC_WORKER_ENV_GUARD
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let temp = tempdir().unwrap();
+    let (worker_path, marker_path) = write_marker_worker(temp.path(), "openai");
+    let packet_path = temp.path().join("evidence.json");
+    write_json_pretty(&packet_path, &minimal_agentic_packet()).unwrap();
+    let mut manifest =
+        FlowManifest::load(Path::new("examples/autonomous-workbench-agentic.yml")).unwrap();
+    manifest.model.provider_allowlist = vec!["openai".to_string()];
+    manifest.model.provider = Some("openai".to_string());
+    manifest.model.base_url = Some("https://api.openai.com/v1".to_string());
+    manifest.model.zdr_required = true;
+
+    let _env = AgenticWorkerEnvGuard::set(&worker_path, &marker_path);
+    let error = run_agentic_review_with_timeout(&manifest, &packet_path, Duration::from_secs(5))
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("does not support required ZDR routing"),
+        "error should identify the unsupported provider capability: {error}"
+    );
+    assert!(!temp.path().join("agentic-request.json").exists());
+    assert!(!marker_path.exists());
 }
 
 #[test]
@@ -194,7 +225,7 @@ fn evidence_packet_rejects_missing_required_model_egress_policy() {
     assert!(serde_json::from_value::<crate::model::EvidencePacket>(packet).is_err());
 }
 #[test]
-fn accepted_model_route_records_versioned_prompt_and_egress_event() {
+fn accepted_model_route_records_versioned_prompt_and_zero_attempts() {
     let _guard = AGENTIC_WORKER_ENV_GUARD
         .lock()
         .unwrap_or_else(|error| error.into_inner());
@@ -213,25 +244,14 @@ fn accepted_model_route_records_versioned_prompt_and_egress_event() {
     let request: serde_json::Value =
         read_json_file(&temp.path().join("agentic-request.json")).unwrap();
     assert_eq!(request["prompt_version"], "allie.agentic.wcag-review.v1");
+    assert_eq!(request["model"]["zdr_required"], true);
 
     let packet: serde_json::Value = read_json_file(&packet_path).unwrap();
-    let events = packet["model_egress_events"].as_array().unwrap();
-    assert_eq!(events.len(), 1);
-    let event = &events[0];
-    assert_eq!(event["schema"], "allie.model-egress-event.v0");
-    assert_eq!(event["prompt_version"], request["prompt_version"]);
-    assert_eq!(event["provider"], "openrouter");
-    assert_eq!(event["model"], "test");
-    assert_eq!(event["endpoint"], "https://openrouter.ai/api/v1");
-    assert_eq!(event["status"], "skipped");
-    assert_eq!(event["calls"], 0);
-    assert_eq!(event["redaction_profile"], "none");
-    assert_eq!(event["redaction_status"], "not_sent");
-    for field in ["request_sha256", "response_sha256"] {
-        let digest = event[field].as_str().unwrap();
-        assert!(digest.starts_with("sha256:"));
-        assert_eq!(digest.len(), "sha256:".len() + 64);
-    }
+    assert!(
+        packet.get("model_egress_events").is_none(),
+        "zero HTTP attempts must keep the model egress collection empty"
+    );
+    assert_eq!(packet["policy"]["budget"]["model_calls"], 0);
 }
 
 #[test]
@@ -264,7 +284,7 @@ fn rejects_unrecognized_worker_prompt_version() {
     assert!(packet.get("model_egress_events").is_none());
 }
 
-fn minimal_agentic_packet() -> serde_json::Value {
+pub(super) fn minimal_agentic_packet() -> serde_json::Value {
     serde_json::json!({
         "schema": "allie.evidence.v0",
         "summary": {

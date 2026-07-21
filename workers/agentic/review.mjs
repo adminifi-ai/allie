@@ -10,6 +10,7 @@
 // It never fabricates a verdict: if the model is unavailable or a call fails,
 // the affected criteria come back as "unavailable" with the captured media
 // still attached, and the response status is "degraded".
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
@@ -47,6 +48,9 @@ async function run(request) {
   if (request.model?.redaction !== 'none') {
     return errorResponse('model.redaction must explicitly declare the supported V0 mode "none"');
   }
+  if (request.model?.zdr_required === true && request.model?.provider !== 'openrouter') {
+    return errorResponse(`model provider ${request.model?.provider || 'unknown'} has no declared ZDR adapter`);
+  }
   const apiKey = process.env[request.model.api_key_env || 'OPENROUTER_API_KEY'];
   const artifactsDir = path.resolve(repoRoot, request.artifacts_dir);
   await fs.mkdir(artifactsDir, { recursive: true });
@@ -54,6 +58,7 @@ async function run(request) {
   let browser = null;
   let fixtureServer = null;
   let calls = 0;
+  const modelCallAudit = [];
   const errors = [];
   try {
     const target = await resolveTarget(request.target);
@@ -87,6 +92,7 @@ async function run(request) {
                 artifactsDir,
                 errors,
                 budget: maxCalls - calls,
+                modelCallAudit,
               });
               Object.assign(verdicts, result.verdicts);
               groupMedia = result.media;
@@ -132,13 +138,14 @@ async function run(request) {
       model: request.model.model,
       calls,
       redaction_receipt: redactionReceipt(calls),
+      model_call_audit: modelCallAudit,
       usage,
       assessments,
       ...(precisionGate ? { precision_gate: precisionGate } : {}),
       errors,
     };
   } catch (error) {
-    return errorResponse(error instanceof Error ? error.message : String(error), calls);
+    return errorResponse(error instanceof Error ? error.message : String(error), calls, modelCallAudit);
   } finally {
     if (browser) await browser.close().catch(() => {});
     if (fixtureServer) await new Promise((resolve) => fixtureServer.close(resolve)).catch(() => {});
@@ -545,31 +552,48 @@ function actionSummary(actions) {
 async function assessGroup(model, apiKey, group, groupMedia, context) {
   const imageMedia = modelImageMedia(groupMedia);
   const videoMedia = groupMedia.filter(isVideoMedia).slice(0, 2);
-  const content = [{ type: 'text', text: buildPrompt(group, [...imageMedia, ...videoMedia], context.surface) }];
+  const prompt = buildPrompt(group, [...imageMedia, ...videoMedia], context.surface);
+  const content = [{ type: 'text', text: prompt }];
+  const mediaSha256 = [];
   for (const entry of imageMedia) {
+    const payload = await mediaPayload(entry.absPath, 'image/png');
+    mediaSha256.push(payload.sha256);
     content.push({
       type: 'image_url',
-      image_url: { url: await mediaDataUrl(entry.absPath, 'image/png') },
+      image_url: { url: payload.url },
     });
   }
   for (const entry of videoMedia) {
+    const payload = await mediaPayload(entry.absPath, videoMimeType(entry.absPath));
+    mediaSha256.push(payload.sha256);
     content.push({
       type: 'video_url',
-      video_url: { url: await mediaDataUrl(entry.absPath, videoMimeType(entry.absPath)) },
+      video_url: { url: payload.url },
     });
   }
+  const zdrRequired = model.zdr_required === true;
   const body = {
     model: model.model,
     max_tokens: 4000,
     temperature: 0.2,
     messages: [{ role: 'user', content }],
+    ...(model.provider === 'openrouter' ? { usage: { include: true } } : {}),
+    ...(zdrRequired ? { provider: { zdr: true, allow_fallbacks: false } } : {}),
   };
   // Thinking-effort hint for models that support it (e.g. Gemini 3.x). Keeping
   // this explicit (low) avoids the pricier "medium" default while preserving
   // full coverage and decisive verdicts.
   if (model.reasoning_effort) body.reasoning = { effort: model.reasoning_effort };
   const base = model.base_url || 'https://openrouter.ai/api/v1';
-  const { json, calls } = await fetchModelJsonWithRetry(base, apiKey, body, context.budget);
+  const { json, calls } = await fetchModelJsonWithRetry(base, apiKey, body, context.budget, {
+    audit: context.modelCallAudit,
+    requestedProvider: model.provider || 'openrouter',
+    requestedModel: model.model,
+    promptSha256: sha256(prompt),
+    mediaSha256,
+    zdrRequired,
+    allowFallbacks: !zdrRequired,
+  });
   const text = json.choices?.[0]?.message?.content || '';
   const parsed = parseModelJson(text);
   const verdicts = {};
@@ -582,41 +606,98 @@ async function assessGroup(model, apiKey, group, groupMedia, context) {
   return { verdicts, actions: parsed?.actions || [], usage: json.usage, calls };
 }
 
-async function fetchModelJsonWithRetry(base, apiKey, body, budget) {
+async function fetchModelJsonWithRetry(base, apiKey, body, budget, policy) {
   const maxAttempts = Math.max(1, Math.min(1 + MAX_MODEL_RETRIES, budget));
   let calls = 0;
   let lastError = null;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     calls += 1;
+    const startedAt = new Date().toISOString();
+    let res;
     try {
-      const res = await fetch(`${base}/chat/completions`, {
+      res = await fetch(`${base}/chat/completions`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://github.com/adminifi-ai/allie',
           'X-Title': 'Allie accessibility review',
+          'X-OpenRouter-Cache': 'false',
+          'X-OpenRouter-Metadata': 'enabled',
         },
         body: JSON.stringify(body),
       });
-      if (!res.ok) {
-        const text = await res.text();
-        const error = new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-        if (isTransientModelFailure(res.status) && attempt + 1 < maxAttempts) {
-          lastError = error;
-          continue;
-        }
-        error.modelCalls = calls;
-        throw error;
-      }
-      return { json: await res.json(), calls };
     } catch (error) {
-      if (error.modelCalls) throw error;
+      policy.audit.push(modelCallAuditEvent(policy, {
+        startedAt,
+        outcome: 'transport_error',
+        errorClass: error?.name || 'transport_error',
+      }));
       lastError = error;
       if (attempt + 1 < maxAttempts) continue;
       error.modelCalls = calls;
       throw error;
     }
+    const generationId = res.headers.get('x-generation-id');
+
+    if (!res.ok) {
+      let text;
+      try {
+        text = await res.text();
+      } catch (error) {
+        policy.audit.push(modelCallAuditEvent(policy, {
+          startedAt,
+          outcome: 'http_error',
+          httpStatus: res.status,
+          errorClass: error?.name || 'response_body_transport_error',
+          generationId,
+        }));
+        lastError = error;
+        if (attempt + 1 < maxAttempts) continue;
+        error.modelCalls = calls;
+        throw error;
+      }
+      const responseJson = parseJsonOrNull(text);
+      policy.audit.push(modelCallAuditEvent(policy, {
+        startedAt,
+        outcome: 'http_error',
+        httpStatus: res.status,
+        errorClass: `http_${res.status}`,
+        responseJson,
+        generationId,
+      }));
+      const error = new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      if (isTransientModelFailure(res.status) && attempt + 1 < maxAttempts) {
+        lastError = error;
+        continue;
+      }
+      error.modelCalls = calls;
+      throw error;
+    }
+
+    let json;
+    try {
+      json = await res.json();
+    } catch (error) {
+      policy.audit.push(modelCallAuditEvent(policy, {
+        startedAt,
+        outcome: 'response_error',
+        httpStatus: res.status,
+        errorClass: 'invalid_json',
+        generationId,
+      }));
+      if (attempt + 1 < maxAttempts) continue;
+      error.modelCalls = calls;
+      throw error;
+    }
+    policy.audit.push(modelCallAuditEvent(policy, {
+      startedAt,
+      outcome: 'success',
+      httpStatus: res.status,
+      responseJson: json,
+      generationId,
+    }));
+    return { json, calls };
   }
   const error = lastError || new Error('model call failed without response');
   error.modelCalls = calls;
@@ -634,9 +715,12 @@ function modelImageMedia(groupMedia) {
   return [...actionScreenshots, ...baselineScreenshots].slice(0, 4);
 }
 
-async function mediaDataUrl(absPath, mimeType) {
+async function mediaPayload(absPath, mimeType) {
   const bytes = await fs.readFile(absPath);
-  return `data:${mimeType};base64,${bytes.toString('base64')}`;
+  return {
+    url: `data:${mimeType};base64,${bytes.toString('base64')}`,
+    sha256: sha256(bytes),
+  };
 }
 
 function isVideoMedia(entry) {
@@ -771,6 +855,75 @@ function chunk(items, size) {
   return out;
 }
 
+function modelCallAuditEvent(policy, {
+  startedAt,
+  outcome,
+  httpStatus = null,
+  errorClass = null,
+  responseJson = null,
+  generationId = null,
+}) {
+  // OpenRouter's documented opt-in response shape:
+  // https://openrouter.ai/docs/guides/features/router-metadata#response-shape
+  const selectedRoute = responseJson?.openrouter_metadata?.endpoints?.available
+    ?.find((endpoint) => endpoint?.selected === true);
+  const succeeded = outcome === 'success';
+  return {
+    schema: 'allie.model-egress-event.v1',
+    attempt: policy.audit.length + 1,
+    started_at: startedAt,
+    requested_provider: policy.requestedProvider,
+    requested_model: policy.requestedModel,
+    prompt_version: PROMPT_VERSION,
+    prompt_sha256: policy.promptSha256,
+    media_sha256: [...policy.mediaSha256],
+    zdr_required: policy.zdrRequired,
+    allow_fallbacks: policy.allowFallbacks,
+    outcome,
+    http_status: httpStatus,
+    error_class: errorClass,
+    response_id: succeeded ? stringOrNull(responseJson?.id) : null,
+    generation_id: stringOrNull(generationId ?? (succeeded ? responseJson?.id : null)),
+    routed_provider: succeeded
+      ? stringOrNull(selectedRoute?.provider
+        ?? (policy.requestedProvider !== 'openrouter' ? policy.requestedProvider : null))
+      : null,
+    routed_model: succeeded
+      ? stringOrNull(selectedRoute?.model ?? responseJson?.model)
+      : null,
+    usage: succeeded ? usageReceipt(responseJson?.usage) : null,
+  };
+}
+
+function usageReceipt(usage) {
+  return {
+    prompt_tokens: numberOrNull(usage?.prompt_tokens),
+    completion_tokens: numberOrNull(usage?.completion_tokens),
+    total_tokens: numberOrNull(usage?.total_tokens),
+    cost: numberOrNull(usage?.cost),
+  };
+}
+
+function stringOrNull(value) {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function numberOrNull(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function parseJsonOrNull(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 function redactionReceipt(calls) {
   return {
     schema: REDACTION_RECEIPT_SCHEMA,
@@ -779,7 +932,7 @@ function redactionReceipt(calls) {
   };
 }
 
-function errorResponse(message, calls = 0) {
+function errorResponse(message, calls = 0, modelCallAudit = []) {
   return {
     schema: RESPONSE_SCHEMA,
     prompt_version: PROMPT_VERSION,
@@ -787,6 +940,7 @@ function errorResponse(message, calls = 0) {
     provider: 'openrouter',
     model: null,
     calls,
+    model_call_audit: modelCallAudit,
     redaction_receipt: redactionReceipt(calls),
     usage: {},
     assessments: [],

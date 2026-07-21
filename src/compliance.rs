@@ -54,6 +54,7 @@ pub(crate) fn build_compliance_report(
         surfaces,
         profile_views,
         state_evidence: build_state_evidence(packet, packet_path),
+        model_egress_events: packet.model_egress_events.clone(),
     }
 }
 

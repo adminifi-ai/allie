@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 const [work, repo] = process.argv.slice(2);
 if (!work || !repo) {
@@ -10,6 +11,7 @@ if (!work || !repo) {
 }
 
 const capturedRequests = [];
+const capturedHeaders = [];
 let settingsTransientReturned = false;
 const server = http.createServer((request, response) => {
   let body = '';
@@ -20,13 +22,29 @@ const server = http.createServer((request, response) => {
   request.on('end', () => {
     const parsed = JSON.parse(body);
     capturedRequests.push(parsed);
-    if (isSettingsPrompt(parsed) && !settingsTransientReturned) {
+    capturedHeaders.push(request.headers);
+    if (parsed.model !== 'fake-direct-openai-model'
+        && isSettingsPrompt(parsed) && !settingsTransientReturned) {
       settingsTransientReturned = true;
-      response.writeHead(503, { 'Content-Type': 'text/plain' });
-      response.end('synthetic transient model outage');
+      response.writeHead(503, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({
+        id: 'error-response',
+        model: 'error/model',
+        openrouter_metadata: {
+          endpoints: {
+            available: [{ provider: 'Failed Provider', model: 'failed/model', selected: true }],
+          },
+        },
+      }));
+      return;
+    }
+    if (parsed.model === 'fake-direct-openai-model') {
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify(fakeDirectOpenAiResponse()));
       return;
     }
     response.setHeader('Content-Type', 'application/json');
+    response.setHeader('X-Generation-Id', `generation-${capturedRequests.length}`);
     response.end(JSON.stringify(fakeOpenRouterResponse(parsed)));
   });
 });
@@ -46,6 +64,19 @@ try {
   assertFakeProviderSawSurfaceFanout();
   await assertWorkerResponse(responsePath);
   console.log('agentic model payload ok: fake OpenRouter saw multi-surface video media, retry, and observe-act-rejudge');
+
+  capturedRequests.length = 0;
+  capturedHeaders.length = 0;
+  const directRequestPath = path.join(work, 'direct-openai-request.json');
+  const directResponsePath = path.join(work, 'direct-openai-response.json');
+  await fs.writeFile(
+    directRequestPath,
+    `${JSON.stringify(directOpenAiRequest(server.address().port), null, 2)}\n`,
+  );
+  const directCode = await runAgenticWorker(directRequestPath, directResponsePath);
+  if (directCode !== 0) throw new Error(`direct OpenAI worker exited ${directCode}`);
+  await assertDirectOpenAiResponse(directResponsePath);
+  console.log('agentic direct-provider payload ok: no OpenRouter-only fields, honest route, null unreported cost');
 } finally {
   await new Promise((resolve) => server.close(resolve));
 }
@@ -67,6 +98,7 @@ function agenticRequest(port) {
       api_key_env: 'ALLIE_AGENTIC_FAKE_KEY',
       base_url: `http://127.0.0.1:${port}`,
       max_calls: 5,
+      zdr_required: true,
       redaction: 'none',
     },
     artifacts_dir: path.join(work, 'model-artifacts'),
@@ -86,10 +118,31 @@ function agenticRequest(port) {
   };
 }
 
+function directOpenAiRequest(port) {
+  const request = agenticRequest(port);
+  request.model = {
+    ...request.model,
+    provider: 'openai',
+    model: 'fake-direct-openai-model',
+    zdr_required: false,
+    max_calls: 1,
+  };
+  request.surfaces = [request.surfaces[0]];
+  request.artifacts_dir = path.join(work, 'direct-openai-artifacts');
+  return request;
+}
+
 function fakeOpenRouterResponse(body) {
   const prompt = promptText(body);
+  const route = {
+    id: `response-${capturedRequests.length}`,
+    openrouter_metadata: {
+      endpoints: { available: [{ provider: 'Fake ZDR Provider', model: 'fake/routed-model', selected: true }] },
+    },
+  };
   if (prompt.includes('Surface: home') && !prompt.includes('Review action')) {
     return {
+      ...route,
       choices: [
         {
           message: {
@@ -114,12 +167,13 @@ function fakeOpenRouterResponse(body) {
           },
         },
       ],
-      usage: { prompt_tokens: 1, completion_tokens: 1 },
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2, cost: 0.001 },
     };
   }
 
   if (prompt.includes('Surface: settings')) {
     return {
+      ...route,
       choices: [
         {
           message: {
@@ -137,11 +191,12 @@ function fakeOpenRouterResponse(body) {
           },
         },
       ],
-      usage: { prompt_tokens: 1, completion_tokens: 1 },
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2, cost: 0.001 },
     };
   }
 
   return {
+    ...route,
     choices: [
       {
         message: {
@@ -159,7 +214,28 @@ function fakeOpenRouterResponse(body) {
         },
       },
     ],
-    usage: { prompt_tokens: 1, completion_tokens: 1 },
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2, cost: 0.001 },
+  };
+}
+
+function fakeDirectOpenAiResponse() {
+  return {
+    id: 'direct-response-1',
+    model: 'fake-direct-openai-model',
+    choices: [{
+      message: {
+        content: JSON.stringify({
+          assessments: [{
+            obligation: 'wcag22-aa:2.4.7-focus-visible',
+            verdict: 'pass',
+            confidence: 'medium',
+            rationale: 'The direct fake provider inspected the supplied evidence.',
+            reviewer_guidance: 'Confirm the attached evidence manually.',
+          }],
+        }),
+      },
+    }],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
   };
 }
 
@@ -220,12 +296,54 @@ function assertFakeProviderSawSurfaceFanout() {
   if (settingsPrompts.length !== 2 || !settingsTransientReturned) {
     throw new Error('settings surface was not retried after the synthetic transient model outage');
   }
+  for (let index = 0; index < capturedRequests.length; index += 1) {
+    const body = capturedRequests[index];
+    const headers = capturedHeaders[index];
+    if (body.provider?.zdr !== true || body.provider?.allow_fallbacks !== false) {
+      throw new Error(`request ${index + 1} did not enforce ZDR and no-fallback routing`);
+    }
+    if (headers['x-openrouter-cache'] !== 'false' || headers['x-openrouter-metadata'] !== 'enabled') {
+      throw new Error(`request ${index + 1} did not disable caching and enable route metadata`);
+    }
+  }
 }
 
 async function assertWorkerResponse(responsePath) {
   const workerResponse = JSON.parse(await fs.readFile(responsePath, 'utf8'));
   if (workerResponse.status !== 'ok' || workerResponse.calls !== 4) {
     throw new Error(`expected successful fake model call, got status=${workerResponse.status} calls=${workerResponse.calls}`);
+  }
+  const audit = workerResponse.model_call_audit;
+  if (!Array.isArray(audit) || audit.length !== workerResponse.calls) {
+    throw new Error(`model audit does not reconcile with calls: ${JSON.stringify(audit)}`);
+  }
+  for (let index = 0; index < audit.length; index += 1) {
+    const event = audit[index];
+    const request = capturedRequests[index];
+    const media = request.messages[0].content.filter((part) => part.type !== 'text');
+    const expectedMediaHashes = media.map((part) => sha256(Buffer.from((part.image_url?.url || part.video_url?.url).split(',')[1], 'base64')));
+    if (event.attempt !== index + 1 || event.prompt_version !== 'allie.agentic.wcag-review.v1') {
+      throw new Error(`audit event ${index + 1} has the wrong attempt or prompt version`);
+    }
+    if (event.prompt_sha256 !== sha256(promptText(request)) || JSON.stringify(event.media_sha256) !== JSON.stringify(expectedMediaHashes)) {
+      throw new Error(`audit event ${index + 1} hashes do not match the exact transmitted payload`);
+    }
+    if (event.requested_provider !== 'openrouter' || event.requested_model !== 'fake-video-capable-model'
+      || event.zdr_required !== true || event.allow_fallbacks !== false) {
+      throw new Error(`audit event ${index + 1} does not record the requested route policy`);
+    }
+    if (index === 2) {
+      if (event.outcome !== 'http_error' || event.http_status !== 503 || event.response_id !== null
+        || event.routed_provider !== null || event.routed_model !== null || event.usage !== null) {
+        throw new Error(`failed retry event fabricated response metadata: ${JSON.stringify(event)}`);
+      }
+    } else if (event.outcome !== 'success' || event.http_status !== 200
+      || event.response_id !== `response-${index + 1}` || event.generation_id !== `generation-${index + 1}`
+      || event.routed_provider !== 'Fake ZDR Provider' || event.routed_model !== 'fake/routed-model'
+      || event.usage?.prompt_tokens !== 1 || event.usage?.completion_tokens !== 1
+      || event.usage?.total_tokens !== 2 || event.usage?.cost !== 0.001) {
+      throw new Error(`successful audit event omitted response-derived metadata: ${JSON.stringify(event)}`);
+    }
   }
   if (workerResponse.assessments[0].verdict !== 'fail') {
     throw new Error(`expected final fanout verdict to fail when one surface fails, got ${workerResponse.assessments[0].verdict}`);
@@ -242,6 +360,30 @@ async function assertWorkerResponse(responsePath) {
   const receipt = workerResponse.redaction_receipt;
   if (receipt?.schema !== 'allie.model-redaction-receipt.v0' || receipt.profile !== 'none' || receipt.status !== 'not_applied') {
     throw new Error(`fake-provider response did not retain a truthful not_applied receipt: ${JSON.stringify(receipt)}`);
+  }
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+async function assertDirectOpenAiResponse(responsePath) {
+  if (capturedRequests.length !== 1) {
+    throw new Error(`direct provider should make one request, captured ${capturedRequests.length}`);
+  }
+  const request = capturedRequests[0];
+  if (request.usage !== undefined || request.provider !== undefined) {
+    throw new Error(`direct provider received OpenRouter-only fields: ${JSON.stringify(request)}`);
+  }
+  const response = JSON.parse(await fs.readFile(responsePath, 'utf8'));
+  const event = response.model_call_audit?.[0];
+  if (response.calls !== 1 || event?.outcome !== 'success'
+      || event.response_id !== 'direct-response-1'
+      || event.generation_id !== 'direct-response-1'
+      || event.routed_provider !== 'openai'
+      || event.routed_model !== 'fake-direct-openai-model'
+      || event.usage?.cost !== null) {
+    throw new Error(`direct provider receipt is incomplete: ${JSON.stringify(event)}`);
   }
 }
 

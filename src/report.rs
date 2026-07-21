@@ -3,6 +3,9 @@ use crate::model::{
     ComplianceObligation, ComplianceProfileView, ComplianceReportPacket, ComplianceSupportingCheck,
     CriterionCoverageCell, EvidenceMedia, StateEvidence,
 };
+mod model_egress;
+mod verdict;
+pub(crate) use verdict::is_agentic_verdict;
 
 pub(crate) const REPORT_CSS: &str = r#"
 /* Allie clean-atomic comic-ops report skin.
@@ -130,21 +133,6 @@ fn cr_status_chip(status: &str) -> String {
         cr_status_suffix(status),
         escape_html(&cr_status_label(status))
     )
-}
-
-/// True when a criterion's pass/fail verdict came from the agentic reviewer
-/// rather than a deterministic check — shown with an asterisk so it is never
-/// mistaken for a machine-proven result. Keyed off the same `agentic_review`
-/// value that renders the evidence block, so the asterisk and the evidence can
-/// never diverge: a marked verdict always has its AI evidence, and vice versa.
-pub(crate) fn is_agentic_verdict(obligation: &ComplianceObligation) -> bool {
-    matches!(
-        obligation
-            .agentic_review
-            .as_ref()
-            .map(|r| r.assessment.as_str()),
-        Some("pass" | "fail")
-    ) && (obligation.status == "pass" || obligation.status == "fail")
 }
 
 /// Status chip that adds an asterisk for agentic pass/fail verdicts.
@@ -571,6 +559,7 @@ pub(crate) fn render_compliance_report(report: &ComplianceReportPacket) -> Strin
     }
 
     html.push_str(&cr_state_gallery(&report.state_evidence));
+    html.push_str(&model_egress::render(&report.model_egress_events));
 
     html.push_str("<section><h2 class=\"sh\">WCAG 2.2 success criteria</h2>");
     html.push_str(&cr_principle_sections(&report.criteria));
@@ -619,8 +608,9 @@ pub(crate) fn render_compliance_summary(report: &ComplianceReportPacket) -> Stri
         .map(|obligation| format!("- {}: {}", obligation.id, obligation.why))
         .collect::<Vec<_>>()
         .join("\n");
+    let egress_summary = model_egress::summary(&report.model_egress_events);
     format!(
-        "# Allie WCAG Evidence Summary\n\nStatus: `{}`\n\nPass: {}. Fail: {}. Needs review: {}. Not tested: {}. Waived: {}. Risk accepted: {}. Total WCAG success criteria: {}. Supporting checks: {}.\n\nSource map: `{}`\nSource packet: `{}`\n\nThis report is evidence visibility for accessibility engineering review, not a legal compliance guarantee.\n\n## Failing Criteria\n\n{}\n",
+        "# Allie WCAG Evidence Summary\n\nStatus: `{}`\n\nPass: {}. Fail: {}. Needs review: {}. Not tested: {}. Waived: {}. Risk accepted: {}. Total WCAG success criteria: {}. Supporting checks: {}.\n\n{}\n\nSource map: `{}`\nSource packet: `{}`\n\nThis report is evidence visibility for accessibility engineering review, not a legal compliance guarantee.\n\n## Failing Criteria\n\n{}\n",
         report.summary.status,
         report.summary.pass,
         report.summary.fail,
@@ -630,6 +620,7 @@ pub(crate) fn render_compliance_summary(report: &ComplianceReportPacket) -> Stri
         report.summary.risk_accepted,
         report.summary.total_success_criteria,
         report.summary.total_supporting_checks,
+        egress_summary,
         report.source_map,
         report.source_packet,
         if failing.is_empty() {

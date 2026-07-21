@@ -88,6 +88,7 @@ fn resolves_the_entire_route_from_the_selected_provider_preset() {
     enable_model(&mut manifest);
     manifest.model.provider_allowlist = vec!["openai".to_string()];
     manifest.model.provider = Some("openai".to_string());
+    manifest.model.zdr_required = false;
     manifest.model.model = None;
     manifest.model.api_key_env = None;
     manifest.model.base_url = None;

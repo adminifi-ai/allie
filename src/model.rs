@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 mod egress;
-pub(crate) use egress::{AgenticAssessmentRecord, ModelEgressEvent};
+pub(crate) use egress::{AgenticAssessmentRecord, ModelEgressEvent, ModelEgressUsage};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -143,6 +143,8 @@ pub(crate) struct ComplianceReportPacket {
     pub(crate) profile_views: Vec<ComplianceProfileView>,
     #[serde(default)]
     pub(crate) state_evidence: Vec<StateEvidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) model_egress_events: Vec<ModelEgressEvent>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

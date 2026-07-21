@@ -171,17 +171,12 @@ const promptVersion = 'allie.agentic.wcag-review.v1';
 if (request.prompt_version !== promptVersion || response.prompt_version !== promptVersion) {
   throw new Error(`agentic prompt version drifted: request=${request.prompt_version} response=${response.prompt_version}`);
 }
-if (!Array.isArray(packet.model_egress_events) || packet.model_egress_events.length !== 1) {
-  throw new Error(`expected one model egress event, got ${JSON.stringify(packet.model_egress_events)}`);
+if (response.calls !== 0 || packet.policy.budget.model_calls !== 0) {
+  throw new Error(`no-key run fabricated model calls: response=${response.calls} packet=${packet.policy.budget.model_calls}`);
 }
-const egress = packet.model_egress_events[0];
-if (egress.schema !== 'allie.model-egress-event.v0' ||
-    egress.prompt_version !== promptVersion ||
-    egress.calls !== response.calls ||
-    packet.policy.budget.model_calls !== response.calls ||
-    !/^sha256:[0-9a-f]{64}$/.test(egress.request_sha256) ||
-    !/^sha256:[0-9a-f]{64}$/.test(egress.response_sha256)) {
-  throw new Error(`model egress event is incomplete: ${JSON.stringify(egress)}`);
+if (packet.model_egress_events !== undefined &&
+    (!Array.isArray(packet.model_egress_events) || packet.model_egress_events.length !== 0)) {
+  throw new Error(`zero HTTP attempts must not produce model egress events: ${JSON.stringify(packet.model_egress_events)}`);
 }
 if (packet.policy.model_egress_redaction !== 'none') throw new Error('evidence policy did not retain accepted model egress mode');
 const surfaceIds = new Set((request.surfaces || []).map((surface) => surface.id));
@@ -206,11 +201,31 @@ fs.writeFileSync(responsePath, `${JSON.stringify({
   schema: 'allie.agentic.response.v0',
   prompt_version: 'allie.agentic.wcag-review.v1',
   status: 'error',
-  calls: 0,
+  calls: 1,
+  model_call_audit: [{
+    schema: 'allie.model-egress-event.v1',
+    attempt: 1,
+    started_at: '2026-07-21T12:00:00Z',
+    requested_provider: 'openrouter',
+    requested_model: 'offline-workbench-smoke',
+    prompt_version: 'allie.agentic.wcag-review.v1',
+    prompt_sha256: 'a'.repeat(64),
+    media_sha256: ['b'.repeat(64)],
+    zdr_required: true,
+    allow_fallbacks: false,
+    outcome: 'http_error',
+    http_status: 503,
+    error_class: 'http_503',
+    response_id: null,
+    generation_id: null,
+    routed_provider: null,
+    routed_model: null,
+    usage: null,
+  }],
   redaction_receipt: {
     schema: 'allie.model-redaction-receipt.v0',
     profile: 'none',
-    status: 'not_sent',
+    status: 'not_applied',
   },
   errors: ['synthetic agentic worker failure'],
 }, null, 2)}\n`);
@@ -239,6 +254,11 @@ if (!review.message.includes('synthetic agentic worker failure')) {
 }
 if (job.pointers.compliance_report || job.pointers.release_summary) {
   throw new Error('report/release should not run after agentic worker infrastructure failure');
+}
+const packet = JSON.parse(fs.readFileSync(path.join(jobDir, 'steps/run/evidence.json'), 'utf8'));
+if (packet.policy.budget.model_calls !== 1 ||
+    packet.model_egress_events?.[0]?.outcome !== 'http_error') {
+  throw new Error(`failed worker attempts were not persisted: ${JSON.stringify(packet.model_egress_events)}`);
 }
 const events = fs.readFileSync(path.join(jobDir, 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
 if (!events.some((event) => event.event === 'step_completed' && event.step === 'review' && event.status === 'failed')) {

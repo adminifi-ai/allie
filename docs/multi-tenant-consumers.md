@@ -47,15 +47,18 @@ A common, demanding deployment target:
    (**platform code vs client theme vs client content**) and likely action owner
    — would be high-value audit context and is not modeled today.
 
-3. **Provider allowlist is enforced; data-retention still needs verification.**
-   The gateway fails closed unless the selected provider is in
-   `provider_allowlist` and its resolved endpoint matches that provider's
-   canonical preset. It enforces the same policy during preflight and again
-   before writing the worker request or spawning the worker. `zdr_required` is
-   still declared and recorded rather than independently verified, so governed
-   consumers must treat retention attestation as an open correctness gap. The
-   agentic model remains a *per-consumer* choice, reinforcing that model
-   selection belongs in the manifest rather than a universal default.
+3. **Provider allowlist and supported ZDR routing are enforced; upstream
+   retention remains an external attestation.** The gateway fails closed unless
+   the selected provider is allowlisted and its resolved endpoint matches the
+   canonical preset. When `zdr_required` is true, the OpenRouter adapter sends
+   `provider.zdr: true`, disables fallbacks, explicitly declines OpenRouter
+   response caching with `X-OpenRouter-Cache: false`, and requests router
+   metadata; providers without a declared ZDR adapter fail before the worker is
+   spawned. Per-attempt receipts record the requested policy and actual routed
+   provider/model. They prove what Allie requested and observed,
+   not the provider's internal retention behavior. The agentic model remains a
+   *per-consumer* choice, reinforcing that model selection belongs in the
+   manifest rather than a universal default.
 
 4. **Run modes: changed-scope vs full sweep.** A regression-prevention mode that
    scans only the surfaces affected by a PR's changes, plus a periodic full
